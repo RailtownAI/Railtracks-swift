@@ -12,7 +12,6 @@ import ConduitAdvanced
 
 @Observable
 class ContentViewModel {
-    
     var title: String = "Hello, World!"
     var libVersion: String = RailtracksSwift.version
     var prompt: String = "What is 50 + 20 x 7? Just give me the final answer"
@@ -27,7 +26,7 @@ class ContentViewModel {
             var logger = Logger(label: "railtracks-swift-demo")
             logger.logLevel = .debug
             
-            //TODO: incapsulate Conduit usage from user
+            //TODO: incapsulate Conduit layer usage from user
             guard let apiKey = RailtracksSwift.getOpenAIAPIKey() else {
                 logger.debug("No API key found")
                 return
@@ -35,7 +34,8 @@ class ContentViewModel {
             let conduit = Conduit(.openAI(apiKey: apiKey))
             do {
                 let agent = RTAgent(
-                    llm: try conduit.session(model: .openAI("gpt-4o")),
+                    // TODO: consider the option to extend or change th lib so Model.init(_ identifier: ModelIdentifier) is public
+                    llm: try conduit.session(model: .openAI(OpenAIModelID.gpt4o.rawValue)),
                     systemMessage: "You a helpful assistant that calculate simple math problem asked by user."
                 )
                 

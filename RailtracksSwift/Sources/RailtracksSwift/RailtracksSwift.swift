@@ -3,6 +3,8 @@
 
 import Foundation
 
+internal let log = RTSLoggers.rtsLog
+
 /// General namespace for the library
 public enum RailtracksSwift {
     public static let version = "0.1.0"

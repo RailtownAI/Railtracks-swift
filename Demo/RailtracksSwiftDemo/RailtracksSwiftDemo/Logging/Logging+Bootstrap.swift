@@ -1,0 +1,17 @@
+//
+//  Logging+Bootstrap.swift
+//  RailtracksSwiftDemo
+//
+//  Created by Mark Su on 2026-04-28.
+//
+
+import Logging
+
+// Bootstrap logging.  This should happen before SwiftUI initializes any views.
+let _loggingBootstrap: Void = {
+    LoggingSystem.bootstrap { label in
+        var handler = StreamLogHandler.standardOutput(label: label)
+        handler.logLevel = .debug
+        return handler
+    }
+}()

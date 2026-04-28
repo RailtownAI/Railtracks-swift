@@ -19,7 +19,7 @@ let package = Package(
     ],
     dependencies: [
         .package(
-            url: "https://github.com/christopherkarani/Conduit",
+            url: "https://github.com/MarkSu-Railtown/Conduit",
             exact: "0.3.14",
             traits: [
                 .trait(name: "OpenAI"),

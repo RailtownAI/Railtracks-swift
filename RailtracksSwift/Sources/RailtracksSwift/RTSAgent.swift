@@ -1,5 +1,5 @@
 //
-//  RTAgent.swift
+//  RTSAgent.swift
 //  RailtracksSwift
 //
 //  Created by Mark Su on 2026-04-24.
@@ -13,7 +13,6 @@ import Logging
 
 public class RTAgent {
     //TODO: setup global logger
-    let logger = Logger(label: "railtracks-swift")
     
     let id = UUID()
     let llm: Session
@@ -29,9 +28,11 @@ public class RTAgent {
     
     public func run(_ prompt: String) async throws -> String? {
         do {
+            log.trace("agent starts to run prompt: \(prompt)")
             return try await llm.run(prompt)
         } catch {
-            logger.debug("agent(\(id))failed at running prompt: \(prompt) | \(error)")
+            log.debug("agent(\(id))failed at running prompt: \(prompt) | \(error)")
+            throw error
         }
         return nil
     }
