@@ -40,8 +40,7 @@ let package = Package(
             name: "RailtracksSwift",
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
-                .product(name: "Conduit", package: "Conduit"),
-                .product(name: "ConduitAdvanced", package: "Conduit")
+                .product(name: "ConduitAdvanced", package: "Conduit"),
             ]
         ),
         .testTarget(
