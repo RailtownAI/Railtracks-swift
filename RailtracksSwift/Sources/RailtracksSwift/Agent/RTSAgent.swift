@@ -11,6 +11,7 @@ import Logging
 //import ConduitAdvanced
 //import Logging
 
+/// Representation of Agent node in Railtracks pipeline
 public class RTAgent {
     //TODO: setup global logger
     

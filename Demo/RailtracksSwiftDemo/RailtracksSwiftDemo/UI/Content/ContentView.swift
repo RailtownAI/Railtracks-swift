@@ -14,12 +14,11 @@ struct ContentView: View {
     @State private var viewModel = ContentViewModel()
     
     var body: some View {
-        VStack {
+        VStack(spacing: 8) {
             Image(systemName: "globe")
                 .imageScale(.large)
                 .foregroundStyle(.tint)
-            Text(viewModel.title)
-            Text("Railtracks Lib Version: " + viewModel.libVersion)
+            Text("Railtracks Swift Lib Version: " + viewModel.libVersion)
             Text("Has OpenAI key:  \(viewModel.openAIAPIKey.isNotNilNorEmpty ? "true" : "false")")
             Text("Prompt: " + viewModel.prompt)
             Text("Result: " + (viewModel.promptResult ?? "waiting..."))

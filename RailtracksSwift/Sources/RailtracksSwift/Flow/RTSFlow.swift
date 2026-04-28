@@ -7,6 +7,7 @@
 
 import Foundation
 
+/// Representation of Agent node in Railtracks pipeline
 public class RTFlow {
     let title: String
     let entryPoint: (String) async -> String

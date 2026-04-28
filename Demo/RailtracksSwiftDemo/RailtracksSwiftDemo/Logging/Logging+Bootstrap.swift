@@ -7,7 +7,8 @@
 
 import Logging
 
-// Bootstrap logging.  This should happen before SwiftUI initializes any views.
+/// Bootstrap logging.  This should happen before App initializes any views.
+/// Trigger it by `_ = _loggingBootstrap`
 let _loggingBootstrap: Void = {
     LoggingSystem.bootstrap { label in
         var handler = StreamLogHandler.standardOutput(label: label)

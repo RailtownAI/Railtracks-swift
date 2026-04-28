@@ -12,7 +12,6 @@ import ConduitAdvanced
 
 @Observable
 class ContentViewModel {
-    var title: String = "Hello, World!"
     var libVersion: String = RailtracksSwift.version
     var prompt: String = "What is 50 + 20 x 7? Just give me the final answer"
     var promptResult: String?
