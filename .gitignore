@@ -49,6 +49,12 @@ playground.xcworkspace
 
 Carthage/Build/
 
+# API keys
+Secrets.plist
+
+# Mac finder
+.DS_Store
+
 # fastlane
 #
 # It is recommended to not store the screenshots in the git repo.
