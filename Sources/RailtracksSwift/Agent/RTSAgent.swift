@@ -6,21 +6,16 @@
 //
 
 import Foundation
-import ConduitAdvanced
 import Logging
-//import ConduitAdvanced
-//import Logging
 
 /// Representation of Agent node in Railtracks pipeline
 public class RTAgent {
-    //TODO: setup global logger
-    
     let id = UUID()
-    let llm: Session
+    let llm: RTSLLMSession
     let systemMessage: String
 
     public init(
-        llm: Session,
+        llm: RTSLLMSession,
         systemMessage: String
     ) {
         self.llm = llm

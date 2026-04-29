@@ -8,7 +8,6 @@
 import Foundation
 import Logging
 import RailtracksSwift
-import ConduitAdvanced
 
 @Observable
 class ContentViewModel {
@@ -25,16 +24,22 @@ class ContentViewModel {
             var logger = Logger(label: "railtracks-swift-demo")
             logger.logLevel = .debug
             
-            //TODO: incapsulate Conduit layer usage from user
             guard let apiKey = RailtracksSwift.getOpenAIAPIKey() else {
                 logger.debug("No API key found")
                 return
             }
-            let conduit = Conduit(.openAI(apiKey: apiKey))
+            let gateway = RTSLLMGateway(
+                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
+                apiKey: apiKey
+            )
+            
             do {
+                guard let session = try gateway?.session() else {
+                    logger.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
+                    return
+                }
                 let agent = RTAgent(
-                    // TODO: consider the option to extend or change th lib so Model.init(_ identifier: ModelIdentifier) is public
-                    llm: try conduit.session(model: .openAI(OpenAIModelID.gpt4o.rawValue)),
+                    llm: session,
                     systemMessage: "You a helpful assistant that calculate simple math problem asked by user."
                 )
                 
