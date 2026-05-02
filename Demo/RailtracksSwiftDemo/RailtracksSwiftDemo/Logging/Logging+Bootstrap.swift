@@ -12,7 +12,7 @@ import Logging
 let _loggingBootstrap: Void = {
     LoggingSystem.bootstrap { label in
         var handler = StreamLogHandler.standardOutput(label: label)
-        handler.logLevel = .debug
+        handler.logLevel = .trace
         return handler
     }
 }()
