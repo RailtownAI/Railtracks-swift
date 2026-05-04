@@ -34,21 +34,26 @@ import Foundation
 //}
 
 /// Default simple tool struct
-struct RTSTool {
+public struct RTSTool {
 //struct RTSTool<Output: Codable, each Input: Codable> {
 //    typealias Inputs = (repeat each T)
 //    typealias Output = RTSSerializableDictionary
-    typealias RTSInput = [String: RTSValue]
+    public typealias RTSInput = [String: RTSValue]
     
     let id = UUID()
     let _name: String
     // TODO: review manifest logic in py that Agent can use
     
-    let inputs: RTSInput
+    public let inputs: RTSInput
 //    let callableRoutine: RTSCallableClosure
 //    let callableRoutine: ((repeat each Input) -> Output)
-    let callableRoutine: (RTSInput) async throws -> RTSOutput
+    public let callableRoutine: @concurrent (RTSInput) async throws -> RTSOutput
     
+    public init(name: String, inputs: RTSInput, callableRoutine: @escaping (RTSInput) async throws -> RTSOutput) {
+        self._name = name
+        self.inputs = inputs
+        self.callableRoutine = callableRoutine
+    }
 //    var inputs: (repeat each Input)
     
 //    func run( ) async throws -> RTSSerializableDictionary {
@@ -74,7 +79,7 @@ extension RTSTool: RTSFunctionNode {
 //        return callableRoutine
 //    }
     
-    func name() -> String {
+    public func name() -> String {
         return _name
     }
 }
@@ -86,7 +91,7 @@ extension RTSTool: Encodable {
         case inputs
     }
     
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(_name, forKey: .name)

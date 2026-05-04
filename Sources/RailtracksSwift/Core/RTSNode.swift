@@ -23,7 +23,7 @@ public protocol RTSFunctionNode: RTSNode {
     typealias RTSInput = [String: RTSValue]
     
     var inputs: RTSInput { get }
-    var callableRoutine: (RTSInput) async throws -> RTSOutput { get }
+    var callableRoutine: @concurrent (RTSInput) async throws -> RTSOutput { get }
 }
 
 public extension RTSFunctionNode {

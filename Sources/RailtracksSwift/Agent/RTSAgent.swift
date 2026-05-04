@@ -25,7 +25,7 @@ public class RTAgent {
     public func run(_ prompt: String) async throws -> String? {
         let requestDictionary: [String: String] = [
             "prompt": prompt,
-            "role": systemMessage
+            "systemMessage": systemMessage
         ]
         do {
             if let jsonString = try requestDictionary.jsonString() {

@@ -15,18 +15,30 @@ struct ContentView: View {
     
     var body: some View {
         VStack(spacing: 8) {
+            HStack(spacing: 4) {
+                Button("Simple") {
+                    viewModel.mode = .simple
+                }
+                
+                Button("Math") {
+                    viewModel.mode = .math
+                }
+            }
             Image(systemName: "globe")
                 .imageScale(.large)
                 .foregroundStyle(.tint)
             Text("Railtracks Swift Lib Version: " + viewModel.libVersion)
             Text("Has OpenAI key:  \(viewModel.openAIAPIKey.isNotNilNorEmpty ? "true" : "false")")
-            Text("Prompt: " + viewModel.prompt)
-            Text("Result: " + (viewModel.promptResult ?? "waiting..."))
+            switch viewModel.mode {
+            case .simple:
+                SimplePromptView()
+            case .math:
+                MathView()
+            }
         }
         .padding()
         .task {
             print("start task...")
-            viewModel.startPrompt()
         }
     }
 }
