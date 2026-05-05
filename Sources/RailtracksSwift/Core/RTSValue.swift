@@ -7,6 +7,9 @@
 
 import Foundation
 
+public typealias RTSInput  = [String: RTSValue]
+public typealias RTSOutput = [String: RTSValue]
+
 public enum RTSValue: Codable {
     case null
     case bool(Bool)
@@ -16,6 +19,3 @@ public enum RTSValue: Codable {
     case array([RTSValue])
     case object([String: RTSValue])
 }
-
-//typealias RTSInput  = [String: RTSValue]
-//typealias RTSOutput = [String: RTSValue]

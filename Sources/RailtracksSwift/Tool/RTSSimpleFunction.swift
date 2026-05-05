@@ -15,13 +15,13 @@ public struct RTSSimpleFunction: RTSFunctionNode {
     
     let id = UUID()
     let _name: String
-    public let inputs: RTSInput
-    public let callableRoutine: @concurrent (RTSInput) async throws -> RTSOutput
+    public var inputs: RTSInput
+    public let callableRoutine: RTSClosure
     
-    public init(name: String, prompt: String, routine: @escaping (String) async throws -> String) {
+    public init(name: String, prompt: String, routine: @escaping @Sendable (String) async throws -> String) {
         self._name = name
         self.inputs = ["prompt": .string(prompt)]
-        self.callableRoutine = { inputs in
+        self.callableRoutine = RTSClosure() { inputs in
             guard case .string(let requestString) = inputs["prompt"] else {
                 throw RTSError.missingInput("prompt")
             }

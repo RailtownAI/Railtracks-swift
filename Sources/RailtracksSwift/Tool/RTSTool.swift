@@ -7,94 +7,82 @@
 
 import Foundation
 
-///// RTSNode protocol describes Node objects that have collected all its input and waiting ot be executed
-//protocol RTSNode: Codable {
-//    associatedtype Output: Codable
-//    
-//    /// Human readible identifcation for the node
-//    func name() -> String
-//    
-//    /// Trigger to ask the node to execute it's pre-determined task
-//    func invoke() async throws -> Output
-//}
-
-//protocol RTSAgentNode: RTSNode {
-//    
-//}
-//
-//protocol RTSFunctionNode: RTSNode {
-////    associatedtype Input: Codable
-////    var runClosure: ((repeat each Input)) -> [Output] { get }
-//}
-
-//protocol RTSTool {
-//    var callableRoutine: CallableClosure { get }
-//    var name: String { get }
-//    //TODO: manifest
-//}
-
-/// Default simple tool struct
-public struct RTSTool {
-//struct RTSTool<Output: Codable, each Input: Codable> {
-//    typealias Inputs = (repeat each T)
-//    typealias Output = RTSSerializableDictionary
-    public typealias RTSInput = [String: RTSValue]
-    
-    let id = UUID()
-    let _name: String
-    // TODO: review manifest logic in py that Agent can use
-    
-    public let inputs: RTSInput
-//    let callableRoutine: RTSCallableClosure
-//    let callableRoutine: ((repeat each Input) -> Output)
-    public let callableRoutine: @concurrent (RTSInput) async throws -> RTSOutput
-    
-    public init(name: String, inputs: RTSInput, callableRoutine: @escaping (RTSInput) async throws -> RTSOutput) {
-        self._name = name
-        self.inputs = inputs
-        self.callableRoutine = callableRoutine
-    }
-//    var inputs: (repeat each Input)
-    
-//    func run( ) async throws -> RTSSerializableDictionary {
-//        
-//    }
-    
-//    var inputDictionary: RTSSerializableDictionary
+enum RTSToolNodeCodingKeys: String, CodingKey {
+    case id, name, inputs
 }
 
-/// Coding keys for RTSTool struct
-///
-/// enum is moved outside of RTSTool because swift compiler current cannot distinguish the fact that inputs in enum case is not actually a type of type parameter packs (variadic generics)
-//enum RTSToolCodingKeys: String, CodingKey {
-//    case id
-//    case _name
-//    case inputs = "routineInputs"
-//}
-
-extension RTSTool: RTSFunctionNode {
-//    typealias Output = RTSSerializableDictionary
+public protocol RTSToolNode: RTSFunctionNode {
+    typealias RTSInput = [String: RTSValue]
     
-//    var runClosure: ((repeat each Input)) -> [Output] {
-//        return callableRoutine
-//    }
-    
-    public func name() -> String {
-        return _name
-    }
+    var id: UUID { get }
+    var _name: String { get }
+    var inputs: RTSInput { get set }
+    var callableRoutine: RTSClosure { get }
+//    var callableClosure: @concurrent (RTSInput) async throws -> RTSOutput { get }
 }
-    
-extension RTSTool: Encodable {
-    enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case inputs
+                
+public extension RTSToolNode {
+    public func name() -> String { _name }
+    public func invoke() async throws -> RTSOutput { try await callableRoutine.closure(inputs) }
+    public func run(with inputs: RTSInput) async throws -> RTSOutput {
+        var copy = self
+        copy.inputs = inputs
+        return try await copy.invoke()
     }
-    
     public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
+        var container = encoder.container(keyedBy: RTSToolNodeCodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(_name, forKey: .name)
         try container.encode(inputs, forKey: .inputs)
     }
 }
+
+///// Default simple tool struct
+//public struct RTSTool {
+//    public typealias RTSInput = [String: RTSValue]
+//    
+//    let id = UUID()
+//    let _name: String
+//    // TODO: review manifest logic in py that Agent can use
+//    
+//    public var inputs: RTSInput
+//    public let callableRoutine: @concurrent (RTSInput) async throws -> RTSOutput
+//    
+//    public init(
+//        name: String,
+//        inputs: RTSInput? = nil,
+//        callableRoutine: @escaping (RTSInput) async throws -> RTSOutput
+//    ) {
+//        self._name = name
+//        self.inputs = inputs ?? [:]
+//        self.callableRoutine = callableRoutine
+//    }
+//    
+//    // direct execution input
+//    public func run(with inputs: RTSInput) -> RTSTool {
+//        var copy = self
+//        copy.inputs = inputs
+//        return copy
+//    }
+//}
+//
+//extension RTSTool: RTSFunctionNode {
+//    public func name() -> String {
+//        return _name
+//    }
+//}
+//    
+//extension RTSTool: Encodable {
+//    enum CodingKeys: String, CodingKey {
+//        case id
+//        case name
+//        case inputs
+//    }
+//    
+//    public func encode(to encoder: Encoder) throws {
+//        var container = encoder.container(keyedBy: CodingKeys.self)
+//        try container.encode(id, forKey: .id)
+//        try container.encode(_name, forKey: .name)
+//        try container.encode(inputs, forKey: .inputs)
+//    }
+//}

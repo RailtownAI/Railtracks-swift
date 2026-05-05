@@ -43,16 +43,18 @@ class MathViewModel {
                     systemMessage: "You a helpful assistant that calculate simple math problem asked by user."
                 )
                 
-                let additionTool = RTSTool(
-                    name: "Addition",
-                    inputs: ["a": RTSValue.double(3), "b": RTSValue.double(5)]
-                ) { inputDict in
-                    let sum = inputDict.values.reduce(0.0) { acc, val in
-                        guard case .double(let d) = val else { return acc }
-                        return acc + d
-                    }
-                    return ["result": .double(sum)]
-                }
+//                let additionTool = RTSTool(
+//                    name: "Addition",
+//                    inputs: ["a": RTSValue.double(3), "b": RTSValue.double(5)]
+//                ) { inputDict in
+//                    let sum = inputDict.values.reduce(0.0) { acc, val in
+//                        guard case .double(let d) = val else { return acc }
+//                        return acc + d
+//                    }
+//                    return ["result": .double(sum)]
+//                }
+                
+                let additionTool = AdditionTool()
                 
                 let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in
                     (try? await agent.run(prompt)) ?? "No response"
@@ -66,5 +68,33 @@ class MathViewModel {
                 logger.error("Prompt agent error: \(error)")
             }
         }
+    }
+}
+
+struct AdditionTool: RTSToolNode {
+    let id = UUID()
+    let _name = "Addition"
+    var inputs: RTSInput = [:]
+    let callableRoutine = RTSClosure { inputs in
+        let sum = inputs.values.reduce(0.0) { acc, val in
+            guard case .double(let d) = val else { return acc }
+            return acc + d
+        }
+        return ["result": .double(sum)]
+    }
+//    let closure: @concurrent (RTSInput) async throws -> RTSOutput = { inputs in
+//        let sum = inputs.values.reduce(0.0) { acc, val in
+//            guard case .double(let d) = val else { return acc }
+//            return acc + d
+//        }
+//        return ["result": .double(sum)]
+//    }
+
+    func run(with a: Double, _ b: Double) async throws -> Double {
+        let output = try await run(with: ["a": RTSValue.double(a), "b": RTSValue.double(b)])
+        guard case .double(let result) = output["result"] else {
+            throw RTSError.missingOutput("result")
+        }
+        return result
     }
 }
