@@ -52,6 +52,9 @@ public class RTSLLMSession {
         let chatSession = ChatSession(provider: provider, model: model)
         let conduitTools = tools.map { $0.asConduitTool() }
         if !conduitTools.isEmpty {
+            // register tools for llm request body
+            chatSession.config = chatSession.config.tools(conduitTools)
+            // register tools for execution
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)
         }
         return RTSLLMSession(
