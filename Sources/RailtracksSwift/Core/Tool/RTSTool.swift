@@ -19,6 +19,9 @@ public protocol RTSToolNode: RTSFunctionNode {
     var inputs: RTSInput { get set }
     var callableRoutine: RTSClosure { get }
 //    var callableClosure: @concurrent (RTSInput) async throws -> RTSOutput { get }
+    
+    var toolDescription: String { get }
+    var parameterSchema: RTSToolSchema { get }
 }
                 
 public extension RTSToolNode {

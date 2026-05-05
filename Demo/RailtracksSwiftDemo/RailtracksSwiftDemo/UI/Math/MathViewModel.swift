@@ -11,7 +11,8 @@ import Logging
 
 @Observable
 class MathViewModel {
-    var prompt: String = "What is 50 + 20 x 8? Just give me the final answer"
+    let prompt: String = "What is 50 + 20 x 8? Just give me the final answer"
+//    let prompt: String = "Are you able to see the addition tool I provided?"
     var promptResult: String?
     
     var openAIAPIKey: String? {
@@ -19,7 +20,7 @@ class MathViewModel {
     }
     
     func startPrompt() {
-        let prompt = prompt
+        let prompt = self.prompt
         Task { [weak self] in
             var logger = Logger(label: "railtracks-swift-demo")
             logger.logLevel = .debug
@@ -34,13 +35,15 @@ class MathViewModel {
             )
             
             do {
-                guard let session = try gateway?.session() else {
+                let tools = [AdditionTool()]
+                guard let session = gateway?.session(tools: tools) else {
                     logger.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
                     return
                 }
+                
                 let agent = RTAgent(
                     llm: session,
-                    systemMessage: "You a helpful assistant that calculate simple math problem asked by user."
+                    systemMessage: "You are a Math assistant.  If there is addition in the math, you must use the provided addition tool to perfrom the calculation.  You will calculate simple math problem asked by user."
                 )
                 
 //                let additionTool = RTSTool(
@@ -53,8 +56,6 @@ class MathViewModel {
 //                    }
 //                    return ["result": .double(sum)]
 //                }
-                
-                let additionTool = AdditionTool()
                 
                 let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in
                     (try? await agent.run(prompt)) ?? "No response"
@@ -76,10 +77,13 @@ struct AdditionTool: RTSToolNode {
     let _name = "Addition"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        let sum = inputs.values.reduce(0.0) { acc, val in
-            guard case .double(let d) = val else { return acc }
-            return acc + d
+        var logger = Logger(label: "railtracks-swift-demo")
+        logger.logLevel = .debug
+        let sum = inputs.values.reduce(0.0) { base, val in
+            guard case .double(let d) = val else { return base }
+            return base + d
         }
+        logger.debug("🧮﹢ Addition tool used!!!")
         return ["result": .double(sum)]
     }
 //    let closure: @concurrent (RTSInput) async throws -> RTSOutput = { inputs in
@@ -89,6 +93,15 @@ struct AdditionTool: RTSToolNode {
 //        }
 //        return ["result": .double(sum)]
 //    }
+    var toolDescription: String = "Adds two numbers and returns the result."
+    var parameterSchema: RTSToolSchema {
+        RTSToolSchema(
+            parameters: [
+                .init(name: "a", description: "First number to add", type: .double),
+                .init(name: "b", description: "Second number to add", type: .double)
+            ]
+        )
+    }
 
     func run(with a: Double, _ b: Double) async throws -> Double {
         let output = try await run(with: ["a": RTSValue.double(a), "b": RTSValue.double(b)])

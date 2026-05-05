@@ -11,12 +11,12 @@ import Logging
 
 @Observable
 class SimplePromptViewModel {
-    var prompt: String = "What is 50 + 20 x 7? Just give me the final answer"
+    let prompt: String = "What is 50 + 20 x 7? Just give me the final answer"
     var promptResult: String?
     
     
     func startPrompt() {
-        let prompt = prompt
+        let prompt = self.prompt
         Task { [weak self] in
             var logger = Logger(label: "railtracks-swift-demo")
             logger.logLevel = .debug
