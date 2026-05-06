@@ -17,7 +17,7 @@ public enum RailtracksSwift {
 // MARK: - global static functions
 //
 public extension RailtracksSwift {
-    // TODO: assess the need for static function call for Node-alike protocol or equivalent logic
+    // TODO: assess the need for static function "call" for Node-alike protocol or equivalent logic
     // call function's main responsibility is to inject context prior to node invoke/execution
 }
 

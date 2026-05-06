@@ -11,7 +11,7 @@ import Logging
 
 @Observable
 class MathViewModel {
-    let prompt: String = "What is 50 + 20 x 8? Give me the final answer in a single number without any description."
+    let prompt: String = "What is 50 + 20 x 8 - 4? Give me the final answer in a single number without any description."
     var promptResult: String?
     
     var openAIAPIKey: String? {
@@ -33,50 +33,35 @@ class MathViewModel {
                 apiKey: apiKey
             )
             
-            do {
-                let tools: [any RTSToolNode] = [
-                    AdditionTool(),
-//                    SubtractionTool(),
-//                    MultiplicationTool(),
-//                    DivisionTool()
-                ]
-                guard let session = gateway?.session(tools: tools) else {
-                    logger.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
-                    return
-                }
-                
-                let agent = RTAgent(
-                    llm: session,
-                    systemMessage: "You are a Math assistant. " +
-                    "If there is addition in the math, you must use the provided addition tool to perfrom the calculation. " +
-                    "If there is subtraction in the math, you must use the provided subtraction tool to perfrom the calculation. " +
-                    "If there is multiplication in the math, you must use the provided multiplication tool to perfrom the calculation. " +
-                    "If there is division in the math, you must use the provided division tool to perfrom the calculation. " +
-                    "You will calculate simple math problem asked by user."
-                )
-                
-//                let additionTool = RTSTool(
-//                    name: "Addition",
-//                    inputs: ["a": RTSValue.double(3), "b": RTSValue.double(5)]
-//                ) { inputDict in
-//                    let sum = inputDict.values.reduce(0.0) { acc, val in
-//                        guard case .double(let d) = val else { return acc }
-//                        return acc + d
-//                    }
-//                    return ["result": .double(sum)]
-//                }
-                
-                let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in
-                    (try? await agent.run(prompt)) ?? "No response"
-                }
-                
-                logger.debug("starting prompt, waiting for response...")
-                
-                self?.promptResult = try? await mainFunction.invokeForStringResponse()
-                logger.debug("obtained prompt result")
-            } catch {
-                logger.error("Prompt agent error: \(error)")
+            let tools: [any RTSToolNode] = [
+                AdditionTool(),
+                SubtractionTool(),
+                MultiplicationTool(),
+                DivisionTool()
+            ]
+            guard let session = gateway?.session(tools: tools) else {
+                logger.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
+                return
             }
+            
+            let agent = RTAgent(
+                llm: session,
+                systemMessage: "You are a Math assistant. " +
+                "If there is addition in the math, you must use the provided addition tool to perfrom the calculation. " +
+                "If there is subtraction in the math, you must use the provided subtraction tool to perfrom the calculation. " +
+                "If there is multiplication in the math, you must use the provided multiplication tool to perfrom the calculation. " +
+                "If there is division in the math, you must use the provided division tool to perfrom the calculation. " +
+                "You will calculate simple math problem asked by user."
+            )
+            
+            let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in
+                (try? await agent.run(prompt)) ?? "No response"
+            }
+            
+            logger.debug("starting prompt, waiting for response...")
+            
+            self?.promptResult = try? await mainFunction.invokeForStringResponse()
+            logger.debug("obtained prompt result")
         }
     }
 }
@@ -101,8 +86,8 @@ struct AdditionTool: RTSToolNode {
     var parameterSchema: RTSToolSchema {
         RTSToolSchema(
             parameters: [
-                .init(name: "a", description: "First number to add", type: .double),
-                .init(name: "b", description: "Second number to add", type: .double)
+                .init(name: "a", description: "First number to add", type: .number),
+                .init(name: "b", description: "Second number to add", type: .number)
             ]
         )
     }
@@ -116,107 +101,107 @@ struct AdditionTool: RTSToolNode {
     }
 }
 
-//struct SubtractionTool: RTSToolNode {
-//    let id = UUID()
-//    let _name = "Subtraction"
-//    var inputs: RTSInput = [:]
-//    let callableRoutine = RTSClosure { inputs in
-//        var logger = Logger(label: "railtracks-swift-demo")
-//        guard case let .double(minuend) = inputs["a"] else {
-//            throw RTSError.missingInput("a")
-//        }
-//        guard case let .double(subtrahend) = inputs["b"] else {
-//            throw RTSError.missingInput("b")
-//        }
-//        let result = minuend - subtrahend
-//        logger.debug("🔢- Subtraction tool used!!!")
-//        return ["result": .double(result)]
-//    }
-//    var toolDescription: String = "Subtract two numbers and returns the result."
-//    var parameterSchema: RTSToolSchema {
-//        RTSToolSchema(
-//            parameters: [
-//                .init(name: "a", description: "First number as minuend in subtraction", type: .double),
-//                .init(name: "b", description: "Second number as subtrahend in subtraction", type: .double)
-//            ]
-//        )
-//    }
-//    
-//    func run(with a: Double, _ b: Double) async throws -> Double {
-//        let output = try await run(with: ["a": RTSValue.double(a), "b": RTSValue.double(b)])
-//        guard case .double(let result) = output["result"] else {
-//            throw RTSError.missingOutput("result")
-//        }
-//        return result
-//    }
-//}
-//
-//struct MultiplicationTool: RTSToolNode {
-//    let id = UUID()
-//    let _name = "Multiplication"
-//    var inputs: RTSInput = [:]
-//    let callableRoutine = RTSClosure { inputs in
-//        var logger = Logger(label: "railtracks-swift-demo")
-//        guard case let .double(left) = inputs["a"] else {
-//            throw RTSError.missingInput("a")
-//        }
-//        guard case let .double(right) = inputs["b"] else {
-//            throw RTSError.missingInput("b")
-//        }
-//        let result = left * right
-//        logger.debug("🔢* Multiplication tool used!!!")
-//        return ["result": .double(result)]
-//    }
-//    var toolDescription: String = "Multiplies two numbers and returns the result."
-//    var parameterSchema: RTSToolSchema {
-//        RTSToolSchema(
-//            parameters: [
-//                .init(name: "a", description: "First number to multiply", type: .double),
-//                .init(name: "b", description: "Second number to multiply", type: .double)
-//            ]
-//        )
-//    }
-//    
-//    func run(with a: Double, _ b: Double) async throws -> Double {
-//        let output = try await run(with: ["a": RTSValue.double(a), "b": RTSValue.double(b)])
-//        guard case .double(let result) = output["result"] else {
-//            throw RTSError.missingOutput("result")
-//        }
-//        return result
-//    }
-//}
-//
-//struct DivisionTool: RTSToolNode {
-//    let id = UUID()
-//    let _name = "Division"
-//    var inputs: RTSInput = [:]
-//    let callableRoutine = RTSClosure { inputs in
-//        var logger = Logger(label: "railtracks-swift-demo")
-//        guard case let .double(left) = inputs["a"] else {
-//            throw RTSError.missingInput("a")
-//        }
-//        guard case let .double(right) = inputs["b"] else {
-//            throw RTSError.missingInput("b")
-//        }
-//        let result = left / right
-//        logger.debug("🔢* Division tool used!!!")
-//        return ["result": .double(result)]
-//    }
-//    var toolDescription: String = "Divides two numbers and returns the result."
-//    var parameterSchema: RTSToolSchema {
-//        RTSToolSchema(
-//            parameters: [
-//                .init(name: "a", description: "First number as the divident in division", type: .double),
-//                .init(name: "b", description: "Second number as the divisor in division", type: .double)
-//            ]
-//        )
-//    }
-//    
-//    func run(with a: Double, _ b: Double) async throws -> Double {
-//        let output = try await run(with: ["a": RTSValue.double(a), "b": RTSValue.double(b)])
-//        guard case .double(let result) = output["result"] else {
-//            throw RTSError.missingOutput("result")
-//        }
-//        return result
-//    }
-//}
+struct SubtractionTool: RTSToolNode {
+    let id = UUID()
+    let _name = "Subtraction"
+    var inputs: RTSInput = [:]
+    let callableRoutine = RTSClosure { inputs in
+        var logger = Logger(label: "railtracks-swift-demo")
+        guard case let .number(minuend) = inputs["a"] else {
+            throw RTSError.missingInput("a")
+        }
+        guard case let .number(subtrahend) = inputs["b"] else {
+            throw RTSError.missingInput("b")
+        }
+        let result = minuend - subtrahend
+        logger.debug("🔢- Subtraction tool used!!!")
+        return ["result": .number(result)]
+    }
+    var toolDescription: String = "Subtract two numbers and returns the result."
+    var parameterSchema: RTSToolSchema {
+        RTSToolSchema(
+            parameters: [
+                .init(name: "a", description: "First number as minuend in subtraction", type: .number),
+                .init(name: "b", description: "Second number as subtrahend in subtraction", type: .number)
+            ]
+        )
+    }
+    
+    func run(with a: Double, _ b: Double) async throws -> Double {
+        let output = try await run(with: ["a": RTSValue.number(a), "b": RTSValue.number(b)])
+        guard case .number(let result) = output["result"] else {
+            throw RTSError.missingOutput("result")
+        }
+        return result
+    }
+}
+
+struct MultiplicationTool: RTSToolNode {
+    let id = UUID()
+    let _name = "Multiplication"
+    var inputs: RTSInput = [:]
+    let callableRoutine = RTSClosure { inputs in
+        var logger = Logger(label: "railtracks-swift-demo")
+        guard case let .number(left) = inputs["a"] else {
+            throw RTSError.missingInput("a")
+        }
+        guard case let .number(right) = inputs["b"] else {
+            throw RTSError.missingInput("b")
+        }
+        let result = left * right
+        logger.debug("🔢* Multiplication tool used!!!")
+        return ["result": .number(result)]
+    }
+    var toolDescription: String = "Multiplies two numbers and returns the result."
+    var parameterSchema: RTSToolSchema {
+        RTSToolSchema(
+            parameters: [
+                .init(name: "a", description: "First number to multiply", type: .number),
+                .init(name: "b", description: "Second number to multiply", type: .number)
+            ]
+        )
+    }
+    
+    func run(with a: Double, _ b: Double) async throws -> Double {
+        let output = try await run(with: ["a": RTSValue.number(a), "b": RTSValue.number(b)])
+        guard case .number(let result) = output["result"] else {
+            throw RTSError.missingOutput("result")
+        }
+        return result
+    }
+}
+
+struct DivisionTool: RTSToolNode {
+    let id = UUID()
+    let _name = "Division"
+    var inputs: RTSInput = [:]
+    let callableRoutine = RTSClosure { inputs in
+        var logger = Logger(label: "railtracks-swift-demo")
+        guard case let .number(left) = inputs["a"] else {
+            throw RTSError.missingInput("a")
+        }
+        guard case let .number(right) = inputs["b"] else {
+            throw RTSError.missingInput("b")
+        }
+        let result = left / right
+        logger.debug("🔢* Division tool used!!!")
+        return ["result": .number(result)]
+    }
+    var toolDescription: String = "Divides two numbers and returns the result."
+    var parameterSchema: RTSToolSchema {
+        RTSToolSchema(
+            parameters: [
+                .init(name: "a", description: "First number as the divident in division", type: .number),
+                .init(name: "b", description: "Second number as the divisor in division", type: .number)
+            ]
+        )
+    }
+    
+    func run(with a: Double, _ b: Double) async throws -> Double {
+        let output = try await run(with: ["a": RTSValue.number(a), "b": RTSValue.number(b)])
+        guard case .number(let result) = output["result"] else {
+            throw RTSError.missingOutput("result")
+        }
+        return result
+    }
+}

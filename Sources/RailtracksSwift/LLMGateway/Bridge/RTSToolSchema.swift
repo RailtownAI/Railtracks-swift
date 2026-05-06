@@ -32,12 +32,10 @@ extension RTSToolSchema {
             type: GeneratedContent.self,
             properties: parameters.map { param in
                 switch param.type {
-                case .double:
-                    return GenerationSchema.Property(name: param.name, description: param.description, type: Double.self)
                 case .string:
                     return GenerationSchema.Property(name: param.name, description: param.description, type: String.self)
-                case .int:
-                    return GenerationSchema.Property(name: param.name, description: param.description, type: Int.self)
+                case .number:
+                    return GenerationSchema.Property(name: param.name, description: param.description, type: Double.self)
                 case .bool:
                     return GenerationSchema.Property(name: param.name, description: param.description, type: Bool.self)
                 }
