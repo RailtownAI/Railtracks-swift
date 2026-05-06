@@ -12,7 +12,7 @@ import ConduitAdvanced
 public class RTSLLMSession {
     private let _run: @Sendable (String) async throws -> String
     private let _setSystemPrompt: @Sendable (String) -> Void
-                                                            
+    
     init(
         run: @escaping @Sendable (String) async throws -> String,
         setSystemPrompt: @escaping @Sendable (String) -> Void
@@ -20,7 +20,7 @@ public class RTSLLMSession {
         self._run = run
         self._setSystemPrompt = setSystemPrompt
     }
-     
+    
     static func build<P: AIProvider & TextGenerator>(
         provider: P,
         model: P.ModelID,
@@ -40,7 +40,7 @@ public class RTSLLMSession {
             setSystemPrompt: { message in chatSession.setSystemPrompt(message) }
         )
     }
-                                                                                                                                       
+    
     public func run(_ prompt: String) async throws -> String { try await _run(prompt) }
     public func setSystemPrompt(_ message: String) { _setSystemPrompt(message) }
 }

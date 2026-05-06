@@ -9,9 +9,6 @@ import SwiftUI
 import Logging
 
 struct MathView: View {
-    var prompt: String = "What is 50 / 2 + 20 x 9? Just give me the final answer"
-    var promptResult: String?
-    
     @State private var viewModel = MathViewModel()
     
     var body: some View {

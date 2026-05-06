@@ -47,7 +47,7 @@ class MathViewModel {
                 "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +
                 "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. " +
                 "If there is multiplication in the math, you must use the provided multiplication tool to perform the calculation. " +
-                "If there is division in the math, you must use the provided division tool to perfrom the calculation. " +
+                "If there is division in the math, you must use the provided division tool to perform the calculation. " +
                 "You will calculate simple math problem asked by user."
             )
             
@@ -112,7 +112,7 @@ struct SubtractionTool: RTSToolNode {
         Log.debug("🔢- Subtraction tool used!!!")
         return ["result": .number(result)]
     }
-    var toolDescription: String = "Subtract two numbers and returns the result."
+    var toolDescription: String = "Subtracts two numbers and returns the result."
     var parameterSchema: RTSToolSchema {
         RTSToolSchema(
             parameters: [
@@ -176,6 +176,9 @@ struct DivisionTool: RTSToolNode {
         guard case let .number(right) = inputs["b"] else {
             throw RTSError.missingInput("b")
         }
+        guard right != 0 else {
+            return ["result": .number(.nan)]
+        }
         let result = left / right
         Log.debug("🔢/ Division tool used!!!")
         return ["result": .number(result)]
@@ -184,7 +187,7 @@ struct DivisionTool: RTSToolNode {
     var parameterSchema: RTSToolSchema {
         RTSToolSchema(
             parameters: [
-                .init(name: "a", description: "First number as the divident in division", type: .number),
+                .init(name: "a", description: "First number as the dividend in division", type: .number),
                 .init(name: "b", description: "Second number as the divisor in division", type: .number)
             ]
         )
