@@ -17,7 +17,7 @@ public class RTSLLMGateway {
     public var modelDescription: String {
         return llmModel.description
     }
-                                                                                                                                       
+    
     public init?(llmProvider: RTSLLMProvider, apiKey: String) {
         switch llmProvider {
         case .openAI(modelIDString: let modelIDString):
@@ -29,7 +29,7 @@ public class RTSLLMGateway {
             }
         }
     }
-     
+    
     public func session(tools: [any RTSToolNode] = []) -> RTSLLMSession {
         sessionBuilder(tools)
     }

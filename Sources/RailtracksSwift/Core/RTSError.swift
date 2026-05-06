@@ -10,4 +10,6 @@ import Foundation
 public enum RTSError: Error {
     case missingInput(String)
     case missingOutput(String)
+    case encodingFailed(String? = nil)
+    case decodingFailed(String? = nil)
 }

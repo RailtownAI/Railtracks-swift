@@ -23,7 +23,11 @@ struct RTSConduitToolBridge: Tool {
         let jsonData = Data(arguments.jsonString.utf8)
         let input = try JSONDecoder().decode(RTSInput.self, from: jsonData)
         let output = try await node.run(with: input)
-        return (try? JSONEncoder().encode(output)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        guard let data = try? JSONEncoder().encode(output),
+              let result = String(data: data, encoding: .utf8) else {
+            throw RTSError.encodingFailed()
+        }
+        return result
     }
 }
 

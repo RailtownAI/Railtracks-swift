@@ -44,9 +44,9 @@ class MathViewModel {
             let agent = RTAgent(
                 llm: session,
                 systemMessage: "You are a Math assistant. " +
-                "If there is addition in the math, you must use the provided addition tool to perfrom the calculation. " +
-                "If there is subtraction in the math, you must use the provided subtraction tool to perfrom the calculation. " +
-                "If there is multiplication in the math, you must use the provided multiplication tool to perfrom the calculation. " +
+                "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +
+                "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. " +
+                "If there is multiplication in the math, you must use the provided multiplication tool to perform the calculation. " +
                 "If there is division in the math, you must use the provided division tool to perfrom the calculation. " +
                 "You will calculate simple math problem asked by user."
             )
@@ -177,7 +177,7 @@ struct DivisionTool: RTSToolNode {
             throw RTSError.missingInput("b")
         }
         let result = left / right
-        Log.debug("🔢* Division tool used!!!")
+        Log.debug("🔢/ Division tool used!!!")
         return ["result": .number(result)]
     }
     var toolDescription: String = "Divides two numbers and returns the result."

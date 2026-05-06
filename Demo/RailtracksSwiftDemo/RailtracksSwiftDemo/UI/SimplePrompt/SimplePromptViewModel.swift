@@ -33,7 +33,7 @@ class SimplePromptViewModel {
             }
             let agent = RTAgent(
                 llm: session,
-                systemMessage: "You a helpful assistant that calculate simple math problem asked by user."
+                systemMessage: "You are a helpful assistant that calculate simple math problem asked by user."
             )
             
             let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in

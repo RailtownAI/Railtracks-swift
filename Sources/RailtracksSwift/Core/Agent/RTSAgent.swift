@@ -41,7 +41,6 @@ public class RTAgent: @unchecked Sendable {
             log.debug("agent(\(id)) failed at running prompt: \(prompt) | \(error)")
             throw error
         }
-        return nil
     }
 }
 

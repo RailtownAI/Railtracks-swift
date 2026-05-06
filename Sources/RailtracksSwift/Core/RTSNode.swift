@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// RTSNode protocol describes Node objects that have collected all its input and waiting ot be executed via invoke
+/// RTSNode protocol describes Node objects that have collected all its input and waiting to be executed via invoke
 public protocol RTSNode: Encodable, Sendable {
     typealias RTSOutput = [String: RTSValue]
     func name() -> String
