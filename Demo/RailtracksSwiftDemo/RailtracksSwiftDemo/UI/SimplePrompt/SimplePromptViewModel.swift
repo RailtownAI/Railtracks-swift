@@ -18,11 +18,8 @@ class SimplePromptViewModel {
     func startPrompt() {
         let prompt = self.prompt
         Task { [weak self] in
-            var logger = Logger(label: "railtracks-swift-demo")
-            logger.logLevel = .debug
-            
             guard let apiKey = RailtracksSwift.getOpenAIAPIKey() else {
-                logger.debug("No API key found")
+                Log.debug("No API key found")
                 return
             }
             let gateway = RTSLLMGateway(
@@ -31,7 +28,7 @@ class SimplePromptViewModel {
             )
             
             guard let session = gateway?.session() else {
-                logger.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
+                Log.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
                 return
             }
             let agent = RTAgent(
@@ -43,10 +40,10 @@ class SimplePromptViewModel {
                 (try? await agent.run(prompt)) ?? "No response"
             }
             
-            logger.debug("starting prompt, waiting for response...")
+            Log.debug("starting prompt, waiting for response...")
             
             self?.promptResult = try? await mainFunction.invokeForStringResponse()
-            logger.debug("obtained prompt result")
+            Log.debug("obtained prompt result")
         }
     }
 }

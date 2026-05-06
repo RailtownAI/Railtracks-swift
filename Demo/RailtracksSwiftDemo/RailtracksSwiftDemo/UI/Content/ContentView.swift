@@ -9,8 +9,6 @@ import SwiftUI
 import Logging
 
 struct ContentView: View {
-    var logger = Logger(label: "railtracks-swift-demo")
-    
     @State private var viewModel = ContentViewModel()
     
     var body: some View {
@@ -37,9 +35,6 @@ struct ContentView: View {
             }
         }
         .padding()
-        .task {
-            print("start task...")
-        }
     }
 }
 

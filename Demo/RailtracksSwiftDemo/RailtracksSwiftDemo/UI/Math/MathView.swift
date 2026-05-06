@@ -9,8 +9,6 @@ import SwiftUI
 import Logging
 
 struct MathView: View {
-    var logger = Logger(label: "railtracks-swift-demo")
-    
     var prompt: String = "What is 50 / 2 + 20 x 9? Just give me the final answer"
     var promptResult: String?
     
@@ -23,7 +21,7 @@ struct MathView: View {
         }
         .padding()
         .task {
-            print("start task...")
+            Log.debug("start math task...")
             viewModel.startPrompt()
         }
     }

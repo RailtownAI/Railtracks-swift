@@ -9,8 +9,6 @@ import SwiftUI
 import Logging
 
 struct SimplePromptView: View {
-    var logger = Logger(label: "railtracks-swift-demo")
-    
     var prompt: String = "What is 50 + 20 x 7? Just give me the final answer"
     var promptResult: String?
     
@@ -23,7 +21,7 @@ struct SimplePromptView: View {
         }
         .padding()
         .task {
-            print("start task...")
+            Log.debug("start simple task...")
             viewModel.startPrompt()
         }
     }

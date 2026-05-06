@@ -28,7 +28,6 @@ public class RTAgent: @unchecked Sendable {
             "prompt": prompt
         ]
         if let systemMessage = systemMessage {
-//            requestDictionary["systemMessage"] = systemMessage
             llm.setSystemPrompt(systemMessage)
         }
         do {

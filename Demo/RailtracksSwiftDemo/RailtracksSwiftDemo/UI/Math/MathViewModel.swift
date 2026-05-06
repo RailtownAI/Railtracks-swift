@@ -21,11 +21,8 @@ class MathViewModel {
     func startPrompt() {
         let prompt = self.prompt
         Task { [weak self] in
-            var logger = Logger(label: "railtracks-swift-demo")
-            logger.logLevel = .debug
-            
             guard let apiKey = RailtracksSwift.getOpenAIAPIKey() else {
-                logger.debug("No API key found")
+                Log.debug("No API key found")
                 return
             }
             let gateway = RTSLLMGateway(
@@ -40,7 +37,7 @@ class MathViewModel {
                 DivisionTool()
             ]
             guard let session = gateway?.session(tools: tools) else {
-                logger.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
+                Log.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
                 return
             }
             
@@ -58,10 +55,10 @@ class MathViewModel {
                 (try? await agent.run(prompt)) ?? "No response"
             }
             
-            logger.debug("starting prompt, waiting for response...")
+            Log.debug("starting prompt, waiting for response...")
             
             self?.promptResult = try? await mainFunction.invokeForStringResponse()
-            logger.debug("obtained prompt result")
+            Log.debug("obtained prompt result")
         }
     }
 }
@@ -71,7 +68,6 @@ struct AdditionTool: RTSToolNode {
     let _name = "Addition"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        var logger = Logger(label: "railtracks-swift-demo")
         guard case let .number(left) = inputs["a"] else {
             throw RTSError.missingInput("a")
         }
@@ -79,7 +75,7 @@ struct AdditionTool: RTSToolNode {
             throw RTSError.missingInput("b")
         }
         let sum = left + right
-        logger.debug("🔢+ Addition tool used!!!")
+        Log.debug("🔢+ Addition tool used!!!")
         return ["result": .number(sum)]
     }
     var toolDescription: String = "Adds two numbers and returns the result."
@@ -106,7 +102,6 @@ struct SubtractionTool: RTSToolNode {
     let _name = "Subtraction"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        var logger = Logger(label: "railtracks-swift-demo")
         guard case let .number(minuend) = inputs["a"] else {
             throw RTSError.missingInput("a")
         }
@@ -114,7 +109,7 @@ struct SubtractionTool: RTSToolNode {
             throw RTSError.missingInput("b")
         }
         let result = minuend - subtrahend
-        logger.debug("🔢- Subtraction tool used!!!")
+        Log.debug("🔢- Subtraction tool used!!!")
         return ["result": .number(result)]
     }
     var toolDescription: String = "Subtract two numbers and returns the result."
@@ -141,7 +136,6 @@ struct MultiplicationTool: RTSToolNode {
     let _name = "Multiplication"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        var logger = Logger(label: "railtracks-swift-demo")
         guard case let .number(left) = inputs["a"] else {
             throw RTSError.missingInput("a")
         }
@@ -149,7 +143,7 @@ struct MultiplicationTool: RTSToolNode {
             throw RTSError.missingInput("b")
         }
         let result = left * right
-        logger.debug("🔢* Multiplication tool used!!!")
+        Log.debug("🔢* Multiplication tool used!!!")
         return ["result": .number(result)]
     }
     var toolDescription: String = "Multiplies two numbers and returns the result."
@@ -176,7 +170,6 @@ struct DivisionTool: RTSToolNode {
     let _name = "Division"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        var logger = Logger(label: "railtracks-swift-demo")
         guard case let .number(left) = inputs["a"] else {
             throw RTSError.missingInput("a")
         }
@@ -184,7 +177,7 @@ struct DivisionTool: RTSToolNode {
             throw RTSError.missingInput("b")
         }
         let result = left / right
-        logger.debug("🔢* Division tool used!!!")
+        Log.debug("🔢* Division tool used!!!")
         return ["result": .number(result)]
     }
     var toolDescription: String = "Divides two numbers and returns the result."

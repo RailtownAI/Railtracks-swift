@@ -30,7 +30,7 @@ public struct RTSSimpleFunction: RTSFunctionNode {
         }
     }
     
-    // pipe terminal call function to unwrap Output from RTSNode.invoke()
+    /// pipeline terminal end function to unwrap Output from RTSNode.invoke()
     public func invokeForStringResponse() async throws -> String {
         let output = try await invoke()
         guard case .string(let responseString) = output["result"] else {

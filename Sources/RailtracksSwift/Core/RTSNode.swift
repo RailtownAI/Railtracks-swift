@@ -21,7 +21,6 @@ public protocol RTSAgentNode: RTSNode {
 public protocol RTSFunctionNode: RTSNode {
     var inputs: RTSInput { get set }
     var callableRoutine: RTSClosure { get }
-//    var callableRoutine: @concurrent (RTSInput) async throws -> RTSOutput { get }
 }
 
 public extension RTSFunctionNode {

@@ -22,7 +22,6 @@ public class RTSLLMGateway {
         switch llmProvider {
         case .openAI(modelIDString: let modelIDString):
             let provider = OpenAIProvider(apiKey: apiKey)
-//            let model = OpenAIModelID(modelIDString)
             let model = ModelIdentifier.openAI(modelIDString)
             self.llmModel = model
             self.sessionBuilder = { tools in
@@ -35,30 +34,6 @@ public class RTSLLMGateway {
         sessionBuilder(tools)
     }
 }
-//public class RTSLLMGateway {
-//    let accessPoint: Conduit
-//    let llmModel: Model
-//    
-//    public var modelDescription: String {
-//        return llmModel.description
-//    }
-//    
-//    public init?(llmProvider: RTSLLMProvider, apiKey: String) {
-//        switch llmProvider {
-//        case .openAI(modelIDString: let modelIDString):
-//            self.accessPoint = Conduit(.openAI(apiKey: apiKey))
-//            self.llmModel = Model.openAI(modelIDString)
-//        }
-//    }
-//    
-//    public func session(tools: [any RTSToolNode] = []) throws -> RTSLLMSession {
-//        return try RTSLLMSession(
-//            accessPoint: accessPoint,
-//            model: llmModel,
-//            tools: tools
-//        )
-//    }
-//}
 
 extension Model: CustomStringConvertible {
     public var description: String {

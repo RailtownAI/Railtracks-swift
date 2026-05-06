@@ -9,28 +9,6 @@ import Foundation
 import ConduitAdvanced
 
 /// Encapsulation layer for LLM session underneath
-//public class RTSLLMSession {
-//    let session: Session
-//    var systemMessage: String?
-//    
-//    init(accessPoint: Conduit, model: Model, tools: [RTSToolNode]) throws {
-//        let conduitTools = tools.map({ $0.asConduitTool() })
-//        self.session = try accessPoint.session(model: model) { options in
-//            options.tools {
-//                conduitTools
-//            }
-//        }
-//        // TODO: add tools into session
-//    }
-//    
-//    func run(_ prompt: String) async throws -> String {
-//        if let systemMessage = self.systemMessage {
-//            session.setSystemPrompt(systemMessage)
-//        }
-//        return try await session.run(prompt)
-//    }
-//}
-
 public class RTSLLMSession {
     private let _run: @Sendable (String) async throws -> String
     private let _setSystemPrompt: @Sendable (String) -> Void

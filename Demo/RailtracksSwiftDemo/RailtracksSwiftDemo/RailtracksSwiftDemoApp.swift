@@ -11,7 +11,7 @@ import Logging
 @main
 struct RailtracksSwiftDemoApp: App {
     init() {
-        _ = _loggingBootstrap
+        Log.setup()
     }
 
     var body: some Scene {
