@@ -65,7 +65,7 @@ class MathViewModel {
 
 struct AdditionTool: RTSToolNode {
     let id = UUID()
-    let _name = "Addition"
+    let toolName = "Addition"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
         guard case let .number(left) = inputs["a"] else {
@@ -99,7 +99,7 @@ struct AdditionTool: RTSToolNode {
 
 struct SubtractionTool: RTSToolNode {
     let id = UUID()
-    let _name = "Subtraction"
+    let toolName = "Subtraction"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
         guard case let .number(minuend) = inputs["a"] else {
@@ -133,7 +133,7 @@ struct SubtractionTool: RTSToolNode {
 
 struct MultiplicationTool: RTSToolNode {
     let id = UUID()
-    let _name = "Multiplication"
+    let toolName = "Multiplication"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
         guard case let .number(left) = inputs["a"] else {
@@ -167,7 +167,7 @@ struct MultiplicationTool: RTSToolNode {
 
 struct DivisionTool: RTSToolNode {
     let id = UUID()
-    let _name = "Division"
+    let toolName = "Division"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
         guard case let .number(left) = inputs["a"] else {

@@ -15,7 +15,7 @@ public protocol RTSToolNode: RTSFunctionNode {
     typealias RTSInput = [String: RTSValue]
     
     var id: UUID { get }
-    var _name: String { get }
+    var toolName: String { get }
     var inputs: RTSInput { get set }
     var callableRoutine: RTSClosure { get }
     
@@ -24,7 +24,10 @@ public protocol RTSToolNode: RTSFunctionNode {
 }
                 
 public extension RTSToolNode {
-    public func name() -> String { _name }
+    public var toolName: String {
+        String(describing: type(of: self))
+    }
+    public func name() -> String { toolName }
     public func invoke() async throws -> RTSOutput { try await callableRoutine.closure(inputs) }
     public func run(with inputs: RTSInput) async throws -> RTSOutput {
         var copy = self
@@ -34,7 +37,7 @@ public extension RTSToolNode {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: RTSToolNodeCodingKeys.self)
         try container.encode(id, forKey: .id)
-        try container.encode(_name, forKey: .name)
+        try container.encode(toolName, forKey: .name)
         try container.encode(inputs, forKey: .inputs)
     }
 }
