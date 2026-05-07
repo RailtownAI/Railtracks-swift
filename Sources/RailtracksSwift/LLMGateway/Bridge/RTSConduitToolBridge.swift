@@ -19,7 +19,7 @@ struct RTSConduitToolBridge: Tool {
     var parameters: GenerationSchema { node.parameterSchema.toGenerationSchema() }
     
     func call(arguments: GeneratedContent) async throws -> String {
-        log.debug("#### RTSConduitToolBridge - \(node.name()) is called with \(arguments.jsonString)")
+        log.debug("🌁 RTSConduitToolBridge - \(node.name()) is called with \(arguments.jsonString)")
         let jsonData = Data(arguments.jsonString.utf8)
         let input = try JSONDecoder().decode(RTSInput.self, from: jsonData)
         let output = try await node.run(with: input)

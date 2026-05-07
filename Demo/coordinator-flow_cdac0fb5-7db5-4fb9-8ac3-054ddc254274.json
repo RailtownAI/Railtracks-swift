@@ -1,0 +1,410 @@
+{
+  "flow_name": "coordinator-flow",
+  "flow_id": "a5fd360f088479f2f89feff7dc9078accb667c26f2d6f296efe340016e919b7d",
+  "session_id": "cdac0fb5-7db5-4fb9-8ac3-054ddc254274",
+  "session_name": null,
+  "start_time": 1776989282.9324548,
+  "end_time": 1776989298.980891,
+  "runs": [
+    {
+      "name": "Tool Call LLM",
+      "run_id": "4ad5204f-a04c-4ba9-8606-8353dbcbb22a",
+      "nodes": [
+        {
+          "identifier": "22e4f70b-1695-4e0d-835f-f5bf507cd033",
+          "node_type": "Tool",
+          "name": "code_agent",
+          "stamp": {
+            "step": 4,
+            "time": 1776989298.272801,
+            "identifier": "Finished executing code_agent"
+          },
+          "details": {
+            "internals": {
+              "latency": {
+                "total_time": 13.900348901748657
+              }
+            }
+          },
+          "parent": {
+            "identifier": "22e4f70b-1695-4e0d-835f-f5bf507cd033",
+            "node_type": "Tool",
+            "name": "code_agent",
+            "stamp": {
+              "step": 1,
+              "time": 1776989284.371884,
+              "identifier": "Tool Call LLM CREATED code_agent"
+            },
+            "details": {
+              "internals": {}
+            },
+            "parent": null
+          }
+        },
+        {
+          "identifier": "d540a36f-2d9d-4236-a6f2-ba12d20ac97b",
+          "node_type": "Agent",
+          "name": "Code Tool",
+          "stamp": {
+            "step": 3,
+            "time": 1776989298.2719228,
+            "identifier": "Finished executing Code Tool"
+          },
+          "details": {
+            "internals": {
+              "guard_details": [],
+              "llm_details": [
+                {
+                  "model_name": "gpt-5-2025-08-07",
+                  "model_provider": "OpenAI",
+                  "input": [
+                    {
+                      "role": "system",
+                      "content": "You are a master python agent that helps users by \nproviding elite python code for their requests. You will output valid python code that can be directly used without any further editing. Do not add anything other than the python code and python comments if you see fit.\nYou will make assumptions if the user does not provide all the details and not ask for clarifications.\n"
+                    },
+                    {
+                      "role": "user",
+                      "content": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition. Your Problem Last Time: There were no problems last time"
+                    }
+                  ],
+                  "output": {
+                    "role": "assistant",
+                    "content": "def add_numbers(a, b):\n    \"\"\"Return the sum of two numbers.\"\"\"\n    return a + b"
+                  },
+                  "input_tokens": 119,
+                  "output_tokens": 990,
+                  "total_cost": 0.01004875,
+                  "system_fingerprint": null,
+                  "latency": 13.898140907287598
+                }
+              ],
+              "latency": {
+                "total_time": 13.898523807525635
+              }
+            }
+          },
+          "parent": {
+            "identifier": "d540a36f-2d9d-4236-a6f2-ba12d20ac97b",
+            "node_type": "Agent",
+            "name": "Code Tool",
+            "stamp": {
+              "step": 2,
+              "time": 1776989284.372457,
+              "identifier": "code_agent CREATED Code Tool"
+            },
+            "details": {
+              "internals": {
+                "guard_details": [],
+                "llm_details": []
+              }
+            },
+            "parent": null
+          }
+        },
+        {
+          "identifier": "ce2dabca-ac7f-40b8-bbb1-dd4b3e5d1fcc",
+          "node_type": "Agent",
+          "name": "Tool Call LLM",
+          "stamp": {
+            "step": 5,
+            "time": 1776989298.977291,
+            "identifier": "Finished executing Tool Call LLM"
+          },
+          "details": {
+            "internals": {
+              "guard_details": [],
+              "llm_details": [
+                {
+                  "model_name": "gpt-4o-2024-08-06",
+                  "model_provider": "OpenAI",
+                  "input": [
+                    {
+                      "role": "system",
+                      "content": "\nYou are a helpful assistant that will talk to users about the type of code they want. You have access to a CodeAgent tool to generate the code the user is looking for. Your job is to clarify with users to ensure that they have provided all details required to write the code and then effectively communicate that to the CodeAgent. Do not write any code and strictly refer to the CodeAgent for this.\nYou will make assumptions if the user does not provide all the details and not ask for clarifications.\n"
+                    },
+                    {
+                      "role": "user",
+                      "content": "Generate a function in python code that takes 2 numbers as input and returns the sum?"
+                    }
+                  ],
+                  "output": {
+                    "role": "assistant",
+                    "content": [
+                      {
+                        "identifier": "call_99YDQ9ej07yGybPcztHnP65I",
+                        "name": "code_agent",
+                        "arguments": {
+                          "prompt": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition."
+                        }
+                      }
+                    ]
+                  },
+                  "input_tokens": 206,
+                  "output_tokens": 38,
+                  "total_cost": 0.0008950000000000001,
+                  "system_fingerprint": "fp_a37395bab7",
+                  "latency": 1.4375193119049072
+                },
+                {
+                  "model_name": "gpt-4o-2024-08-06",
+                  "model_provider": "OpenAI",
+                  "input": [
+                    {
+                      "role": "system",
+                      "content": "\nYou are a helpful assistant that will talk to users about the type of code they want. You have access to a CodeAgent tool to generate the code the user is looking for. Your job is to clarify with users to ensure that they have provided all details required to write the code and then effectively communicate that to the CodeAgent. Do not write any code and strictly refer to the CodeAgent for this.\nYou will make assumptions if the user does not provide all the details and not ask for clarifications.\n"
+                    },
+                    {
+                      "role": "user",
+                      "content": "Generate a function in python code that takes 2 numbers as input and returns the sum?"
+                    },
+                    {
+                      "role": "assistant",
+                      "content": [
+                        {
+                          "identifier": "call_99YDQ9ej07yGybPcztHnP65I",
+                          "name": "code_agent",
+                          "arguments": {
+                            "prompt": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition."
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "role": "tool",
+                      "content": {
+                        "identifier": "call_99YDQ9ej07yGybPcztHnP65I",
+                        "name": "code_agent",
+                        "result": "Success"
+                      }
+                    }
+                  ],
+                  "output": {
+                    "role": "assistant",
+                    "content": "I have generated the Python code for a function that takes two numbers as input and returns their sum. If you need any further assistance or have any questions, feel free to ask!"
+                  },
+                  "input_tokens": 253,
+                  "output_tokens": 37,
+                  "total_cost": 0.0010025000000000001,
+                  "system_fingerprint": "fp_a37395bab7",
+                  "latency": 0.7031939029693604
+                }
+              ],
+              "latency": {
+                "total_time": 16.044222831726074
+              }
+            }
+          },
+          "parent": {
+            "identifier": "ce2dabca-ac7f-40b8-bbb1-dd4b3e5d1fcc",
+            "node_type": "Agent",
+            "name": "Tool Call LLM",
+            "stamp": {
+              "step": 0,
+              "time": 1776989282.932584,
+              "identifier": "START CREATED Tool Call LLM"
+            },
+            "details": {
+              "internals": {
+                "guard_details": [],
+                "llm_details": []
+              }
+            },
+            "parent": null
+          }
+        }
+      ],
+      "status": "Completed",
+      "edges": [
+        {
+          "source": "ce2dabca-ac7f-40b8-bbb1-dd4b3e5d1fcc",
+          "target": "22e4f70b-1695-4e0d-835f-f5bf507cd033",
+          "identifier": "7c7185e2-8b45-4049-89ed-3c28b10a2441",
+          "stamp": {
+            "step": 4,
+            "time": 1776989298.272801,
+            "identifier": "Finished executing code_agent"
+          },
+          "details": {
+            "input_args": [],
+            "input_kwargs": {
+              "prompt": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition."
+            },
+            "status": "Completed",
+            "output": "Success"
+          },
+          "parent": {
+            "source": "ce2dabca-ac7f-40b8-bbb1-dd4b3e5d1fcc",
+            "target": "22e4f70b-1695-4e0d-835f-f5bf507cd033",
+            "identifier": "7c7185e2-8b45-4049-89ed-3c28b10a2441",
+            "stamp": {
+              "step": 1,
+              "time": 1776989284.371884,
+              "identifier": "Tool Call LLM CREATED code_agent"
+            },
+            "details": {
+              "input_args": [],
+              "input_kwargs": {
+                "prompt": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition."
+              },
+              "status": "Open",
+              "output": null
+            },
+            "parent": null
+          }
+        },
+        {
+          "source": "22e4f70b-1695-4e0d-835f-f5bf507cd033",
+          "target": "d540a36f-2d9d-4236-a6f2-ba12d20ac97b",
+          "identifier": "eddbc16e-dd3b-478b-904c-98f00f72ffbb",
+          "stamp": {
+            "step": 3,
+            "time": 1776989298.2719228,
+            "identifier": "Finished executing Code Tool"
+          },
+          "details": {
+            "input_args": [],
+            "input_kwargs": {
+              "user_input": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition. Your Problem Last Time: There were no problems last time"
+            },
+            "status": "Completed",
+            "output": {
+              "message_history": [
+                {
+                  "role": "user",
+                  "content": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition. Your Problem Last Time: There were no problems last time"
+                },
+                {
+                  "role": "assistant",
+                  "content": "def add_numbers(a, b):\n    \"\"\"Return the sum of two numbers.\"\"\"\n    return a + b"
+                }
+              ],
+              "content": "def add_numbers(a, b):\n    \"\"\"Return the sum of two numbers.\"\"\"\n    return a + b"
+            }
+          },
+          "parent": {
+            "source": "22e4f70b-1695-4e0d-835f-f5bf507cd033",
+            "target": "d540a36f-2d9d-4236-a6f2-ba12d20ac97b",
+            "identifier": "eddbc16e-dd3b-478b-904c-98f00f72ffbb",
+            "stamp": {
+              "step": 2,
+              "time": 1776989284.372457,
+              "identifier": "code_agent CREATED Code Tool"
+            },
+            "details": {
+              "input_args": [],
+              "input_kwargs": {
+                "user_input": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition. Your Problem Last Time: There were no problems last time"
+              },
+              "status": "Open",
+              "output": null
+            },
+            "parent": null
+          }
+        },
+        {
+          "source": null,
+          "target": "ce2dabca-ac7f-40b8-bbb1-dd4b3e5d1fcc",
+          "identifier": "4ad5204f-a04c-4ba9-8606-8353dbcbb22a",
+          "stamp": {
+            "step": 5,
+            "time": 1776989298.977291,
+            "identifier": "Finished executing Tool Call LLM"
+          },
+          "details": {
+            "input_args": [
+              "Generate a function in python code that takes 2 numbers as input and returns the sum?"
+            ],
+            "input_kwargs": {},
+            "status": "Completed",
+            "output": {
+              "message_history": [
+                {
+                  "role": "user",
+                  "content": "Generate a function in python code that takes 2 numbers as input and returns the sum?"
+                },
+                {
+                  "role": "assistant",
+                  "content": [
+                    {
+                      "identifier": "call_99YDQ9ej07yGybPcztHnP65I",
+                      "name": "code_agent",
+                      "arguments": {
+                        "prompt": "Create a Python function that takes two numbers as input and returns their sum. The function should be simple and demonstrate basic addition."
+                      }
+                    }
+                  ]
+                },
+                {
+                  "role": "tool",
+                  "content": {
+                    "identifier": "call_99YDQ9ej07yGybPcztHnP65I",
+                    "name": "code_agent",
+                    "result": "Success"
+                  }
+                },
+                {
+                  "role": "assistant",
+                  "content": "I have generated the Python code for a function that takes two numbers as input and returns their sum. If you need any further assistance or have any questions, feel free to ask!"
+                }
+              ],
+              "content": "I have generated the Python code for a function that takes two numbers as input and returns their sum. If you need any further assistance or have any questions, feel free to ask!"
+            }
+          },
+          "parent": {
+            "source": null,
+            "target": "ce2dabca-ac7f-40b8-bbb1-dd4b3e5d1fcc",
+            "identifier": "4ad5204f-a04c-4ba9-8606-8353dbcbb22a",
+            "stamp": {
+              "step": 0,
+              "time": 1776989282.932584,
+              "identifier": "START CREATED Tool Call LLM"
+            },
+            "details": {
+              "input_args": [
+                "Generate a function in python code that takes 2 numbers as input and returns the sum?"
+              ],
+              "input_kwargs": {},
+              "status": "Open",
+              "output": null
+            },
+            "parent": null
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": 0,
+          "time": 1776989282.932584,
+          "identifier": "START CREATED Tool Call LLM"
+        },
+        {
+          "step": 1,
+          "time": 1776989284.371884,
+          "identifier": "Tool Call LLM CREATED code_agent"
+        },
+        {
+          "step": 2,
+          "time": 1776989284.372457,
+          "identifier": "code_agent CREATED Code Tool"
+        },
+        {
+          "step": 3,
+          "time": 1776989298.2719228,
+          "identifier": "Finished executing Code Tool"
+        },
+        {
+          "step": 4,
+          "time": 1776989298.272801,
+          "identifier": "Finished executing code_agent"
+        },
+        {
+          "step": 5,
+          "time": 1776989298.977291,
+          "identifier": "Finished executing Tool Call LLM"
+        }
+      ],
+      "start_time": 1776989282.932584,
+      "end_time": 1776989298.977291
+    }
+  ]
+}
