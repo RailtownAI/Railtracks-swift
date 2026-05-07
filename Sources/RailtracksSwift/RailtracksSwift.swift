@@ -8,7 +8,20 @@ internal let log = RTSLoggers.rtsLog
 /// General namespace for the library
 public enum RailtracksSwift {
     public static let version = "0.1.0"
-    
+}
+
+//
+// MARK: - global static functions
+//
+public extension RailtracksSwift {
+    // TODO: assess the need for static function "call" for Node-alike protocol or equivalent logic
+    // call function's main responsibility is to inject context prior to node invoke/execution
+}
+
+//
+// MARK: - API key access
+//
+public extension RailtracksSwift {
     public enum SecretKeys {
         static let openAI = "OpenAI_API_KEY"
     }
