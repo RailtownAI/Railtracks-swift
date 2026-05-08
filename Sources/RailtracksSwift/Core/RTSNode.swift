@@ -9,6 +9,7 @@ import Foundation
 
 /// RTSNode protocol describes Node objects that have collected all its input and waiting to be executed via invoke
 public protocol RTSNode: Encodable, Sendable {
+    var id: UUID { get }
     func name() -> String
     func invoke() async throws -> RTSOutput
 }

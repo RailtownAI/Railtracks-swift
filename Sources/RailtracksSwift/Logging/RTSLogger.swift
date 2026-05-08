@@ -8,7 +8,7 @@
 import Foundation
 import Logging
 
-/// Loggers for RailtracksSwift Library
+/// Development Loggers for RailtracksSwift Library
 ///
 /// Should follow Swift Library [log guide line]:  https://www.swift.org/documentation/server/guides/libraries/log-levels.html
 internal enum RTSLoggers {
