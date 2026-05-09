@@ -25,10 +25,13 @@ class MathViewModel {
                 Log.debug("No API key found")
                 return
             }
-            let gateway = RTSLLMGateway(
+            guard let gateway = RTSLLMGateway(
                 llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
                 apiKey: apiKey
-            )
+            ) else {
+                Log.error("Cannot establish LLM gateway")
+                return
+            }
             
             let tools: [any RTSToolNode] = [
                 AdditionTool(),
@@ -36,12 +39,13 @@ class MathViewModel {
                 MultiplicationTool(),
                 DivisionTool()
             ]
-            guard let session = gateway?.session(tools: tools) else {
-                Log.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
-                return
-            }
             
-            let agent = RTAgent(
+            let flow = RTSFlow(title: "Simple prompt flow") { _ in
+                ""
+            }
+            let session = flow.session(gateway: gateway, tools: tools)
+            
+            let agent = RTSAgent(
                 llm: session,
                 systemMessage: "You are a Math assistant. " +
                 "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +

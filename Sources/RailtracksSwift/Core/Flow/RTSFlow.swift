@@ -42,7 +42,7 @@ import Foundation
 ///                                                   │
 ///                                                   └── writes ──► JSON file
 /// ```
-public class RTFlow {
+public class RTSFlow {
     let id: UUID = UUID()
     let title: String
     let entryPoint: (String) async -> String
@@ -51,7 +51,7 @@ public class RTFlow {
     let nodeInvoker: RTSNodeInvoker
     let flowGraphCollector: RTSFlowGraphCollector
     
-    init(title: String, entryPoint: @escaping (String) async -> String) {
+    public init(title: String, entryPoint: @escaping (String) async -> String) {
         self.title = title
         self.entryPoint = entryPoint
         let stampFactory = RTSStampFactory()
@@ -62,6 +62,10 @@ public class RTFlow {
             flowID: id,
             flowName: title
         )
+    }
+    
+    public func session(gateway: RTSLLMGateway, tools: [any RTSToolNode] = []) -> RTSLLMSession {
+        gateway.session(invoker: nodeInvoker, tools: tools)
     }
     
     func invoke(_ prompt: String) async -> String {

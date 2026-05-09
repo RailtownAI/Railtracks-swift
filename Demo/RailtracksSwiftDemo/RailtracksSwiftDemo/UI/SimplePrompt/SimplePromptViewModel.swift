@@ -19,19 +19,23 @@ class SimplePromptViewModel {
         let prompt = self.prompt
         Task { [weak self] in
             guard let apiKey = RailtracksSwift.getOpenAIAPIKey() else {
-                Log.debug("No API key found")
+                Log.error("No API key found")
                 return
             }
-            let gateway = RTSLLMGateway(
+            guard let gateway = RTSLLMGateway(
                 llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
                 apiKey: apiKey
-            )
-            
-            guard let session = gateway?.session() else {
-                Log.debug("Unable to create session with \(gateway?.modelDescription ?? "--") gateway")
+            ) else {
+                Log.error("Cannot establish LLM gateway")
                 return
             }
-            let agent = RTAgent(
+            
+            let flow = RTSFlow(title: "Simple prompt flow") { _ in
+                ""
+            }
+            let session = flow.session(gateway: gateway)
+            
+            let agent = RTSAgent(
                 llm: session,
                 systemMessage: "You are a helpful assistant that calculate simple math problem asked by user."
             )

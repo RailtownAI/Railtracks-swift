@@ -10,7 +10,7 @@ import Combine
 
 /// An operator that facilitate with node invoking, and publish node invoke event
 /// All node invoking should go through this, otherwise will have even record inconsistency
-class RTSNodeInvoker {
+public class RTSNodeInvoker: @unchecked Sendable {
     let stampFactory: RTSStampFactory
     
     let nodeCreateEventSubject = PassthroughSubject<RTSNodeEvent, Never>()

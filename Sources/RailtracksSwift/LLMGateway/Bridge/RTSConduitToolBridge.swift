@@ -13,6 +13,7 @@ struct RTSConduitToolBridge: Tool {
     typealias Output = String
     
     internal let node: any RTSToolNode
+    internal let nodeInvoker: RTSNodeInvoker
     
     var name: String { node.name() }
     var description: String { node.toolDescription }
@@ -32,7 +33,7 @@ struct RTSConduitToolBridge: Tool {
 }
 
 public extension RTSToolNode {
-    func asConduitTool() -> any Tool {
-        RTSConduitToolBridge(node: self)
+    func asConduitTool(invoker: RTSNodeInvoker) -> any Tool {
+        RTSConduitToolBridge(node: self, nodeInvoker: invoker)
     }
 }

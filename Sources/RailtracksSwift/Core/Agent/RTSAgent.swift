@@ -9,7 +9,7 @@ import Foundation
 import Logging
 
 /// Representation of Agent node in Railtracks pipeline
-public class RTAgent: @unchecked Sendable {
+public class RTSAgent: @unchecked Sendable {
     // TODO: when RTAgent comply to RTSNode protocol Sendable will be inherited, remove Sendable here then
     let id = UUID()
     let llm: RTSLLMSession

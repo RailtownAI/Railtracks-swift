@@ -11,6 +11,7 @@ import Foundation
 public protocol RTSNode: Encodable, Sendable {
     var id: UUID { get }
     func name() -> String
+    /// execution function to be run by invoker operator
     func invoke() async throws -> RTSOutput
 }
 
