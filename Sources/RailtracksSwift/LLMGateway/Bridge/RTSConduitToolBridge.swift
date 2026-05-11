@@ -14,17 +14,17 @@ struct RTSConduitToolBridge: Tool {
     
     internal let node: any RTSToolNode
     internal let nodeInvoker: RTSNodeInvoker
-    
+    internal let createdBy: String
+
     var name: String { node.name() }
     var description: String { node.toolDescription }
     var parameters: GenerationSchema { node.parameterSchema.toGenerationSchema() }
-    
+
     func call(arguments: GeneratedContent) async throws -> String {
         log.debug("🌁 RTSConduitToolBridge - \(node.name()) is called with \(arguments.jsonString)")
         let jsonData = Data(arguments.jsonString.utf8)
         let input = try JSONDecoder().decode(RTSInput.self, from: jsonData)
-//        let output = try await node.run(with: input)
-        let output = try await nodeInvoker.invoke(node, input: input)
+        let output = try await nodeInvoker.invoke(node, input: input, createdBy: createdBy)
         guard let data = try? JSONEncoder().encode(output),
               let result = String(data: data, encoding: .utf8) else {
             throw RTSError.encodingFailed()
@@ -34,7 +34,7 @@ struct RTSConduitToolBridge: Tool {
 }
 
 public extension RTSToolNode {
-    func asConduitTool(invoker: RTSNodeInvoker) -> any Tool {
-        RTSConduitToolBridge(node: self, nodeInvoker: invoker)
+    func asConduitTool(invoker: RTSNodeInvoker, createdBy: String) -> any Tool {
+        RTSConduitToolBridge(node: self, nodeInvoker: invoker, createdBy: createdBy)
     }
 }

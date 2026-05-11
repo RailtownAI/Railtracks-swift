@@ -11,7 +11,7 @@ import ConduitAdvanced
 /// Encapsulation layer for against the LLM connection service underneath
 /// If the llm model accessing library underneath is replaced, only files under LLMGateway directory should require update while the rest  can remain the same
 public class RTSLLMGateway {
-    private let sessionBuilder: (RTSNodeInvoker, [any RTSToolNode]) -> RTSLLMSession
+    private let sessionBuilder: (RTSNodeInvoker, [any RTSToolNode], String) -> RTSLLMSession
     let llmModel: ModelIdentifier
     
     public var modelDescription: String {
@@ -24,17 +24,18 @@ public class RTSLLMGateway {
             let provider = OpenAIProvider(apiKey: apiKey)
             let model = ModelIdentifier.openAI(modelIDString)
             self.llmModel = model
-            self.sessionBuilder = { invoker, tools in
-                RTSLLMSession.build(provider: provider, model: model, tools: tools, invoker: invoker)
+            self.sessionBuilder = { invoker, tools, agentName in
+                RTSLLMSession.build(provider: provider, model: model, tools: tools, invoker: invoker, agentName: agentName)
             }
         }
     }
-    
+
     public func session(
         invoker: RTSNodeInvoker,
-        tools: [any RTSToolNode] = []
+        tools: [any RTSToolNode] = [],
+        agentName: String = "Agent"
     ) -> RTSLLMSession {
-        sessionBuilder(invoker, tools)
+        sessionBuilder(invoker, tools, agentName)
     }
 }
 

@@ -62,11 +62,12 @@ extension RTSLLMSession {
         provider: P,
         model: P.ModelID,
         tools: [any RTSToolNode],
-        invoker: RTSNodeInvoker
+        invoker: RTSNodeInvoker,
+        agentName: String = "Agent"
     ) -> RTSLLMSession {
         log.debug("💎 RTSLLMSession: registering tools: [\(tools.map({ $0.name() }))]")
         let chatSession = ChatSession(provider: provider, model: model)
-        let conduitTools = tools.map { $0.asConduitTool(invoker: invoker) }
+        let conduitTools = tools.map { $0.asConduitTool(invoker: invoker, createdBy: agentName) }
         if !conduitTools.isEmpty {
             // register tools for llm request body
             chatSession.config = chatSession.config.tools(conduitTools)

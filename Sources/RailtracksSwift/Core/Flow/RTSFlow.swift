@@ -65,8 +65,8 @@ public class RTSFlow {
         )
     }
     
-    public func session(gateway: RTSLLMGateway, tools: [any RTSToolNode] = []) -> RTSLLMSession {
-        gateway.session(invoker: nodeInvoker, tools: tools)
+    public func session(gateway: RTSLLMGateway, tools: [any RTSToolNode] = [], agentName: String = "Agent") -> RTSLLMSession {
+        gateway.session(invoker: nodeInvoker, tools: tools, agentName: agentName)
     }
     
     func invoke(_ prompt: String) async -> String {

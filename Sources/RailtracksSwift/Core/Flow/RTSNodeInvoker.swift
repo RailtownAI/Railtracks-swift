@@ -25,9 +25,14 @@ public class RTSNodeInvoker: @unchecked Sendable {
         self.stampFactory = stampFactory
     }
     
-    func invoke(_ node: some RTSNode, input: RTSInput) async throws -> RTSOutput {
-        let startStamp = await stampFactory.makeStamp(event: .startCreate(node.name()))
-        // TODO: double check if creation event here is good enough, or need to be more realistic, and have invoker be the sole entity to create nodes and trigger event there
+    func invoke(_ node: some RTSNode, input: RTSInput, createdBy: String? = nil) async throws -> RTSOutput {
+        let creationEvent: RTSStamp.Event
+        if let createdBy {
+            creationEvent = .create(createdBy, node.name())
+        } else {
+            creationEvent = .startCreate(node.name())
+        }
+        let startStamp = await stampFactory.makeStamp(event: creationEvent)
         nodeCreateEventSubject.send(
             RTSNodeEvent(
                 nodeID: node.id,
