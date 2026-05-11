@@ -60,7 +60,8 @@ public class RTSFlow {
         self.flowGraphCollector = RTSFlowGraphCollector(
             stampFactory: stampFactory,
             flowID: id,
-            flowName: title
+            flowName: title,
+            nodeEventPublisher: self.nodeInvoker
         )
     }
     
@@ -70,5 +71,22 @@ public class RTSFlow {
     
     func invoke(_ prompt: String) async -> String {
         return await self.entryPoint(prompt)
+    }
+    
+    /// convinient function to use agent as a start point and run a prompt
+    public func run(
+        agent: RTSAgentNode,
+        prompt: String,
+        systemMessage: String? = nil
+    ) async throws -> String {
+        var input: RTSInput = [agent.inputKeyPrompt: .string(prompt)]
+        if let systemMessage = systemMessage {
+            input[agent.inputKeySystemMessage] = .string(systemMessage)
+        }
+        let output = try await nodeInvoker.invoke(agent, input: input)
+        guard case let .string(result) = output[agent.outputKeyResult] else {
+            throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
+        }
+        return result
     }
 }

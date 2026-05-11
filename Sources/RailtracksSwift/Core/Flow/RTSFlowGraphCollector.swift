@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 
 actor RTSFlowGraphCollector {
     let stampFactory: RTSStampFactory
@@ -19,14 +20,47 @@ actor RTSFlowGraphCollector {
     // TODO: if multiple run within a flow is allowed, will need to the followings in dictionary with run id as key
     var stepCount: Int = 0
     var steps: [RTSStamp] = []
-    var nodeEvent: [RTSNodeEvent] = []
-    var edgeEvent: [RTSEdgeEvent] = []
+    var nodeEvents: [RTSNodeEvent] = []
+    var edgeEvents: [RTSEdgeEvent] = []
     
-    init(stampFactory: RTSStampFactory, flowID: UUID, flowName: String) {
+    nonisolated(unsafe) var cancellables: Set<AnyCancellable> = []
+    
+    init(
+        stampFactory: RTSStampFactory,
+        flowID: UUID,
+        flowName: String,
+        nodeEventPublisher: NodeEventPublishers
+    ) {
         self.stampFactory = stampFactory
         self.flowID = flowID
         self.flowName = flowName
         
-        // TODO: setup the collector by subscribe to event like node creation and append snapshots
+        log.debug("🎁 setup create node event collector")
+        nodeEventPublisher.nodeCreateEventPublisher
+            .sink { nodeEvent in
+                Task { [weak self] in
+                    await self?.processNodeEvent(nodeEvent)
+                }
+            }
+            .store(in: &cancellables)
+        
+        log.debug("🎁 setup invoke node event collector")
+        nodeEventPublisher.nodeInvokeEventPublisher
+            .sink { nodeEvent in
+                Task { [weak self] in
+                    await self?.processNodeEvent(nodeEvent)
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    deinit {
+        cancellables.removeAll()
+    }
+    
+    private func processNodeEvent(_ nodeEvent: RTSNodeEvent) {
+        // TODO: find the associated Message and attach it to event
+        log.trace("🎁 Appending nodeEvent: \(nodeEvent.name) - \(nodeEvent.stamp.event.identifier) to collector")
+        nodeEvents.append(nodeEvent)
     }
 }

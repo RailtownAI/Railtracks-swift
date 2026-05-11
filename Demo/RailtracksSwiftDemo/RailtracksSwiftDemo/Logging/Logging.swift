@@ -23,6 +23,14 @@ enum Log {
     static func setup() {
         _ = _bootstrap
     }
+    
+    nonisolated static func trace(_ message: @autoclosure () -> Logger.Message) {
+        logger.trace(message())
+    }
+    
+    nonisolated static func verbose(_ message: @autoclosure () -> Logger.Message) {
+        logger.trace(message())
+    }
 
     nonisolated static func debug(_ message: @autoclosure () -> Logger.Message) {
         logger.debug(message())

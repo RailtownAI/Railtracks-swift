@@ -36,17 +36,18 @@ class SimplePromptViewModel {
             let session = flow.session(gateway: gateway)
             
             let agent = RTSAgent(
-                llm: session,
+                llmSession: session,
                 systemMessage: "You are a helpful assistant that calculate simple math problem asked by user."
             )
             
-            let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in
-                (try? await agent.run(prompt)) ?? "No response"
-            }
+//            let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in
+//                (try? await agent.run(prompt: prompt)) ?? "No response"
+//            }
             
             Log.debug("starting prompt, waiting for response...")
             
-            self?.promptResult = try? await mainFunction.invokeForStringResponse()
+//            self?.promptResult = try? await mainFunction.invokeForStringResponse()
+            self?.promptResult = try? await flow.run(agent: agent, prompt: prompt)
             Log.debug("obtained prompt result")
         }
     }

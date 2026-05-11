@@ -9,7 +9,7 @@ import Foundation
 import ConduitAdvanced
 
 /// Encapsulation layer for LLM session underneath
-public class RTSLLMSession {
+public final class RTSLLMSession: Sendable {
     private let _run: @Sendable (String) async throws -> String
     private let _setSystemPrompt: @Sendable (String) -> Void
     private let _messages: (@Sendable () -> [RTSMessage])  // TODO: convert Message into non-Conduit specific before exposing it

@@ -46,7 +46,7 @@ class MathViewModel {
             let session = flow.session(gateway: gateway, tools: tools)
             
             let agent = RTSAgent(
-                llm: session,
+                llmSession: session,
                 systemMessage: "You are a Math assistant. " +
                 "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +
                 "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. " +
@@ -55,13 +55,14 @@ class MathViewModel {
                 "You will calculate simple math problem asked by user."
             )
             
-            let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in
-                (try? await agent.run(prompt)) ?? "No response"
-            }
+//            let mainFunction = RTSSimpleFunction(name: "main", prompt: prompt) { prompt in
+//                (try? await agent.run(prompt: prompt)) ?? "No response"
+//            }
             
             Log.debug("starting prompt, waiting for response...")
             
-            self?.promptResult = try? await mainFunction.invokeForStringResponse()
+//            self?.promptResult = try? await mainFunction.invokeForStringResponse()
+            self?.promptResult = try? await flow.run(agent: agent, prompt: prompt)
             Log.debug("obtained prompt result")
         }
     }

@@ -8,19 +8,16 @@
 import Foundation
 
 /// RTSNode protocol describes Node objects that have collected all its input and waiting to be executed via invoke
-public protocol RTSNode: Encodable, Sendable {
+public protocol RTSNode: Sendable {
     var id: UUID { get }
+    var inputs: RTSInput { get set }
     func name() -> String
     /// execution function to be run by invoker operator
     func invoke() async throws -> RTSOutput
 }
 
-public protocol RTSAgentNode: RTSNode {
-    // TODO: reassess the need to have RTSAgentNode and RTSFunctionNode as protocol over concrete class
-}
-
 public protocol RTSFunctionNode: RTSNode {
-    var inputs: RTSInput { get set }
+//    var inputs: RTSInput { get set }
     var callableRoutine: RTSClosure { get }
 }
 
