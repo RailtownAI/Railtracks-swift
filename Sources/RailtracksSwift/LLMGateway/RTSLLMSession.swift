@@ -6,22 +6,39 @@
 //
 
 import Foundation
+import Combine
 import ConduitAdvanced
+
+protocol MessagePublisher {
+    var messagePublisher: AnyPublisher<[RTSMessage], Never> { get }
+}
 
 /// Encapsulation layer for LLM session underneath
 public final class RTSLLMSession: Sendable {
     private let _run: @Sendable (String, UUID?) async throws -> String
     private let _setSystemPrompt: @Sendable (String, UUID?) -> Void
     private let _messages: (@Sendable () -> [RTSMessage])
+    nonisolated(unsafe) let messageSubject: PassthroughSubject<[RTSMessage], Never>
 
+    /// - Parameter run: Sends a prompt to the underlying LLM. The optional `UUID` is a `runID`
+    ///   that stamps all messages produced during this call so they can be traced back to the
+    ///   node invocation that triggered it.
+    /// - Parameter setSystemPrompt: Applies a system prompt to the underlying chat session.
+    ///   The optional `UUID` is a `runID` used to stamp the resulting system message, keeping it
+    ///   associated with the same node invocation as the subsequent `run` call.
+    /// - Parameter message: Closure that maps the underlying provider's raw messages to
+    ///   `[RTSMessage]`, injecting `runID` associations at read time. Called on every `messages()`
+    ///   invocation so the result always reflects current session state and the latest runID map.
     init(
         run: @escaping @Sendable (String, UUID?) async throws -> String,
         setSystemPrompt: @escaping @Sendable (String, UUID?) -> Void,
-        message: @escaping @Sendable () -> [RTSMessage]
+        message: @escaping @Sendable () -> [RTSMessage],
+        messageSubject: PassthroughSubject<[RTSMessage], Never>
     ) {
         self._run = run
         self._setSystemPrompt = setSystemPrompt
         self._messages = message
+        self.messageSubject = messageSubject
     }
 
     public func run(_ prompt: String) async throws -> String {
@@ -68,24 +85,14 @@ public final class RTSLLMSession: Sendable {
     }
 }
 
-// MARK: - runIDMap
-
-private final class runIDMap: @unchecked Sendable {
-    private var storage: [UUID: UUID] = [:]
-    private let lock = NSLock()
-
-    func set(_ runID: UUID, for messageId: UUID) {
-        lock.withLock { storage[messageId] = runID }
-    }
-
-    subscript(_ messageId: UUID) -> UUID? {
-        lock.withLock { storage[messageId] }
+extension RTSLLMSession: MessagePublisher {
+    var messagePublisher: AnyPublisher<[RTSMessage], Never> {
+        return messageSubject.eraseToAnyPublisher()
     }
 }
 
-//
-// MARK: static Builder
-//
+// MARK: - static Builder
+
 extension RTSLLMSession {
     static func build<P: AIProvider & TextGenerator>(
         provider: P,
@@ -102,8 +109,13 @@ extension RTSLLMSession {
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)
         }
         let runIDMap = runIDMap()
+        let relay = SendablePassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
             run: { prompt, runID in
+                // Capturing ids before send to filter out messages that doesn't belong to latest prompt
+                // only works if session is never ran concurrently.  Given each agent own its own session,
+                // and there's no intention to have same agent instance used in parallel pipeline
+                // this design is safe for now.
                 let beforeIds = Set(chatSession.messages.map { $0.id })
                 let response = try await chatSession.send(prompt)
                 if let runID {
@@ -111,6 +123,8 @@ extension RTSLLMSession {
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
+                    let rtsMessages = newMessages.map { $0.toRTSMessage(runID: runIDMap[$0.id]) }
+                    relay.send(rtsMessages)
                     log.trace("💎 [\(agentName)] run(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }
                 return response
@@ -123,10 +137,31 @@ extension RTSLLMSession {
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
+                    let rtsMessages = newMessages.map { $0.toRTSMessage(runID: runIDMap[$0.id]) }
+                    relay.send(rtsMessages)
                     log.trace("💎 [\(agentName)] setSystemPrompt(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }
             },
-            message: { chatSession.messages.map { $0.toRTSMessage(runID: runIDMap[$0.id]) } }
+            message: {
+                chatSession.messages.map { $0.toRTSMessage(runID: runIDMap[$0.id]) }
+            },
+            messageSubject: relay.subject
         )
+    }
+}
+
+// MARK: - runIDMap
+
+private final class runIDMap: @unchecked Sendable {
+    /// [messageID: runID]
+    private var storage: [UUID: UUID] = [:]
+    private let lock = NSLock()
+
+    func set(_ runID: UUID, for messageID: UUID) {
+        lock.withLock { storage[messageID] = runID }
+    }
+
+    subscript(_ messageID: UUID) -> UUID? {
+        lock.withLock { storage[messageID] }
     }
 }

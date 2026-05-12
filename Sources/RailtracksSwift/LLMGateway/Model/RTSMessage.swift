@@ -337,7 +337,7 @@ private extension GeneratedContent {
     }
 }
 
-private extension RTSGeneratedContent {
+extension RTSGeneratedContent {
     init(kind: Kind) {
         self.kind = kind
     }

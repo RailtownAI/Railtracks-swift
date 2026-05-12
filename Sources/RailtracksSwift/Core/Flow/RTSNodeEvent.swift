@@ -16,6 +16,7 @@ struct RTSNodeEvent {
     var output: RTSOutput?
     var error: String?
     var runID: UUID?
+    var messages: [RTSMessage] = []
 
     init(
         nodeID: UUID,
@@ -24,7 +25,8 @@ struct RTSNodeEvent {
         input: RTSInput? = nil,
         output: RTSOutput? = nil,
         error: String? = nil,
-        runID: UUID? = nil
+        runID: UUID? = nil,
+        messages: [RTSMessage] = []
     ) {
         self.id = nodeID
         self.name = name
@@ -33,5 +35,6 @@ struct RTSNodeEvent {
         self.output = output
         self.error = error
         self.runID = runID
+        self.messages = messages
     }
 }
