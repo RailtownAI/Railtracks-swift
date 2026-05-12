@@ -25,16 +25,32 @@ public extension RTSAgentNode {
     }
     
     public func name() -> String { agentName }
+
     public func invoke() async throws -> RTSOutput {
+        try await invoke(runID: nil)
+    }
+
+    func invoke(runID: UUID) async throws -> RTSOutput {
+        try await invoke(runID: Optional(runID))
+    }
+
+    private func invoke(runID: UUID?) async throws -> RTSOutput {
         guard case let .string(prompt) = inputs[inputKeyPrompt] else {
             throw RTSError.missingInput("Agent \(agentName) missing prompt")
         }
         if case let .string(systemMessage) = inputs[inputKeySystemMessage] {
-            llmSession.setSystemPrompt(systemMessage)
+            if let runID {
+                llmSession.setSystemPrompt(systemMessage, runID: runID)
+            } else {
+                llmSession.setSystemPrompt(systemMessage)
+            }
         }
-        
         do {
-            let result = try await llmSession.run(prompt)
+            let result = if let runID {
+                try await llmSession.run(prompt, runID: runID)
+            } else {
+                try await llmSession.run(prompt)
+            }
             return [outputKeyResult: .string(result)]
         } catch {
             log.debug("agent(\(id)) failed at running prompt: \(prompt) | \(error)")

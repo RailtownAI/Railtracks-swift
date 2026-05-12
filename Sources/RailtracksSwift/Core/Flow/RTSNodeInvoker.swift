@@ -41,19 +41,36 @@ public class RTSNodeInvoker: @unchecked Sendable {
             )
         )
         
+        let runID = UUID()
         var mutableNode = node
         mutableNode.inputs = input
-        let output = try await mutableNode.invoke()
-        
+
+        let output: RTSOutput
+        var invokeError: Error?
+        do {
+            if let agentNode = mutableNode as? any RTSAgentNode {
+                output = try await agentNode.invoke(runID: runID)
+            } else {
+                output = try await mutableNode.invoke()
+            }
+        } catch {
+            invokeError = error
+            output = [:]
+        }
+
         let finishStamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
         nodeInvokeEventSubject.send(
             RTSNodeEvent(
                 nodeID: node.id,
                 name: node.name(),
                 stamp: finishStamp,
-                output: output
+                input: input,
+                output: invokeError == nil ? output : nil,
+                error: invokeError.map { "\($0)" },
+                runID: runID
             )
         )
+        if let invokeError { throw invokeError }
         return output
     }
 }

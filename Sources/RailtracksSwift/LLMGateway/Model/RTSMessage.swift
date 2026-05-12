@@ -16,6 +16,7 @@ public struct RTSMessage: Sendable, Codable {
     public let content: Content
     public let timestamp: Date
     public let metadata: RTSMessageMetadata?
+    public let runID: UUID?
 }
 
 // MARK: - RTSMessage.Role
@@ -230,13 +231,14 @@ public struct RTSGeneratedContent: Sendable, Codable {
 // MARK: - Conduit → RTS Mappings
 
 public extension Message {
-    var toRTSMessage: RTSMessage {
+    func toRTSMessage(runID: UUID? = nil) -> RTSMessage {
         RTSMessage(
             id: id,
             role: role.toRTSRole,
             content: content.toRTSContent,
             timestamp: timestamp,
-            metadata: metadata?.toRTSMetadata
+            metadata: metadata?.toRTSMetadata,
+            runID: runID
         )
     }
 }
