@@ -9,21 +9,29 @@ import Foundation
 import Combine
 
 actor RTSFlowGraphCollector {
+    private enum CollectionState {
+        case collecting
+        case nodeComplete
+        case edgeComplete
+        case finished
+    }
+    
     let stampFactory: RTSStampFactory
     var flowID: UUID
     var flowName: String
     var sessionID: UUID?
     var startTime: Date?
     var endTime: Date?
-    
+
     // TODO: assuming single flow -> single run for now;
     // TODO: if multiple run within a flow is allowed, will need to the followings in dictionary with run id as key
     var steps: [RTSStamp] = []  // TODO: populate steps properly and generate JSON from here instead of grabbing from fields in nodeEvents
     var nodeEvents: [RTSNodeEvent] = []
     var edgeEvents: [RTSEdgeEvent] = []
-    
+
     internal var rootNodeID: UUID?
     private var messageBuffer: [UUID: [RTSMessage]] = [:]
+    private var collectionState: CollectionState = .collecting
     
     nonisolated(unsafe) var cancellables: Set<AnyCancellable> = []
     
@@ -54,6 +62,25 @@ actor RTSFlowGraphCollector {
                 }
             }
             .store(in: &cancellables)
+        
+        log.debug("🎁 setup create edge event collector")
+        nodeEventPublisher.edgeCreateEventPublisher
+            .sink { edgeEvent in
+                Task { [weak self] in
+                    await self?.processEdgeEvent(edgeEvent)
+                }
+            }
+            .store(in: &cancellables)
+        
+        log.debug("🎁 setup finish edge event collector")
+        nodeEventPublisher.edgeFinishEventPublisher
+            .sink { edgeEvent in
+                Task { [weak self] in
+                    await self?.processEdgeEvent(edgeEvent)
+                }
+            }
+            .store(in: &cancellables)
+        
     }
     
     deinit {
@@ -93,26 +120,66 @@ actor RTSFlowGraphCollector {
     
     private func processNodeEvent(_ nodeEvent: RTSNodeEvent) async {
         log.trace("🎁 Appending nodeEvent: \(nodeEvent.name) - \(nodeEvent.stamp.event.identifier) to collector")
+        
         var nodeEvent = nodeEvent
         if let runID = nodeEvent.runID,
            let bufferedMessages = messageBuffer.removeValue(forKey: runID) {
             log.trace("🎁 appending \(bufferedMessages.count) messages to nodeEvent: \(nodeEvent.name)")
             nodeEvent.messages = bufferedMessages
         }
-        var isFlowComepleted: Bool = false
+        
+        var isCollectionFinished: Bool = false
         switch nodeEvent.stamp.event {
         case .startCreate:
             rootNodeID = nodeEvent.id
         case .finishExecution where nodeEvent.id == rootNodeID:
-            isFlowComepleted = true
+            switch collectionState {
+            case .collecting:
+                collectionState = .nodeComplete
+            case .edgeComplete:
+                collectionState = .finished
+                isCollectionFinished = true
+            case .nodeComplete, .finished:
+                log.debug("☠️🎁 should not be processing node event if collector state is finished")
+            }
         default:
             break
         }
         nodeEvents.append(nodeEvent)
-        if isFlowComepleted {
-            await generateJSONFile()
-            cancellables.removeAll()
+        
+        if isCollectionFinished {
+            await finishCollection()
         }
+    }
+    
+    private func processEdgeEvent(_ edgeEvent: RTSEdgeEvent) async {
+        log.trace("🎁 Appending edgeEvent: \(edgeEvent.sourceName ?? "START")->\(edgeEvent.targetName) - \(edgeEvent.stamp.event.identifier) to collector")
+        
+        var isCollectionFinished: Bool = false
+        switch edgeEvent.stamp.event {
+        case .finishExecution where edgeEvent.sourceNodeID == nil:
+            switch collectionState {
+            case .collecting:
+                collectionState = .edgeComplete
+            case .nodeComplete:
+                collectionState = .finished
+                isCollectionFinished = true
+            case .edgeComplete, .finished:
+                log.debug("☠️🎁 should not be processing edge event if collector state is finished")
+            }
+        default:
+            break
+        }
+        edgeEvents.append(edgeEvent)
+        
+        if isCollectionFinished {
+            await finishCollection()
+        }
+    }
+
+    private func finishCollection() async {
+        await generateJSONFile()
+        cancellables.removeAll()
     }
     
     private func generateJSONFile() async {
