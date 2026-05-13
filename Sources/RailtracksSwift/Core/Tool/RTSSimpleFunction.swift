@@ -13,7 +13,7 @@ public struct RTSSimpleFunction: RTSFunctionNode {
         case name
     }
     
-    let id = UUID()
+    public let id = UUID()
     let _name: String
     public var inputs: RTSInput
     public let callableRoutine: RTSClosure

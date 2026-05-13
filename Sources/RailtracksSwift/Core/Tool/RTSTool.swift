@@ -12,8 +12,6 @@ enum RTSToolNodeCodingKeys: String, CodingKey {
 }
 
 public protocol RTSToolNode: RTSFunctionNode {
-    typealias RTSInput = [String: RTSValue]
-    
     var id: UUID { get }
     var toolName: String { get }
     var inputs: RTSInput { get set }
