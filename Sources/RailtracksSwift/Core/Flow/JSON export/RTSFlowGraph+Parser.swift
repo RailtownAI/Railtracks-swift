@@ -37,12 +37,14 @@ extension RTSFlowGraph {
         let startTime = allStamps.first?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
         let endTime = allStamps.last?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
 
+        let edges = makeEdges(from: edgeEvents)
+
         let run = RTSFlowRun(
             name: rootFinish?.name ?? flowName,
             runID: rootFinish?.runID?.uuidString ?? "N/A", // TODO: runID shouldn't be empty
             nodes: nodes,
             status: .completed, // TODO: reflect actual status once error propagation is implemented
-            edges: [],          // TODO: RTSEdgeEvent is currently empty — edges not yet populated
+            edges: edges,
             steps: steps,
             startTime: startTime,
             endTime: endTime
@@ -90,6 +92,55 @@ extension RTSFlowGraph {
         )
     }
 
+    // MARK: - Edge
+
+    private static func makeEdges(from edgeEvents: [RTSEdgeEvent]) -> [RTSFlowGraphEdge] {
+        let createsByEdgeID: [UUID: RTSEdgeEvent] = edgeEvents
+            .filter { if case .finishExecution = $0.stamp.event { false } else { true } }
+            .reduce(into: [:]) { $0[$1.id] = $1 }
+
+        let finishEvents = edgeEvents.filter {
+            if case .finishExecution = $0.stamp.event { true } else { false }
+        }
+
+        return finishEvents.map { finish in
+            makeEdge(finish: finish, create: createsByEdgeID[finish.id])
+        }
+    }
+
+    private static func makeEdge(finish: RTSEdgeEvent, create: RTSEdgeEvent?) -> RTSFlowGraphEdge {
+        let parent: RTSFlowGraphEdgeCreation? = create.map {
+            RTSFlowGraphEdgeCreation(
+                source: $0.sourceNodeID?.uuidString,
+                target: $0.targetNodeID.uuidString,
+                identifier: $0.id.uuidString,
+                stamp: $0.stamp.toFlowGraphStamp(),
+                details: makeEdgeDetails(from: $0, status: .open)
+            )
+        }
+        return RTSFlowGraphEdge(
+            source: finish.sourceNodeID?.uuidString,
+            target: finish.targetNodeID.uuidString,
+            identifier: finish.id.uuidString,
+            stamp: finish.stamp.toFlowGraphStamp(),
+            details: makeEdgeDetails(from: finish, status: finish.error == nil ? .completed : .failed),
+            parent: parent
+        )
+    }
+
+    private static func makeEdgeDetails(from event: RTSEdgeEvent, status: RTSFlowStatus) -> RTSFlowGraphEdgeDetails {
+        let inputKwargs: [String: RTSGeneratedContent] = (event.input ?? [:]).mapValues { $0.toGeneratedContent() }
+        let output: RTSGeneratedContent? = event.output.map { output in
+            RTSGeneratedContent(kind: .structure(output.mapValues { $0.toGeneratedContent() }))
+        }
+        return RTSFlowGraphEdgeDetails(
+            inputArgs: [],
+            inputKwargs: inputKwargs,
+            status: status,
+            output: output
+        )
+    }
+
     // Heuristic: .startCreate = root agent, .create = tool (only tools use createdBy in current design).
     // TODO: add explicit nodeType to RTSNodeEvent when sub-agents are introduced
     private static func inferNodeType(from event: RTSNodeEvent) -> RTSFlowNodeType {
@@ -127,6 +178,19 @@ extension RTSFlowGraph {
 private extension RTSStamp {
     func toFlowGraphStamp() -> RTSFlowGraphStamp {
         RTSFlowGraphStamp(step: stepIndex, time: timestamp.timeIntervalSince1970, identifier: event.identifier)
+    }
+}
+
+private extension RTSValue {
+    func toGeneratedContent() -> RTSGeneratedContent {
+        switch self {
+        case .null:               return RTSGeneratedContent(kind: .null)
+        case .bool(let v):        return RTSGeneratedContent(kind: .bool(v))
+        case .number(let v):      return RTSGeneratedContent(kind: .number(v))
+        case .string(let v):      return RTSGeneratedContent(kind: .string(v))
+        case .array(let elements): return RTSGeneratedContent(kind: .array(elements.map { $0.toGeneratedContent() }))
+        case .object(let props):  return RTSGeneratedContent(kind: .structure(props.mapValues { $0.toGeneratedContent() }))
+        }
     }
 }
 

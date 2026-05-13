@@ -198,7 +198,7 @@ public struct RTSFlowGraphEdgeCreation: Codable {
 
 public struct RTSFlowGraphEdgeDetails: Codable {
     public let inputArgs: [String]
-    public let inputKwargs: [String: String]
+    public let inputKwargs: [String: RTSGeneratedContent]
     public let status: RTSFlowStatus
     public let output: RTSGeneratedContent?
 
