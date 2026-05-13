@@ -57,42 +57,12 @@ public extension RTSAgentNode {
             throw error
         }
     }
-    
-//    public func run(
-////        llmSession: RTSLLMSession,
-//        prompt: String,
-//        systemMessage: String? = nil
-//    ) async throws -> String {
-//        var copy = self
-////        copy.llmSession = llmSession
-//        var input: RTSInput = inputs
-//        input[inputKeyPrompt] = .string(prompt)
-//        if let systemMessage = systemMessage {
-//            input[inputKeySystemMessage] = .string(systemMessage)
-//        }
-//        copy.inputs = input
-//        let output = try await copy.invoke()
-//        if case let .string(result) = output[outputKeyResult] {
-//            return result
-//        } else {
-//            throw RTSError.missingOutput("Agent \(agentName) missing result")
-//        }
-////        if let systemMessage = systemMessage {
-////            llmSession.setSystemPrompt(systemMessage)
-////        }
-////        
-////        do {
-////            return try await llmSession.run(prompt)
-////        } catch {
-////            log.debug("agent(\(id)) failed at running prompt: \(prompt) | \(error)")
-////            throw error
-////        }
-//    }
 }
 
 public struct RTSAgent: RTSAgentNode {
     public let id: UUID = UUID()
     public let agentName: String
+    // TODO: session is exposed, app side user can supply same session to multiple agent and leads to corrupt context.
     public let llmSession: RTSLLMSession
     public var inputs: RTSInput = [:]
     public var outputs: RTSOutput = [:]
@@ -109,34 +79,3 @@ public struct RTSAgent: RTSAgentNode {
         }
     }
 }
-
-///// Representation of Agent node in Railtracks pipeline
-//public class RTSAgent: @unchecked Sendable {
-//    // TODO: when RTAgent comply to RTSNode protocol Sendable will be inherited, remove Sendable here then
-//    public let id = UUID()
-//    let _name: String
-////    let llm: RTSLLMSession
-//    let systemMessage: String?
-//
-//    public init(
-////        llm: RTSLLMSession,
-//        name: String,
-//        systemMessage: String? = nil
-//    ) {
-////        self.llm = llm
-//        self._name = name
-//        self.systemMessage = systemMessage
-//    }
-//    
-////    public func run(_ prompt: String) async throws -> String? {
-////        if let systemMessage = systemMessage {
-////            llm.setSystemPrompt(systemMessage)
-////        }
-////        do {
-////            return try await llm.run(prompt)
-////        } catch {
-////            log.debug("agent(\(id)) failed at running prompt: \(prompt) | \(error)")
-////            throw error
-////        }
-////    }
-//}

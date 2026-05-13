@@ -24,6 +24,7 @@ actor RTSFlowGraphCollector {
     var edgeEvents: [RTSEdgeEvent] = []
     
     internal var rootNodeID: UUID?
+    private var messageBuffer: [UUID: [RTSMessage]] = [:]
     
     nonisolated(unsafe) var cancellables: Set<AnyCancellable> = []
     
@@ -63,9 +64,6 @@ actor RTSFlowGraphCollector {
     nonisolated func subscribeMessage(_ publisher: MessagePublisher) {
         publisher.messagePublisher
             .sink { messages in
-                // TODO: append message to event based on runID
-                // TODO: what to do if nothing matches??... log/throw error?
-
                 Task { [weak self] in
                     await self?.processMessages(messages)
                 }
@@ -86,8 +84,7 @@ actor RTSFlowGraphCollector {
                     nodeEvents[index].messages.append(message)
                     log.trace("🎁 Appending message: \(message.id) to node event: \(nodeEvents[index].stamp.event.identifier)")
                 } else {
-                    log.warning("⚠️🎁 Could not find node event for message: \(message.id) - runID: \(runID)")
-                    log.trace("⚠️🎁 message payload: \(message)")
+                    messageBuffer[runID, default: []].append(message)
                 }
             } else {
                 log.trace("🎁 Message: \(message.id) dropped due to no runID - payload: \(message)")
@@ -95,9 +92,14 @@ actor RTSFlowGraphCollector {
         }
     }
     
-    private func processNodeEvent(_ nodeEvent: RTSNodeEvent) {
-        // TODO: find the associated Message and attach it to event, might be able to be completely dealt with in subscribeMessage
+    private func processNodeEvent(_ nodeEvent: RTSNodeEvent) async {
         log.trace("🎁 Appending nodeEvent: \(nodeEvent.name) - \(nodeEvent.stamp.event.identifier) to collector")
+        var nodeEvent = nodeEvent
+        if let runID = nodeEvent.runID,
+           let bufferedMessages = messageBuffer.removeValue(forKey: runID) {
+            log.trace("🎁 appending \(bufferedMessages.count) messages to nodeEvent: \(nodeEvent.name)")
+            nodeEvent.messages = bufferedMessages
+        }
         var isFlowComepleted: Bool = false
         switch nodeEvent.stamp.event {
         case .startCreate:
@@ -109,26 +111,52 @@ actor RTSFlowGraphCollector {
         }
         nodeEvents.append(nodeEvent)
         if isFlowComepleted {
-            generateJSONFile()
+            await generateJSONFile()
             cancellables.removeAll()
         }
     }
     
-    private func generateJSONFile() {
-        log.debug("generating JSON file for flow: \(flowName)(\(flowID))")
-        log.debug("total nodes: \(nodeEvents.count)")
-        log.debug("total edges: \(edgeEvents.count)")
-        log.debug("total steps: \(steps.count)")
+    private func generateJSONFile() async {
+        if !messageBuffer.isEmpty {
+            for message in messageBuffer.values.flatMap({ $0 }) {
+                log.warning("⚠️🎁 Could not find node event for message: \(message.id) - runID: \(message.runID?.uuidString ?? "n/a")")
+                log.trace("⚠️🎁 message payload: \(message)")
+            }
+        }
+        log.debug("🎁 generating JSON file for flow: \(flowName)(\(flowID))")
+        log.debug("🎁 total nodes: \(nodeEvents.count)")
+        log.debug("🎁 total edges: \(edgeEvents.count)")
+        log.debug("🎁 total steps: \(steps.count)")
         
-//        let graph = RTSFlowGraph.make(
-//            flowName: flowName,
-//            flowID: flowID,
-//            nodeEvents: nodeEvents,
-//            edgeEvents: edgeEvents,
-//            rootNodeID: rootNodeID
-//        )
+        let graph = RTSFlowGraph.make(
+            flowName: flowName,
+            flowID: flowID,
+            nodeEvents: nodeEvents,
+            edgeEvents: edgeEvents,
+            rootNodeID: rootNodeID
+        )
         
-        // TODO: determine JSON file name
-        // TODO: create FlowGraph instance and serialize it
+        let encoder = JSONEncoder()
+        #if DEBUG
+        // petty format cost extra storage and will be an issue when JSON file size is of concern
+        encoder.outputFormatting = .prettyPrinted
+        #endif
+        let filename = generateJSONFileName()
+        do {
+            let json = try encoder.encode(graph)
+            log.trace("🎁 Messages: \(String(data: json, encoding: .utf8) ?? "<invalid JSON data>")")
+            let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(filename)
+                .appendingPathExtension("json")
+            try json.write(to: url)
+        } catch {
+            // TODO: throw error upward to app level instead of only capture in log here
+            log.debug("☠️🎁 unable to encode flow graph to json and write to file: \(filename).json")
+        }
+    }
+    
+    public func generateJSONFileName() -> String {
+        // TODO: implement json file name logic, assess permission of public for app-side injection
+        return "output_json_log"
     }
 }

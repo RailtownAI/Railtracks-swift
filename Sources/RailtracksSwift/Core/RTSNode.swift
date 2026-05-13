@@ -11,13 +11,13 @@ import Foundation
 public protocol RTSNode: Sendable {
     var id: UUID { get }
     var inputs: RTSInput { get set }
+    
     func name() -> String
     /// execution function to be run by invoker operator
     func invoke() async throws -> RTSOutput
 }
 
 public protocol RTSFunctionNode: RTSNode {
-//    var inputs: RTSInput { get set }
     var callableRoutine: RTSClosure { get }
 }
 

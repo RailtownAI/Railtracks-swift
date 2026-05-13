@@ -8,40 +8,6 @@
 import Foundation
 
 /// Representation of Agent node in Railtracks pipeline
-/// ```
-/// RTFlow
-///   │
-///   ├── owns ──► RTSNodeInvoker
-///   │                │
-///   │                ├── publishes ──► RTSNodeEvent
-///   │                │                      │
-///   │                │              RTSFlowGraphCollector (actor)
-///   │                │              subscribes & records
-///   │                │
-///   │                └── injected into
-///   │                        │
-///   │               ┌────────┴────────┐
-///   │               │                 │
-///   │           RTAgent          RTSConduitToolBridge
-///   │               │                 │
-///   │           invokes           invokes
-///   │               │                 │
-///   │        RTSLLMSession        RTSToolNode
-///   │               │
-///   │           messages()
-///   │               │
-///   │           RTSMessage[]
-///   │           (contains tool_call_id
-///   │            linking back to
-///   │            RTSConduitToolBridge
-///   │            invocation)
-///   │
-///   └── owns ──► RTSFlowGraphCollector
-///                      │
-///                      └── exportGraph() ──► RTSExecutionGraph (Codable)
-///                                                   │
-///                                                   └── writes ──► JSON file
-/// ```
 public class RTSFlow {
     let id: UUID = UUID()
     let title: String

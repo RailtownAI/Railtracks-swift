@@ -20,15 +20,17 @@ public final class RTSLLMSession: Sendable {
     private let _messages: (@Sendable () -> [RTSMessage])
     nonisolated(unsafe) let messageSubject: PassthroughSubject<[RTSMessage], Never>
 
-    /// - Parameter run: Sends a prompt to the underlying LLM. The optional `UUID` is a `runID`
-    ///   that stamps all messages produced during this call so they can be traced back to the
-    ///   node invocation that triggered it.
+    /// - Parameter run: Sends a prompt to the underlying LLM and returns the response text.
+    ///   The optional `UUID` is a `runID` that stamps all new messages produced during this call
+    ///   so they can be traced back to the node invocation that triggered it.
     /// - Parameter setSystemPrompt: Applies a system prompt to the underlying chat session.
     ///   The optional `UUID` is a `runID` used to stamp the resulting system message, keeping it
     ///   associated with the same node invocation as the subsequent `run` call.
-    /// - Parameter message: Closure that maps the underlying provider's raw messages to
-    ///   `[RTSMessage]`, injecting `runID` associations at read time. Called on every `messages()`
-    ///   invocation so the result always reflects current session state and the latest runID map.
+    /// - Parameter message: Returns all messages in the session mapped to `RTSMessage`, with
+    ///   `runID` associations injected at read time. Always reflects current session state.
+    /// - Parameter messageSubject: Subject through which new messages are published after each
+    ///   `run` or `setSystemPrompt` call. Subscribers (e.g. `RTSFlowGraphCollector`) use this
+    ///   to receive messages stamped with their `runID` without polling `messages()`.
     init(
         run: @escaping @Sendable (String, UUID?) async throws -> String,
         setSystemPrompt: @escaping @Sendable (String, UUID?) -> Void,
@@ -53,7 +55,10 @@ public final class RTSLLMSession: Sendable {
         let response = try await _run(prompt, runID)
         do {
             let encoder = JSONEncoder()
+            #if DEBUG
+            // petty format cost extra storage and will be an issue when JSON file size is of concern
             encoder.outputFormatting = .prettyPrinted
+            #endif
             let json = try encoder.encode(self.messages())
             log.trace("💎 Messages: \(String(data: json, encoding: .utf8) ?? "<invalid JSON data>")")
             let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
