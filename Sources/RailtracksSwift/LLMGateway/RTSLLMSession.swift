@@ -113,7 +113,7 @@ extension RTSLLMSession {
             chatSession.config = chatSession.config.tools(conduitTools)
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)
         }
-        let runIDMap = runIDMap()
+        let runIDMap = RunIDMap()
         let relay = SendablePassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
             run: { prompt, runID in
@@ -157,7 +157,7 @@ extension RTSLLMSession {
 
 // MARK: - runIDMap
 
-private final class runIDMap: @unchecked Sendable {
+private final class RunIDMap: @unchecked Sendable {
     /// [messageID: runID]
     private var storage: [UUID: UUID] = [:]
     private let lock = NSLock()

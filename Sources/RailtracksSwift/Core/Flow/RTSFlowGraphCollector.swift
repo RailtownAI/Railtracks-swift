@@ -18,8 +18,7 @@ actor RTSFlowGraphCollector {
     
     // TODO: assuming single flow -> single run for now;
     // TODO: if multiple run within a flow is allowed, will need to the followings in dictionary with run id as key
-    var stepCount: Int = 0
-    var steps: [RTSStamp] = []
+    var steps: [RTSStamp] = []  // TODO: populate steps properly and generate JSON from here instead of grabbing from fields in nodeEvents
     var nodeEvents: [RTSNodeEvent] = []
     var edgeEvents: [RTSEdgeEvent] = []
     
@@ -155,7 +154,7 @@ actor RTSFlowGraphCollector {
         }
     }
     
-    public func generateJSONFileName() -> String {
+    func generateJSONFileName() -> String {
         // TODO: implement json file name logic, assess permission of public for app-side injection
         return "output_json_log"
     }

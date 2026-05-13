@@ -16,7 +16,7 @@ public protocol RTSAgentNode: RTSNode {
 }
 
 public extension RTSAgentNode {
-    var inputKeySystemMessage: String { "stemMessage" }
+    var inputKeySystemMessage: String { "systemMessage" }
     var inputKeyPrompt: String { "prompt" }
     var outputKeyResult: String { "result" }
     

@@ -41,7 +41,7 @@ public class RTSFlow {
         return await self.entryPoint(prompt)
     }
     
-    /// convinient function to use agent as a start point and run a prompt
+    /// convenient function to use agent as a start point and run a prompt
     public func run(
         agent: RTSAgentNode,
         prompt: String,
