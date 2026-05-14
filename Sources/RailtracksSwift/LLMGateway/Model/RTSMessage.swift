@@ -176,58 +176,6 @@ public struct RTSToolCall: Sendable, Codable {
     public let arguments: RTSGeneratedContent
 }
 
-// MARK: - RTSGeneratedContent
-
-public struct RTSGeneratedContent: Sendable, Codable {
-    public enum Kind: Sendable {
-        case null
-        case bool(Bool)
-        case number(Double)
-        case string(String)
-        case array([RTSGeneratedContent])
-        case structure([String: RTSGeneratedContent])
-    }
-    public let kind: Kind
-
-    private enum CodingKeys: String, CodingKey { case type, value, elements, properties }
-    private enum KindType: String, Codable { case null, bool, number, string, array, structure }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(KindType.self, forKey: .type) {
-        case .null:      kind = .null
-        case .bool:      kind = .bool(try container.decode(Bool.self, forKey: .value))
-        case .number:    kind = .number(try container.decode(Double.self, forKey: .value))
-        case .string:    kind = .string(try container.decode(String.self, forKey: .value))
-        case .array:     kind = .array(try container.decode([RTSGeneratedContent].self, forKey: .elements))
-        case .structure: kind = .structure(try container.decode([String: RTSGeneratedContent].self, forKey: .properties))
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch kind {
-        case .null:
-            try container.encode(KindType.null, forKey: .type)
-        case .bool(let v):
-            try container.encode(KindType.bool, forKey: .type)
-            try container.encode(v, forKey: .value)
-        case .number(let v):
-            try container.encode(KindType.number, forKey: .type)
-            try container.encode(v, forKey: .value)
-        case .string(let v):
-            try container.encode(KindType.string, forKey: .type)
-            try container.encode(v, forKey: .value)
-        case .array(let elements):
-            try container.encode(KindType.array, forKey: .type)
-            try container.encode(elements, forKey: .elements)
-        case .structure(let props):
-            try container.encode(KindType.structure, forKey: .type)
-            try container.encode(props, forKey: .properties)
-        }
-    }
-}
-
 // MARK: - Conduit → RTS Mappings
 
 public extension Message {

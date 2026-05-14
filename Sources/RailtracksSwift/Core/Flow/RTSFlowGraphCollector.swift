@@ -17,7 +17,7 @@ actor RTSFlowGraphCollector {
     }
     
     let stampFactory: RTSStampFactory
-    var flowID: UUID
+    var sessionID: UUID
     var flowName: String
     var startTime: Date?
     var endTime: Date?
@@ -31,18 +31,21 @@ actor RTSFlowGraphCollector {
     internal var rootNodeID: UUID?
     private var messageBuffer: [UUID: [RTSMessage]] = [:]
     private var collectionState: CollectionState = .collecting
-    
+
+    private let completionStream: AsyncStream<Void>
+    private let streamContinuation: AsyncStream<Void>.Continuation
+
     nonisolated(unsafe) var cancellables: Set<AnyCancellable> = []
     
     init(
         stampFactory: RTSStampFactory,
-        flowID: UUID,
         flowName: String,
         nodeEventPublisher: NodeEventPublishers
     ) {
         self.stampFactory = stampFactory
-        self.flowID = flowID
+        self.sessionID = UUID()
         self.flowName = flowName
+        (self.completionStream, self.streamContinuation) = AsyncStream<Void>.makeStream()
         
         log.debug("🎁 setup create node event collector")
         nodeEventPublisher.nodeCreateEventPublisher
@@ -180,10 +183,16 @@ actor RTSFlowGraphCollector {
         }
     }
 
+    /// async signal for owner to not deallocate the collector before json generation is done
+    func awaitCompletion() async {
+        for await _ in completionStream {}
+    }
+
     private func finishCollection() async {
         endTime = Date()
         await generateJSONFile()
         cancellables.removeAll()
+        streamContinuation.finish()
     }
     
     private func generateJSONFile() async {
@@ -193,7 +202,7 @@ actor RTSFlowGraphCollector {
                 log.trace("⚠️🎁 message payload: \(message)")
             }
         }
-        log.debug("🎁 generating JSON file for flow: \(flowName)(\(flowID))")
+        log.debug("🎁 generating JSON file for flow: \(flowName) | sessionID: \(sessionID))")
         log.debug("🎁 total nodes: \(nodeEvents.count)")
         log.debug("🎁 total edges: \(edgeEvents.count)")
         log.debug("🎁 total steps: \(steps.count)")
@@ -205,7 +214,7 @@ actor RTSFlowGraphCollector {
         
         let graph = RTSFlowGraph.make(
             flowName: flowName,
-            sessionID: flowID,
+            sessionID: sessionID,
             nodeEvents: nodeEvents,
             edgeEvents: edgeEvents,
             rootNodeID: rootNodeID,

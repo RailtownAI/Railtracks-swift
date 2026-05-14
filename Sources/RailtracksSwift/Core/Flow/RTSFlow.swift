@@ -11,28 +11,14 @@ import Foundation
 public class RTSFlow {
     let id: UUID = UUID()
     let title: String
-    let entryPoint: (String) async -> String
+//    let entryPoint: (String) async -> String
     
-    let stampFactory: RTSStampFactory
-    let nodeInvoker: RTSNodeInvoker
-    let flowGraphCollector: RTSFlowGraphCollector
-    
-    public init(title: String, entryPoint: @escaping (String) async -> String) {
+    public init(
+        title: String //,
+//        entryPoint: @escaping (String) async -> String
+    ) {
         self.title = title
-        self.entryPoint = entryPoint
-        let stampFactory = RTSStampFactory()
-        self.stampFactory = stampFactory
-        self.nodeInvoker = RTSNodeInvoker(stampFactory: stampFactory)
-        self.flowGraphCollector = RTSFlowGraphCollector(
-            stampFactory: stampFactory,
-            flowID: id,
-            flowName: title,
-            nodeEventPublisher: self.nodeInvoker
-        )
-    }
-    
-    func invoke(_ prompt: String) async -> String {
-        return await self.entryPoint(prompt)
+//        self.entryPoint = entryPoint
     }
 
     public func run(
@@ -41,6 +27,13 @@ public class RTSFlow {
         gateway: RTSLLMGateway,
         systemMessage: String? = nil
     ) async throws -> String {
+        let stampFactory = RTSStampFactory()
+        let nodeInvoker = RTSNodeInvoker(stampFactory: stampFactory)
+        let flowGraphCollector = RTSFlowGraphCollector(
+            stampFactory: stampFactory,
+            flowName: title,
+            nodeEventPublisher: nodeInvoker
+        )
         await flowGraphCollector.setup()
         
         let session = gateway.session(invoker: nodeInvoker, agentNode: agent)
@@ -56,6 +49,7 @@ public class RTSFlow {
         guard case let .string(result) = output[agent.outputKeyResult] else {
             throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
         }
+        await flowGraphCollector.awaitCompletion()
         return result
     }
 }

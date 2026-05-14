@@ -39,6 +39,52 @@ public enum RTSValue: Codable, Sendable {
             )
         }
     }
+    
+    public func encode(to encoder: Encoder) throws {
+          switch self {
+          case .null:
+              var container = encoder.singleValueContainer()
+              try container.encodeNil()
+          case .bool(let v):
+              var container = encoder.singleValueContainer()
+              try container.encode(v)
+          case .number(let v):
+              var container = encoder.singleValueContainer()
+              try container.encode(v)
+          case .string(let v):
+              var container = encoder.singleValueContainer()
+              try container.encode(v)
+          case .array(let elements):
+              var container = encoder.unkeyedContainer()
+              for element in elements {
+                  try container.encode(element)
+              }
+          case .object(let dict):
+              var container = encoder.container(keyedBy: AnyCodingKey.self)
+              for (key, value) in dict {
+                  try container.encode(value, forKey: AnyCodingKey(key))
+              }
+          }
+      }
+                      
+      private struct AnyCodingKey: CodingKey {
+          let stringValue: String
+          var intValue: Int? {
+              nil
+          }
+          
+          init(_ string: String) {
+              self.stringValue = string
+          }
+          
+          init?(stringValue: String) {
+              self.stringValue = stringValue
+          }
+          
+          init?(intValue: Int) {
+              nil
+          }
+      }
 }
 
 /// Value type used for tool parameter schema
