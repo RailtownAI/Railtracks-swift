@@ -35,29 +35,42 @@ public class RTSNodeInvoker: @unchecked Sendable {
         session: RTSLLMSession,
         createdBy: (any RTSNode)? = nil
     ) async throws -> RTSOutput {
-        await publishNodeCreated(node, createdBy: createdBy)
-
-        let runID = UUID()
         var mutableNode = node
         mutableNode.inputs = input
-
-        let edgeID = createdBy == nil ? runID : UUID()
-        await publishEdgeCreated(edgeID: edgeID, from: createdBy, to: node, input: input)
-
-        let output: RTSOutput
-        var invokeError: Error?
-        do {
-            output = try await mutableNode.invoke(runID: runID, session: session)
-        } catch {
-            invokeError = error
-            output = [:]
+        return try await invokeCore(node, input: input, createdBy: createdBy) { runID in
+            try await mutableNode.invoke(runID: runID, session: session)
         }
-
-        await publishEdgeFinished(edgeID: edgeID, from: createdBy, to: node, input: input, output: output, error: invokeError)
-        await publishNodeFinished(node, runID: runID, input: input, output: output, error: invokeError)
-
-        if let invokeError { throw invokeError }
-        return output
+//        let event: RTSStamp.Event
+//        if let sourceName = createdBy?.name() {
+//            event = .create(sourceName, node.name())
+//        } else {
+//            event = .startCreate(node.name())
+//        }
+//        let creationStamp = await stampFactory.makeStamp(event: event)
+//        await publishNodeCreated(node, stamp: creationStamp, createdBy: createdBy)
+//
+//        let runID = UUID()
+//        var mutableNode = node
+//        mutableNode.inputs = input
+//
+//        let edgeID = createdBy == nil ? runID : UUID()
+//        await publishEdgeCreated(edgeID: edgeID, stamp: creationStamp, from: createdBy, to: node, input: input)
+//
+//        let output: RTSOutput
+//        var invokeError: Error?
+//        do {
+//            output = try await mutableNode.invoke(runID: runID, session: session)
+//        } catch {
+//            invokeError = error
+//            output = [:]
+//        }
+//        
+//        let completionStamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
+//        await publishEdgeFinished(edgeID: edgeID, stamp: completionStamp, from: createdBy, to: node, input: input, output: output, error: invokeError)
+//        await publishNodeFinished(node, stamp: completionStamp, runID: runID, input: input, output: output, error: invokeError)
+//
+//        if let invokeError { throw invokeError }
+//        return output
     }
 
     func invoke(
@@ -65,26 +78,48 @@ public class RTSNodeInvoker: @unchecked Sendable {
         input: RTSInput,
         createdBy: (any RTSNode)? = nil
     ) async throws -> RTSOutput {
-        await publishNodeCreated(node, createdBy: createdBy)
+        var mutableNode = node
+        mutableNode.inputs = input
+        return try await invokeCore(node, input: input, createdBy: createdBy) { _ in
+            try await mutableNode.invoke()
+        }
+    }
+
+    func invokeCore(
+        _ node: some RTSNode,
+        input: RTSInput,
+        createdBy: (any RTSNode)? = nil,
+        execute: (UUID) async throws -> RTSOutput
+    ) async throws -> RTSOutput {
+        let event: RTSStamp.Event
+        if let sourceName = createdBy?.name() {
+            event = .create(sourceName, node.name())
+        } else {
+            event = .startCreate(node.name())
+        }
+        let creationStamp = await stampFactory.makeStamp(event: event)
+        await publishNodeCreated(node, stamp: creationStamp, createdBy: createdBy)
 
         let runID = UUID()
         var mutableNode = node
         mutableNode.inputs = input
 
         let edgeID = createdBy == nil ? runID : UUID()
-        await publishEdgeCreated(edgeID: edgeID, from: createdBy, to: node, input: input)
+        await publishEdgeCreated(edgeID: edgeID, stamp: creationStamp, from: createdBy, to: node, input: input)
 
         let output: RTSOutput
         var invokeError: Error?
         do {
-            output = try await mutableNode.invoke()
+//            output = try await mutableNode.invoke()
+            output = try await execute(runID)
         } catch {
             invokeError = error
             output = [:]
         }
-
-        await publishEdgeFinished(edgeID: edgeID, from: createdBy, to: node, input: input, output: output, error: invokeError)
-        await publishNodeFinished(node, runID: runID, input: input, output: output, error: invokeError)
+        
+        let completionStamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
+        await publishEdgeFinished(edgeID: edgeID, stamp: completionStamp, from: createdBy, to: node, input: input, output: output, error: invokeError)
+        await publishNodeFinished(node, stamp: completionStamp, runID: runID, input: input, output: output, error: invokeError)
 
         if let invokeError { throw invokeError }
         return output
@@ -92,15 +127,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishNodeCreated(
         _ node: some RTSNode,
+        stamp: RTSStamp,
         createdBy: (any RTSNode)?
     ) async {
-        let event: RTSStamp.Event
-        if let sourceName = createdBy?.name() {
-            event = .create(sourceName, node.name())
-        } else {
-            event = .startCreate(node.name())
-        }
-        let stamp = await stampFactory.makeStamp(event: event)
         nodeCreateEventSubject.send(
             RTSNodeEvent(
                 nodeID: node.id,
@@ -112,12 +141,12 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishNodeFinished(
         _ node: some RTSNode,
+        stamp: RTSStamp,
         runID: UUID,
         input: RTSInput,
         output: RTSOutput,
         error: Error?
     ) async {
-        let stamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
         nodeInvokeEventSubject.send(
             RTSNodeEvent(
                 nodeID: node.id,
@@ -133,17 +162,11 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishEdgeCreated(
         edgeID: UUID,
+        stamp: RTSStamp,
         from source: (any RTSNode)?,
         to target: some RTSNode,
         input: RTSInput
     ) async {
-        let event: RTSStamp.Event
-        if let sourceName = source?.name() {
-            event = .create(sourceName, target.name())
-        } else {
-            event = .startCreate(target.name())
-        }
-        let stamp = await stampFactory.makeStamp(event: event)
         edgeCreateEventSubject.send(
             RTSEdgeEvent(
                 id: edgeID,
@@ -159,13 +182,13 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishEdgeFinished(
         edgeID: UUID,
+        stamp: RTSStamp,
         from source: (any RTSNode)?,
         to target: some RTSNode,
         input: RTSInput,
         output: RTSOutput,
         error: Error?
     ) async {
-        let stamp = await stampFactory.makeStamp(event: .finishExecution(target.name()))
         edgeFinishEventSubject.send(
             RTSEdgeEvent(
                 id: edgeID,

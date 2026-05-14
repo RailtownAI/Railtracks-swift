@@ -41,6 +41,8 @@ public class RTSFlow {
         gateway: RTSLLMGateway,
         systemMessage: String? = nil
     ) async throws -> String {
+        await flowGraphCollector.setup()
+        
         let session = gateway.session(invoker: nodeInvoker, agentNode: agent)
         flowGraphCollector.subscribeMessage(session)
 

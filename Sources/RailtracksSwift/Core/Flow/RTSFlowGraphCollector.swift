@@ -19,7 +19,6 @@ actor RTSFlowGraphCollector {
     let stampFactory: RTSStampFactory
     var flowID: UUID
     var flowName: String
-    var sessionID: UUID?
     var startTime: Date?
     var endTime: Date?
 
@@ -95,6 +94,10 @@ actor RTSFlowGraphCollector {
                 }
             }
             .store(in: &cancellables)
+    }
+    
+    func setup() {
+        startTime = Date()
     }
     
     private func processMessages(_ messages: [RTSMessage]) async {
@@ -178,6 +181,7 @@ actor RTSFlowGraphCollector {
     }
 
     private func finishCollection() async {
+        endTime = Date()
         await generateJSONFile()
         cancellables.removeAll()
     }
@@ -194,12 +198,19 @@ actor RTSFlowGraphCollector {
         log.debug("🎁 total edges: \(edgeEvents.count)")
         log.debug("🎁 total steps: \(steps.count)")
         
+        guard let rootNodeID = rootNodeID, let startTime = startTime, let endTime = endTime else {
+            log.debug("☠️🎁 unable to generate JSON output from the flow due to missing data")
+            return
+        }
+        
         let graph = RTSFlowGraph.make(
             flowName: flowName,
-            flowID: flowID,
+            sessionID: flowID,
             nodeEvents: nodeEvents,
             edgeEvents: edgeEvents,
-            rootNodeID: rootNodeID
+            rootNodeID: rootNodeID,
+            startTime: startTime.timeIntervalSince1970,
+            endTime: endTime.timeIntervalSince1970
         )
         
         let encoder = JSONEncoder()

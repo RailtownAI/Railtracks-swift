@@ -9,13 +9,23 @@ import Foundation
 
 // MARK: - RTSFlowGraph
 
+/// A structure representation of JSON output that can by consumed by python visualizer
 public struct RTSFlowGraph: Codable {
+    /// Name of the flow
     public let flowName: String
+    /// A hashed value of flowName, will be the same if flowName is the same
     public let flowID: String
-    public let sessionID: String?
+    /// Representing per run of the flow, effectively the ID for this flow.
+    /// Session here is unrelated to session used to communicate with LLM.
+    public let sessionID: String
+    /// Tech debt from python, will be null for now
+    /// Session here is unrelated to session used to communicate with LLM.
     public let sessionName: String?
+    /// Start time of the flow's execution
     public let startTime: TimeInterval
+    /// End time of the flow's completion
     public let endTime: TimeInterval
+    /// By existing design runs will only have one item in the array and is corresponding to sessionID
     public let runs: [RTSFlowRun]
 
     enum CodingKeys: String, CodingKey {
@@ -27,12 +37,26 @@ public struct RTSFlowGraph: Codable {
         case endTime = "end_time"
         case runs
     }
+
+    /// Custom econder to overwrite the default `encodeIfPresent` and allow output of value of `null`
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(flowName, forKey: .flowName)
+        try container.encode(flowID, forKey: .flowID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(sessionName, forKey: .sessionName)
+        try container.encode(startTime, forKey: .startTime)
+        try container.encode(endTime, forKey: .endTime)
+        try container.encode(runs, forKey: .runs)
+    }
 }
 
 // MARK: - RTSFlowRun
 
+/// A sub-structure representation of JSON output that can by consumed by python visualizer
 public struct RTSFlowRun: Codable {
     public let name: String
+    /// ID for the run, will be represented by rootNode's runID
     public let runID: String
     public let nodes: [RTSFlowGraphNode]
     public let status: RTSFlowStatus
@@ -200,7 +224,7 @@ public struct RTSFlowGraphEdgeDetails: Codable {
     public let inputArgs: [String]
     public let inputKwargs: [String: RTSGeneratedContent]
     public let status: RTSFlowStatus
-    public let output: RTSGeneratedContent?
+    public let output: RTSGeneratedContent? // TODO: review output formats
 
     enum CodingKeys: String, CodingKey {
         case inputArgs = "input_args"

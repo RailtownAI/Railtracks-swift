@@ -10,10 +10,12 @@ import Foundation
 extension RTSFlowGraph {
     static func make(
         flowName: String,
-        flowID: UUID,
+        sessionID: UUID,
         nodeEvents: [RTSNodeEvent],
         edgeEvents: [RTSEdgeEvent],
-        rootNodeID: UUID?
+        rootNodeID: UUID,
+        startTime: TimeInterval,
+        endTime: TimeInterval
     ) -> RTSFlowGraph {
         let createsByNodeID: [UUID: RTSNodeEvent] = nodeEvents
             .filter { $0.runID == nil }
@@ -34,8 +36,8 @@ extension RTSFlowGraph {
         }
 
         let rootFinish = finishEvents.first { $0.id == rootNodeID }
-        let startTime = allStamps.first?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
-        let endTime = allStamps.last?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
+        let startTime = startTime
+        let endTime = endTime 
 
         let edges = makeEdges(from: edgeEvents)
 
@@ -52,9 +54,9 @@ extension RTSFlowGraph {
 
         return RTSFlowGraph(
             flowName: flowName,
-            flowID: flowID.uuidString,
-            sessionID: nil,    // TODO: session ID not yet tracked in collector
-            sessionName: nil,  // TODO: session name not yet tracked in collector
+            flowID: RailtracksSwift.equalityHash(flowName),
+            sessionID: sessionID.uuidString,
+            sessionName: nil,
             startTime: startTime,
             endTime: endTime,
             runs: [run]
@@ -177,7 +179,11 @@ extension RTSFlowGraph {
 
 private extension RTSStamp {
     func toFlowGraphStamp() -> RTSFlowGraphStamp {
-        RTSFlowGraphStamp(step: stepIndex, time: timestamp.timeIntervalSince1970, identifier: event.identifier)
+        RTSFlowGraphStamp(
+            step: stepIndex,
+            time: timestamp.timeIntervalSince1970,
+            identifier: event.identifier
+        )
     }
 }
 
