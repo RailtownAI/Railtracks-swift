@@ -30,6 +30,37 @@ public class RTSNodeInvoker: @unchecked Sendable {
     }
     
     func invoke(
+        _ node: some RTSAgentNode,
+        input: RTSInput,
+        session: RTSLLMSession,
+        createdBy: (any RTSNode)? = nil
+    ) async throws -> RTSOutput {
+        await publishNodeCreated(node, createdBy: createdBy)
+
+        let runID = UUID()
+        var mutableNode = node
+        mutableNode.inputs = input
+
+        let edgeID = createdBy == nil ? runID : UUID()
+        await publishEdgeCreated(edgeID: edgeID, from: createdBy, to: node, input: input)
+
+        let output: RTSOutput
+        var invokeError: Error?
+        do {
+            output = try await mutableNode.invoke(runID: runID, session: session)
+        } catch {
+            invokeError = error
+            output = [:]
+        }
+
+        await publishEdgeFinished(edgeID: edgeID, from: createdBy, to: node, input: input, output: output, error: invokeError)
+        await publishNodeFinished(node, runID: runID, input: input, output: output, error: invokeError)
+
+        if let invokeError { throw invokeError }
+        return output
+    }
+
+    func invoke(
         _ node: some RTSNode,
         input: RTSInput,
         createdBy: (any RTSNode)? = nil
@@ -43,35 +74,17 @@ public class RTSNodeInvoker: @unchecked Sendable {
         let edgeID = createdBy == nil ? runID : UUID()
         await publishEdgeCreated(edgeID: edgeID, from: createdBy, to: node, input: input)
 
-        // execution
         let output: RTSOutput
         var invokeError: Error?
         do {
-            if let agentNode = mutableNode as? any RTSAgentNode {
-                output = try await agentNode.invoke(runID: runID)
-            } else {
-                output = try await mutableNode.invoke()
-            }
+            output = try await mutableNode.invoke()
         } catch {
             invokeError = error
             output = [:]
         }
 
-        await publishEdgeFinished(
-            edgeID: edgeID,
-            from: createdBy,
-            to: node,
-            input: input,
-            output: output,
-            error: invokeError
-        )
-        await publishNodeFinished(
-            node,
-            runID: runID,
-            input: input,
-            output: output,
-            error: invokeError
-        )
+        await publishEdgeFinished(edgeID: edgeID, from: createdBy, to: node, input: input, output: output, error: invokeError)
+        await publishNodeFinished(node, runID: runID, input: input, output: output, error: invokeError)
 
         if let invokeError { throw invokeError }
         return output

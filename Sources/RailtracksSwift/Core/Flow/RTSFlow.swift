@@ -31,27 +31,26 @@ public class RTSFlow {
         )
     }
     
-    public func session(gateway: RTSLLMGateway, tools: [any RTSToolNode] = [], agentName: String = "Agent") -> RTSLLMSession {
-        let session = gateway.session(invoker: nodeInvoker, tools: tools, agentName: agentName)
-        flowGraphCollector.subscribeMessage(session)
-        return session
-    }
-    
     func invoke(_ prompt: String) async -> String {
         return await self.entryPoint(prompt)
     }
-    
-    /// convenient function to use agent as a start point and run a prompt
+
     public func run(
-        agent: RTSAgentNode,
+        agent: some RTSAgentNode,
         prompt: String,
+        gateway: RTSLLMGateway,
         systemMessage: String? = nil
     ) async throws -> String {
-        var input: RTSInput = [agent.inputKeyPrompt: .string(prompt)]
-        if let systemMessage = systemMessage {
+        let session = gateway.session(invoker: nodeInvoker, agentNode: agent)
+        flowGraphCollector.subscribeMessage(session)
+
+        var input = agent.inputs
+        input[agent.inputKeyPrompt] = .string(prompt)
+        if let systemMessage {
             input[agent.inputKeySystemMessage] = .string(systemMessage)
         }
-        let output = try await nodeInvoker.invoke(agent, input: input)
+
+        let output = try await nodeInvoker.invoke(agent, input: input, session: session)
         guard case let .string(result) = output[agent.outputKeyResult] else {
             throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
         }

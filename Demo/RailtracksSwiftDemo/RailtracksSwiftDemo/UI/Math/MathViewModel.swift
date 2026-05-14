@@ -43,10 +43,10 @@ class MathViewModel {
             let flow = RTSFlow(title: "Simple prompt flow") { _ in
                 ""
             }
-            let session = flow.session(gateway: gateway, tools: tools)
-            
+
             let agent = RTSAgent(
-                llmSession: session,
+                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
+                tools: tools,
                 systemMessage: "You are a Math assistant. " +
                 "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +
                 "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. " +
@@ -54,10 +54,10 @@ class MathViewModel {
                 "If there is division in the math, you must use the provided division tool to perform the calculation. " +
                 "You will calculate simple math problem asked by user."
             )
-            
+
             Log.debug("starting prompt, waiting for response...")
-            
-            self?.promptResult = try? await flow.run(agent: agent, prompt: prompt)
+
+            self?.promptResult = try? await flow.run(agent: agent, prompt: prompt, gateway: gateway)
             Log.debug("obtained prompt result")
         }
     }

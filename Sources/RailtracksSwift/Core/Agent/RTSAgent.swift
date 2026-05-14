@@ -12,45 +12,32 @@ public protocol RTSAgentNode: RTSNode {
     // TODO: reassess the need to have RTSAgentNode and RTSFunctionNode as protocol over concrete class
     var id: UUID { get }
     var agentName: String { get }
-    var llmSession: RTSLLMSession { get }
+    var tools: [any RTSToolNode] { get }
+    var llmProvider: RTSLLMProvider { get }
 }
 
 public extension RTSAgentNode {
     var inputKeySystemMessage: String { "systemMessage" }
     var inputKeyPrompt: String { "prompt" }
     var outputKeyResult: String { "result" }
-    
-    public var agentName: String {
+
+    var agentName: String {
         String(describing: type(of: self))
     }
-    
-    public func name() -> String { agentName }
 
-    public func invoke() async throws -> RTSOutput {
-        try await invoke(runID: nil)
-    }
+    func name() -> String { agentName }
 
-    func invoke(runID: UUID) async throws -> RTSOutput {
-        try await invoke(runID: Optional(runID))
-    }
+    func invoke() async throws -> RTSOutput { [:] }
 
-    private func invoke(runID: UUID?) async throws -> RTSOutput {
+    func invoke(runID: UUID, session: RTSLLMSession) async throws -> RTSOutput {
         guard case let .string(prompt) = inputs[inputKeyPrompt] else {
             throw RTSError.missingInput("Agent \(agentName) missing prompt")
         }
         if case let .string(systemMessage) = inputs[inputKeySystemMessage] {
-            if let runID {
-                llmSession.setSystemPrompt(systemMessage, runID: runID)
-            } else {
-                llmSession.setSystemPrompt(systemMessage)
-            }
+            session.setSystemPrompt(systemMessage, runID: runID)
         }
         do {
-            let result = if let runID {
-                try await llmSession.run(prompt, runID: runID)
-            } else {
-                try await llmSession.run(prompt)
-            }
+            let result = try await session.run(prompt, runID: runID)
             return [outputKeyResult: .string(result)]
         } catch {
             log.debug("agent(\(id)) failed at running prompt: \(prompt) | \(error)")
@@ -62,19 +49,20 @@ public extension RTSAgentNode {
 public struct RTSAgent: RTSAgentNode {
     public let id: UUID = UUID()
     public let agentName: String
-    // TODO: session is exposed, app side user can supply same session to multiple agent and leads to corrupt context.
-    public let llmSession: RTSLLMSession
+    public let tools: [any RTSToolNode]
+    public let llmProvider: RTSLLMProvider
     public var inputs: RTSInput = [:]
-    public var outputs: RTSOutput = [:]
-    
+
     public init(
-        llmSession: RTSLLMSession,
+        llmProvider: RTSLLMProvider,
         name: String? = nil,
+        tools: [any RTSToolNode] = [],
         systemMessage: String? = nil
     ) {
-        self.llmSession = llmSession
         self.agentName = name ?? "Agent"
-        if let systemMessage = systemMessage {
+        self.tools = tools
+        self.llmProvider = llmProvider
+        if let systemMessage {
             inputs[inputKeySystemMessage] = .string(systemMessage)
         }
     }
