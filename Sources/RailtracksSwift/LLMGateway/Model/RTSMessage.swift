@@ -161,6 +161,7 @@ extension RTSMessage {
 
 public struct RTSMessageMetadata: Sendable, Codable {
     public let tokenCount: Int?
+    public let inputTokenCount: Int?
     public let generationTime: TimeInterval?
     public let model: String?
     public let tokensPerSecond: Double?
@@ -251,6 +252,7 @@ private extension MessageMetadata {
     var toRTSMetadata: RTSMessageMetadata {
         RTSMessageMetadata(
             tokenCount: tokenCount,
+            inputTokenCount: inputTokenCount,
             generationTime: generationTime,
             model: model,
             tokensPerSecond: tokensPerSecond,

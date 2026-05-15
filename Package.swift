@@ -20,7 +20,8 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/MarkSu-Railtown/Conduit",
-            exact: "0.3.14",
+            branch: "expose-input-token-count",
+//            exact: "0.3.14",
             traits: [
                 .trait(name: "OpenAI"),
                 .trait(name: "OpenRouter"),
