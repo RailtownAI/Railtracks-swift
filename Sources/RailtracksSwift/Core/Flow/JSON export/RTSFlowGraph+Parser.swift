@@ -209,12 +209,22 @@ private extension RTSValue {
 private extension RTSMessage {
     func toFlowGraphMessage() -> RTSFlowGraphMessage {
         let content: RTSGeneratedContent
-        switch self.content {
-        case .text(let string):
-            content = RTSGeneratedContent(kind: .string(string))
-        case .parts:
-            // TODO: map ContentPart array (tool calls, images) to structured RTSGeneratedContent
-            content = RTSGeneratedContent(kind: .string(self.content.textValue))
+        if let toolCalls = metadata?.toolCalls, !toolCalls.isEmpty {
+            content = RTSGeneratedContent(kind: .array(toolCalls.map { call in
+                RTSGeneratedContent(kind: .structure([
+                    "identifier": RTSGeneratedContent(kind: .string(call.id)),
+                    "name": RTSGeneratedContent(kind: .string(call.toolName)),
+                    "arguments": call.arguments
+                ]))
+            }))
+        } else {
+            switch self.content {
+            case .text(let string):
+                content = RTSGeneratedContent(kind: .string(string))
+            case .parts:
+                // TODO: map ContentPart array (images, audio) to structured RTSGeneratedContent
+                content = RTSGeneratedContent(kind: .string(self.content.textValue))
+            }
         }
         return RTSFlowGraphMessage(role: role.rawValue, content: content)
     }
