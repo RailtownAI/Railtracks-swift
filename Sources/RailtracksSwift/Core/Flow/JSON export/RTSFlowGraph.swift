@@ -254,7 +254,7 @@ public struct RTSFlowGraphEdgeCreation: Codable {
     public let stamp: RTSFlowGraphStamp
     public let details: RTSFlowGraphEdgeDetails
     /// Always null — added to mirror the JSON schema where creation snapshots carry a null parent.
-    internal let parent: String? = nil
+    private let parent: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case source, target, identifier, stamp, details, parent

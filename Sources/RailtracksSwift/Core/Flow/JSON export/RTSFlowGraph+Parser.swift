@@ -36,8 +36,6 @@ extension RTSFlowGraph {
         }
 
         let rootFinish = finishEvents.first { $0.id == rootNodeID }
-        let startTime = startTime
-        let endTime = endTime 
 
         let edges = makeEdges(from: edgeEvents)
 
