@@ -167,7 +167,7 @@ extension RTSFlowGraph {
             let cost = try? await RTSCostCalculator.shared.calculateCost(model: modelName, usage: usage)
             details.append(RTSFlowGraphLLMDetail(
                 modelName: modelName,
-                modelProvider: "unknown",                         // TODO: model provider not tracked in RTSMessageMetadata
+                modelProvider: message.metadata?.providerName ?? "unknown",
                 input: Array(messages[0..<index]).map { $0.toFlowGraphMessage() },
                 output: message.toFlowGraphMessage(),
                 inputTokens: inputTokens,
