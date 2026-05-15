@@ -11,14 +11,11 @@ import Foundation
 public class RTSFlow {
     let id: UUID = UUID()
     let title: String
-//    let entryPoint: (String) async -> String
     
     public init(
-        title: String //,
-//        entryPoint: @escaping (String) async -> String
+        title: String
     ) {
         self.title = title
-//        self.entryPoint = entryPoint
     }
 
     public func run(
