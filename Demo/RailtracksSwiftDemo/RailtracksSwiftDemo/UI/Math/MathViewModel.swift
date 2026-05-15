@@ -40,9 +40,7 @@ class MathViewModel {
                 DivisionTool()
             ]
             
-            let flow = RTSFlow(title: "Simple prompt flow") { _ in
-                ""
-            }
+            let flow = RTSFlow(title: "Simple prompt flow")
 
             let agent = RTSAgent(
                 llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
