@@ -166,6 +166,7 @@ public struct RTSMessageMetadata: Sendable, Codable {
     public let model: String?
     public let providerName: String?
     public let tokensPerSecond: Double?
+    public let providerExtra: [String: String]?
     public let custom: [String: String]?
     public let toolCalls: [RTSToolCall]?
 }
@@ -258,6 +259,7 @@ private extension MessageMetadata {
             model: model,
             providerName: providerName,
             tokensPerSecond: tokensPerSecond,
+            providerExtra: providerExtra,
             custom: custom,
             toolCalls: toolCalls?.map { $0.toRTSToolCall }
         )

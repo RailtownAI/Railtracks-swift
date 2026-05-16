@@ -173,7 +173,7 @@ extension RTSFlowGraph {
                 inputTokens: inputTokens,
                 outputTokens: outputTokens,
                 totalCost: cost?.totalCost,
-                systemFingerprint: nil,                           // TODO: not tracked in RTSMessageMetadata
+                systemFingerprint: message.metadata?.providerExtra?["system_fingerprint"],
                 latency: message.metadata?.generationTime ?? 0
             ))
         }
