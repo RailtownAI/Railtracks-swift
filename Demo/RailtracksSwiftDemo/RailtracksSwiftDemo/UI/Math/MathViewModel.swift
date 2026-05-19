@@ -9,14 +9,11 @@ import Foundation
 import RailtracksSwift
 import Logging
 
+/// An example of usage of an Agent given the 4 basic math tools, and solve math prompt with usage of these tools.
 @Observable
 class MathViewModel {
     let prompt: String = "What is 50 + 20 x 8 - 4? Give me the final answer in a single number without any description."
     var promptResult: String?
-    
-    var openAIAPIKey: String? {
-        RailtracksSwift.getOpenAIAPIKey()
-    }
     
     func startPrompt() {
         let prompt = self.prompt

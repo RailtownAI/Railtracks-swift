@@ -9,11 +9,11 @@ import Foundation
 import RailtracksSwift
 import Logging
 
+/// A simple example to demostrate usage of a single Agent with input prompt, and display on screen the obtained output from llm 
 @Observable
 class SimplePromptViewModel {
     let prompt: String = "What is 50 + 20 x 7? Just give me the final answer"
     var promptResult: String?
-    
     
     func startPrompt() {
         let prompt = self.prompt

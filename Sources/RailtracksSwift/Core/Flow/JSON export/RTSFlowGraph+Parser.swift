@@ -209,7 +209,13 @@ private extension RTSValue {
 private extension RTSMessage {
     func toFlowGraphMessage() -> RTSFlowGraphMessage {
         let content: RTSGeneratedContent
-        if let toolCalls = metadata?.toolCalls, !toolCalls.isEmpty {
+        if role == .tool, let toolCallID = metadata?.custom?["tool_call_id"] {
+            content = RTSGeneratedContent(kind: .structure([
+                "identifier": RTSGeneratedContent(kind: .string(toolCallID)),
+                "name": RTSGeneratedContent(kind: .string(metadata?.custom?["tool_name"] ?? "")),
+                "result": RTSGeneratedContent(kind: .string(self.content.textValue))
+            ]))
+        } else if let toolCalls = metadata?.toolCalls, !toolCalls.isEmpty {
             content = RTSGeneratedContent(kind: .array(toolCalls.map { call in
                 RTSGeneratedContent(kind: .structure([
                     "identifier": RTSGeneratedContent(kind: .string(call.id)),
