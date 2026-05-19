@@ -193,7 +193,7 @@ public enum RTSCostCalculatorError: Error, LocalizedError {
 ///
 /// Pricing source (in priority order):
 ///   1. Remote JSON: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
-///   2. Disk cache (24-hour TTL) — used when the remote fetch fails, analogous to
+///   2. Disk/In-memory cache (24-hour TTL) — used when the remote fetch fails, analogous to
 ///      LiteLLM's bundled `model_prices_and_context_window_backup.json` fallback.
 public actor RTSCostCalculator {
 
@@ -220,8 +220,10 @@ public actor RTSCostCalculator {
     /// Discard in-memory and disk-cached data, then re-fetch from remote.
     public func refreshPricing() async throws {
         modelCostMap = nil
+        modelCostMapLoadedAt = nil
         try? FileManager.default.removeItem(at: cacheFileURL)
         modelCostMap = try await loadModelCostMap()
+        modelCostMapLoadedAt = diskCacheModificationDate()
     }
 
     // MARK: - Pricing Map Loading
@@ -234,15 +236,21 @@ public actor RTSCostCalculator {
         }
         let map = try await loadModelCostMap()
         modelCostMap = map
-        modelCostMapLoadedAt = Date()
+        modelCostMapLoadedAt = diskCacheModificationDate()
         return map
+    }
+    
+    /// Fetch the modification date of the cached price map file
+    private func diskCacheModificationDate() -> Date? {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: cacheFileURL.path)
+        return attrs?[.modificationDate] as? Date
     }
 
     /// Mirrors `get_model_cost_map()` (`litellm/litellm_core_utils/get_model_cost_map.py`).
     /// The LITELLM_LOCAL_MODEL_COST_MAP flag check is removed
-    /// The updatd refresh mechanism as follow
-    ///  1. Fetch fresh remote(fall back to disk cache if fail) price map at first use of every launch, store map in both disk and memory
-    ///  2. Every cacheTTL(24h) duration, flush the in memory map and refetch remote(fall back to disk cache if failed)
+    /// The updatd refresh mechanism as follows
+    ///  1. Fetch fresh remote(fall back to TTL disk cache if fail) price map at first use of every launch, store map in both disk and memory
+    ///  2. Every cacheTTL(24h) duration, flush the in memory and disk cache map and refetch remote(fall back to TTL disk cache if failed)
     private func loadModelCostMap() async throws -> [String: [String: Any]] {
         do {
             let data = try await fetchRemote()
@@ -250,14 +258,13 @@ public actor RTSCostCalculator {
             saveToDiskCache(data)
             return map
         } catch {
-            // Network failed — fall through to disk cache, ignoring TTL.
+            if let cachedData = loadFromDiskCache(respectTTL: true),
+               let map = try? parseJSON(cachedData) {
+                return map
+            }
+            
+            throw RTSCostCalculatorError.noPricingDataAvailable
         }
-
-        if let cachedData = loadFromDiskCache(respectTTL: true), let map = try? parseJSON(cachedData) {
-            return map
-        }
-
-        throw RTSCostCalculatorError.noPricingDataAvailable
     }
 
     /// Mirrors `GetModelCostMap.fetch_remote_model_cost_map()` (`litellm/litellm_core_utils/get_model_cost_map.py`).
