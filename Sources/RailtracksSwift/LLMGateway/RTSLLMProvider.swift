@@ -22,7 +22,7 @@ public enum RTSOpenAIModelID {
 }
 
 /// LLM Providers that store model ID as string in its associated value
-public enum RTSLLMProvider: CustomStringConvertible {
+public enum RTSLLMProvider: CustomStringConvertible, Sendable {
     case openAI(modelIDString: String)
     // TODO: complete the rest of the cases
     

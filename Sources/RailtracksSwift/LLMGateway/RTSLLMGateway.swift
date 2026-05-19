@@ -11,31 +11,34 @@ import ConduitAdvanced
 /// Encapsulation layer for against the LLM connection service underneath
 /// If the llm model accessing library underneath is replaced, only files under LLMGateway directory should require update while the rest  can remain the same
 public class RTSLLMGateway {
-    private let sessionBuilder: (RTSNodeInvoker, [any RTSToolNode], String) -> RTSLLMSession
+    private let apiKey: String
+    private let defaultProvider: RTSLLMProvider
     let llmModel: ModelIdentifier
-    
+
     public var modelDescription: String {
         return llmModel.description
     }
-    
+
     public init?(llmProvider: RTSLLMProvider, apiKey: String) {
+        self.apiKey = apiKey
+        self.defaultProvider = llmProvider
         switch llmProvider {
         case .openAI(modelIDString: let modelIDString):
-            let provider = OpenAIProvider(apiKey: apiKey)
-            let model = ModelIdentifier.openAI(modelIDString)
-            self.llmModel = model
-            self.sessionBuilder = { invoker, tools, agentName in
-                RTSLLMSession.build(provider: provider, model: model, tools: tools, invoker: invoker, agentName: agentName)
-            }
+            self.llmModel = ModelIdentifier.openAI(modelIDString)
         }
     }
 
-    public func session(
-        invoker: RTSNodeInvoker,
-        tools: [any RTSToolNode] = [],
-        agentName: String = "Agent"
-    ) -> RTSLLMSession {
-        sessionBuilder(invoker, tools, agentName)
+    func session(invoker: RTSNodeInvoker, agentNode: any RTSAgentNode) -> RTSLLMSession {
+        buildSession(invoker: invoker, agentNode: agentNode, provider: agentNode.llmProvider)
+    }
+
+    private func buildSession(invoker: RTSNodeInvoker, agentNode: any RTSAgentNode, provider: RTSLLMProvider) -> RTSLLMSession {
+        switch provider {
+        case .openAI(modelIDString: let modelIDString):
+            let openAIProvider = OpenAIProvider(apiKey: apiKey)
+            let model = ModelIdentifier.openAI(modelIDString)
+            return RTSLLMSession.build(provider: openAIProvider, model: model, tools: agentNode.tools, invoker: invoker, agentNode: agentNode)
+        }
     }
 }
 

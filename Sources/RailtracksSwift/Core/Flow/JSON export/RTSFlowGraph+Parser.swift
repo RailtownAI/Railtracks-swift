@@ -10,10 +10,12 @@ import Foundation
 extension RTSFlowGraph {
     static func make(
         flowName: String,
-        flowID: UUID,
+        sessionID: UUID,
         nodeEvents: [RTSNodeEvent],
         edgeEvents: [RTSEdgeEvent],
-        rootNodeID: UUID?
+        rootNodeID: UUID,
+        startTime: TimeInterval,
+        endTime: TimeInterval
     ) -> RTSFlowGraph {
         let createsByNodeID: [UUID: RTSNodeEvent] = nodeEvents
             .filter { $0.runID == nil }
@@ -34,15 +36,15 @@ extension RTSFlowGraph {
         }
 
         let rootFinish = finishEvents.first { $0.id == rootNodeID }
-        let startTime = allStamps.first?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
-        let endTime = allStamps.last?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
+
+        let edges = makeEdges(from: edgeEvents)
 
         let run = RTSFlowRun(
             name: rootFinish?.name ?? flowName,
             runID: rootFinish?.runID?.uuidString ?? "N/A", // TODO: runID shouldn't be empty
             nodes: nodes,
             status: .completed, // TODO: reflect actual status once error propagation is implemented
-            edges: [],          // TODO: RTSEdgeEvent is currently empty — edges not yet populated
+            edges: edges,
             steps: steps,
             startTime: startTime,
             endTime: endTime
@@ -50,9 +52,9 @@ extension RTSFlowGraph {
 
         return RTSFlowGraph(
             flowName: flowName,
-            flowID: flowID.uuidString,
-            sessionID: nil,    // TODO: session ID not yet tracked in collector
-            sessionName: nil,  // TODO: session name not yet tracked in collector
+            flowID: RailtracksSwift.equalityHash(flowName),
+            sessionID: sessionID.uuidString,
+            sessionName: nil,
             startTime: startTime,
             endTime: endTime,
             runs: [run]
@@ -87,6 +89,55 @@ extension RTSFlowGraph {
                 )
             ),
             parent: parent
+        )
+    }
+
+    // MARK: - Edge
+
+    private static func makeEdges(from edgeEvents: [RTSEdgeEvent]) -> [RTSFlowGraphEdge] {
+        let createsByEdgeID: [UUID: RTSEdgeEvent] = edgeEvents
+            .filter { if case .finishExecution = $0.stamp.event { false } else { true } }
+            .reduce(into: [:]) { $0[$1.id] = $1 }
+
+        let finishEvents = edgeEvents.filter {
+            if case .finishExecution = $0.stamp.event { true } else { false }
+        }
+
+        return finishEvents.map { finish in
+            makeEdge(finish: finish, create: createsByEdgeID[finish.id])
+        }
+    }
+
+    private static func makeEdge(finish: RTSEdgeEvent, create: RTSEdgeEvent?) -> RTSFlowGraphEdge {
+        let parent: RTSFlowGraphEdgeCreation? = create.map {
+            RTSFlowGraphEdgeCreation(
+                source: $0.sourceNodeID?.uuidString,
+                target: $0.targetNodeID.uuidString,
+                identifier: $0.id.uuidString,
+                stamp: $0.stamp.toFlowGraphStamp(),
+                details: makeEdgeDetails(from: $0, status: .open)
+            )
+        }
+        return RTSFlowGraphEdge(
+            source: finish.sourceNodeID?.uuidString,
+            target: finish.targetNodeID.uuidString,
+            identifier: finish.id.uuidString,
+            stamp: finish.stamp.toFlowGraphStamp(),
+            details: makeEdgeDetails(from: finish, status: finish.error == nil ? .completed : .failed),
+            parent: parent
+        )
+    }
+
+    private static func makeEdgeDetails(from event: RTSEdgeEvent, status: RTSFlowStatus) -> RTSFlowGraphEdgeDetails {
+        let inputKwargs: [String: RTSGeneratedContent] = (event.input ?? [:]).mapValues { $0.toGeneratedContent() }
+        let output: RTSGeneratedContent? = event.output.map { output in
+            RTSGeneratedContent(kind: .structure(output.mapValues { $0.toGeneratedContent() }))
+        }
+        return RTSFlowGraphEdgeDetails(
+            inputArgs: [],
+            inputKwargs: inputKwargs,
+            status: status,
+            output: output
         )
     }
 
@@ -126,7 +177,24 @@ extension RTSFlowGraph {
 
 private extension RTSStamp {
     func toFlowGraphStamp() -> RTSFlowGraphStamp {
-        RTSFlowGraphStamp(step: stepIndex, time: timestamp.timeIntervalSince1970, identifier: event.identifier)
+        RTSFlowGraphStamp(
+            step: stepIndex,
+            time: timestamp.timeIntervalSince1970,
+            identifier: event.identifier
+        )
+    }
+}
+
+private extension RTSValue {
+    func toGeneratedContent() -> RTSGeneratedContent {
+        switch self {
+        case .null:               return RTSGeneratedContent(kind: .null)
+        case .bool(let v):        return RTSGeneratedContent(kind: .bool(v))
+        case .number(let v):      return RTSGeneratedContent(kind: .number(v))
+        case .string(let v):      return RTSGeneratedContent(kind: .string(v))
+        case .array(let elements): return RTSGeneratedContent(kind: .array(elements.map { $0.toGeneratedContent() }))
+        case .object(let props):  return RTSGeneratedContent(kind: .structure(props.mapValues { $0.toGeneratedContent() }))
+        }
     }
 }
 

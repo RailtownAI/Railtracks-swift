@@ -17,10 +17,14 @@ struct ContentView: View {
                 Button("Simple") {
                     viewModel.mode = .simple
                 }
-                
+                .background(viewModel.mode == .simple ? Color.accentColor.opacity(0.2) : Color.clear)
+                .cornerRadius(8)
+
                 Button("Math") {
                     viewModel.mode = .math
                 }
+                .background(viewModel.mode == .math ? Color.accentColor.opacity(0.2) : Color.clear)
+                .cornerRadius(8)
             }
             Image(systemName: "globe")
                 .imageScale(.large)

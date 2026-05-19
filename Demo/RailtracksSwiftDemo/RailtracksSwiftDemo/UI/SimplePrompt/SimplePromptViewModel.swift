@@ -30,19 +30,16 @@ class SimplePromptViewModel {
                 return
             }
             
-            let flow = RTSFlow(title: "Simple prompt flow") { _ in
-                ""
-            }
-            let session = flow.session(gateway: gateway)
-            
+            let flow = RTSFlow(title: "Simple prompt flow")
+
             let agent = RTSAgent(
-                llmSession: session,
+                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
                 systemMessage: "You are a helpful assistant that calculate simple math problem asked by user."
             )
-            
+
             Log.debug("starting prompt, waiting for response...")
-            
-            self?.promptResult = try? await flow.run(agent: agent, prompt: prompt)
+
+            self?.promptResult = try? await flow.run(agent: agent, prompt: prompt, gateway: gateway)
             Log.debug("obtained prompt result")
         }
     }

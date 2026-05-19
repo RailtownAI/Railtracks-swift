@@ -14,7 +14,7 @@ struct RTSConduitToolBridge: Tool {
     
     internal let node: any RTSToolNode
     internal let nodeInvoker: RTSNodeInvoker
-    internal let createdBy: String
+    internal let createdBy: any RTSAgentNode
 
     var name: String { node.name() }
     var description: String { node.toolDescription }
@@ -34,7 +34,7 @@ struct RTSConduitToolBridge: Tool {
 }
 
 public extension RTSToolNode {
-    func asConduitTool(invoker: RTSNodeInvoker, createdBy: String) -> any Tool {
+    func asConduitTool(invoker: RTSNodeInvoker, createdBy: any RTSAgentNode) -> any Tool {
         RTSConduitToolBridge(node: self, nodeInvoker: invoker, createdBy: createdBy)
     }
 }

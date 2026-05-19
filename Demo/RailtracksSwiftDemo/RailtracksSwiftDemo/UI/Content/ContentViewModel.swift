@@ -17,7 +17,7 @@ class ContentViewModel {
     }
     
     var libVersion: String = RailtracksSwift.version
-    var mode: ViewMode = .simple
+    var mode: ViewMode = .math
     
     var openAIAPIKey: String? {
         RailtracksSwift.getOpenAIAPIKey()
