@@ -107,6 +107,7 @@ extension RTSLLMSession {
         agentNode: any RTSAgentNode
     ) -> RTSLLMSession {
         let agentName = agentNode.agentName
+        let providerName = agentNode.llmProvider.providerName
         log.debug("💎 RTSLLMSession: registering tools: [\(tools.map({ $0.name() }))]")
         let chatSession = ChatSession(provider: provider, model: model)
         let conduitTools = tools.map { $0.asConduitTool(invoker: invoker, createdBy: agentNode) }
@@ -129,7 +130,7 @@ extension RTSLLMSession {
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
-                    let rtsMessages = newMessages.map { $0.toRTSMessage(runID: runIDMap[$0.id]) }
+                    let rtsMessages = newMessages.map { $0.toRTSMessage(runID: runIDMap[$0.id], providerName: providerName) }
                     relay.send(rtsMessages)
                     log.trace("💎 [\(agentName)] run(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }
@@ -143,7 +144,7 @@ extension RTSLLMSession {
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
-                    let rtsMessages = newMessages.map { $0.toRTSMessage(runID: runIDMap[$0.id]) }
+                    let rtsMessages = newMessages.map { $0.toRTSMessage(runID: runIDMap[$0.id], providerName: providerName) }
                     relay.send(rtsMessages)
                     log.trace("💎 [\(agentName)] setSystemPrompt(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }

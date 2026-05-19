@@ -313,41 +313,53 @@ public struct RTSGeneratedContent: Sendable, Codable {
     }
     public let kind: Kind
 
-    private enum CodingKeys: String, CodingKey { case type, value, elements, properties }
-    private enum KindType: String, Codable { case null, bool, number, string, array, structure }
-
     public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(KindType.self, forKey: .type) {
-        case .null:      kind = .null
-        case .bool:      kind = .bool(try container.decode(Bool.self, forKey: .value))
-        case .number:    kind = .number(try container.decode(Double.self, forKey: .value))
-        case .string:    kind = .string(try container.decode(String.self, forKey: .value))
-        case .array:     kind = .array(try container.decode([RTSGeneratedContent].self, forKey: .elements))
-        case .structure: kind = .structure(try container.decode([String: RTSGeneratedContent].self, forKey: .properties))
+        let singleContainer = try? decoder.singleValueContainer()
+        if singleContainer?.decodeNil() == true { kind = .null; return }
+        if let bool = try? singleContainer?.decode(Bool.self)     { kind = .bool(bool); return }
+        if let number = try? singleContainer?.decode(Double.self) { kind = .number(number); return }
+        if let string = try? singleContainer?.decode(String.self) { kind = .string(string); return }
+        if var unkeyedContainer = try? decoder.unkeyedContainer() {
+            var elements: [RTSGeneratedContent] = []
+            while !unkeyedContainer.isAtEnd {
+                elements.append(try unkeyedContainer.decode(RTSGeneratedContent.self))
+            }
+            kind = .array(elements); return
         }
+        let keyedContainer = try decoder.container(keyedBy: AnyCodingKey.self)
+        kind = .structure(try keyedContainer.allKeys.reduce(into: [:]) {
+            $0[$1.stringValue] = try keyedContainer.decode(RTSGeneratedContent.self, forKey: $1)
+        })
     }
 
     public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
         switch kind {
         case .null:
-            try container.encode(KindType.null, forKey: .type)
-        case .bool(let v):
-            try container.encode(KindType.bool, forKey: .type)
-            try container.encode(v, forKey: .value)
-        case .number(let v):
-            try container.encode(KindType.number, forKey: .type)
-            try container.encode(v, forKey: .value)
-        case .string(let v):
-            try container.encode(KindType.string, forKey: .type)
-            try container.encode(v, forKey: .value)
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
+        case .bool(let bool):
+            var container = encoder.singleValueContainer()
+            try container.encode(bool)
+        case .number(let number):
+            var container = encoder.singleValueContainer()
+            try container.encode(number)
+        case .string(let string):
+            var container = encoder.singleValueContainer()
+            try container.encode(string)
         case .array(let elements):
-            try container.encode(KindType.array, forKey: .type)
-            try container.encode(elements, forKey: .elements)
+            var container = encoder.unkeyedContainer()
+            for element in elements { try container.encode(element) }
         case .structure(let props):
-            try container.encode(KindType.structure, forKey: .type)
-            try container.encode(props, forKey: .properties)
+            var container = encoder.container(keyedBy: AnyCodingKey.self)
+            for (key, value) in props { try container.encode(value, forKey: AnyCodingKey(key)) }
         }
     }
+}
+
+private struct AnyCodingKey: CodingKey {
+    let stringValue: String
+    var intValue: Int? { nil }
+    init(_ string: String) { stringValue = string }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { nil }
 }

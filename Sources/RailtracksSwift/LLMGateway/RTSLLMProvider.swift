@@ -32,4 +32,10 @@ public enum RTSLLMProvider: CustomStringConvertible, Sendable {
             return "OpenAI-\(modelIDString)"
         }
     }
+
+    public var providerName: String {
+        switch self {
+        case .openAI: return "OpenAI"
+        }
+    }
 }

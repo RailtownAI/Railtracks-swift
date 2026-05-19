@@ -16,7 +16,7 @@ extension RTSFlowGraph {
         rootNodeID: UUID,
         startTime: TimeInterval,
         endTime: TimeInterval
-    ) -> RTSFlowGraph {
+    ) async -> RTSFlowGraph {
         let createsByNodeID: [UUID: RTSNodeEvent] = nodeEvents
             .filter { $0.runID == nil }
             .reduce(into: [:]) { $0[$1.id] = $1 }
@@ -31,8 +31,9 @@ extension RTSFlowGraph {
             RTSFlowGraphStamp(step: $0.stepIndex, time: $0.timestamp.timeIntervalSince1970, identifier: $0.event.identifier)
         }
 
-        let nodes = finishEvents.map { finish in
-            makeNode(finish: finish, create: createsByNodeID[finish.id])
+        var nodes: [RTSFlowGraphNode] = []
+        for finish in finishEvents {
+            nodes.append(await makeNode(finish: finish, create: createsByNodeID[finish.id]))
         }
 
         let rootFinish = finishEvents.first { $0.id == rootNodeID }
@@ -63,7 +64,7 @@ extension RTSFlowGraph {
 
     // MARK: - Node
 
-    private static func makeNode(finish: RTSNodeEvent, create: RTSNodeEvent?) -> RTSFlowGraphNode {
+    private static func makeNode(finish: RTSNodeEvent, create: RTSNodeEvent?) async -> RTSFlowGraphNode {
         let nodeType = inferNodeType(from: create ?? finish)
         let latency = create.map {
             RTSFlowGraphLatency(totalTime: finish.stamp.timestamp.timeIntervalSince($0.stamp.timestamp))
@@ -84,7 +85,7 @@ extension RTSFlowGraph {
             stamp: finish.stamp.toFlowGraphStamp(),
             details: RTSFlowGraphNodeDetails(
                 internals: RTSFlowGraphNodeInternals(
-                    llmDetails: finish.messages.isEmpty ? nil : makeLLMDetails(from: finish.messages),
+                    llmDetails: finish.messages.isEmpty ? nil : await makeLLMDetails(from: finish.messages),
                     latency: latency
                 )
             ),
@@ -155,21 +156,28 @@ extension RTSFlowGraph {
 
     // Each assistant message marks the end of one LLM call round.
     // Input for each round is all messages accumulated up to that point.
-    private static func makeLLMDetails(from messages: [RTSMessage]) -> [RTSFlowGraphLLMDetail] {
-        messages.enumerated().compactMap { index, message in
-            guard message.role == .assistant else { return nil }
-            return RTSFlowGraphLLMDetail(
-                modelName: message.metadata?.model ?? "unknown", // TODO: model not always populated on assistant messages
-                modelProvider: "unknown",                         // TODO: model provider not tracked in RTSMessageMetadata
+    private static func makeLLMDetails(from messages: [RTSMessage]) async -> [RTSFlowGraphLLMDetail] {
+        var details: [RTSFlowGraphLLMDetail] = []
+        for (index, message) in messages.enumerated() {
+            guard message.role == .assistant else { continue }
+            let inputTokens = message.metadata?.inputTokenCount ?? 0
+            let outputTokens = message.metadata?.tokenCount ?? 0
+            let modelName = message.metadata?.model ?? "unknown" // TODO: model not always populated on assistant messages
+            let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
+            let cost = try? await RTSCostCalculator.shared.calculateCost(model: modelName, usage: usage)
+            details.append(RTSFlowGraphLLMDetail(
+                modelName: modelName,
+                modelProvider: message.metadata?.providerName ?? "unknown",
                 input: Array(messages[0..<index]).map { $0.toFlowGraphMessage() },
                 output: message.toFlowGraphMessage(),
-                inputTokens: 0,                                   // TODO: input token count not captured by Conduit
-                outputTokens: message.metadata?.tokenCount ?? 0,
-                totalCost: nil,                                   // TODO: cost not captured by Conduit
-                systemFingerprint: nil,                           // TODO: not tracked in RTSMessageMetadata
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                totalCost: cost?.totalCost,
+                systemFingerprint: message.metadata?.providerExtra?["system_fingerprint"],
                 latency: message.metadata?.generationTime ?? 0
-            )
+            ))
         }
+        return details
     }
 }
 
@@ -201,12 +209,28 @@ private extension RTSValue {
 private extension RTSMessage {
     func toFlowGraphMessage() -> RTSFlowGraphMessage {
         let content: RTSGeneratedContent
-        switch self.content {
-        case .text(let string):
-            content = RTSGeneratedContent(kind: .string(string))
-        case .parts:
-            // TODO: map ContentPart array (tool calls, images) to structured RTSGeneratedContent
-            content = RTSGeneratedContent(kind: .string(self.content.textValue))
+        if role == .tool, let toolCallID = metadata?.custom?["tool_call_id"] {
+            content = RTSGeneratedContent(kind: .structure([
+                "identifier": RTSGeneratedContent(kind: .string(toolCallID)),
+                "name": RTSGeneratedContent(kind: .string(metadata?.custom?["tool_name"] ?? "")),
+                "result": RTSGeneratedContent(kind: .string(self.content.textValue))
+            ]))
+        } else if let toolCalls = metadata?.toolCalls, !toolCalls.isEmpty {
+            content = RTSGeneratedContent(kind: .array(toolCalls.map { call in
+                RTSGeneratedContent(kind: .structure([
+                    "identifier": RTSGeneratedContent(kind: .string(call.id)),
+                    "name": RTSGeneratedContent(kind: .string(call.toolName)),
+                    "arguments": call.arguments
+                ]))
+            }))
+        } else {
+            switch self.content {
+            case .text(let string):
+                content = RTSGeneratedContent(kind: .string(string))
+            case .parts:
+                // TODO: map ContentPart array (images, audio) to structured RTSGeneratedContent
+                content = RTSGeneratedContent(kind: .string(self.content.textValue))
+            }
         }
         return RTSFlowGraphMessage(role: role.rawValue, content: content)
     }

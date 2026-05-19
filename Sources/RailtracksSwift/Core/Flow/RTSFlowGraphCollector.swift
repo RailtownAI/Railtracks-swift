@@ -212,7 +212,7 @@ actor RTSFlowGraphCollector {
             return
         }
         
-        let graph = RTSFlowGraph.make(
+        let graph = await RTSFlowGraph.make(
             flowName: flowName,
             sessionID: sessionID,
             nodeEvents: nodeEvents,

@@ -161,9 +161,12 @@ extension RTSMessage {
 
 public struct RTSMessageMetadata: Sendable, Codable {
     public let tokenCount: Int?
+    public let inputTokenCount: Int?
     public let generationTime: TimeInterval?
     public let model: String?
+    public let providerName: String?
     public let tokensPerSecond: Double?
+    public let providerExtra: [String: String]?
     public let custom: [String: String]?
     public let toolCalls: [RTSToolCall]?
 }
@@ -179,13 +182,13 @@ public struct RTSToolCall: Sendable, Codable {
 // MARK: - Conduit → RTS Mappings
 
 public extension Message {
-    func toRTSMessage(runID: UUID? = nil) -> RTSMessage {
+    func toRTSMessage(runID: UUID? = nil, providerName: String? = nil) -> RTSMessage {
         RTSMessage(
             id: id,
             role: role.toRTSRole,
             content: content.toRTSContent,
             timestamp: timestamp,
-            metadata: metadata?.toRTSMetadata,
+            metadata: metadata?.toRTSMetadata(providerName: providerName),
             runID: runID
         )
     }
@@ -248,12 +251,15 @@ private extension Message.AudioFormat {
 }
 
 private extension MessageMetadata {
-    var toRTSMetadata: RTSMessageMetadata {
+    func toRTSMetadata(providerName: String? = nil) -> RTSMessageMetadata {
         RTSMessageMetadata(
             tokenCount: tokenCount,
+            inputTokenCount: inputTokenCount,
             generationTime: generationTime,
             model: model,
+            providerName: providerName,
             tokensPerSecond: tokensPerSecond,
+            providerExtra: providerExtra,
             custom: custom,
             toolCalls: toolCalls?.map { $0.toRTSToolCall }
         )

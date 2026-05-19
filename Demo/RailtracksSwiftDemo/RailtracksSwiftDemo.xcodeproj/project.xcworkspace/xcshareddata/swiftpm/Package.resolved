@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/MarkSu-Railtown/Conduit",
       "state" : {
-        "revision" : "9a97919c614f42698b3c1d2b67d6a1e386b16b4a",
-        "version" : "0.3.14"
+        "branch" : "expose-input-token-count",
+        "revision" : "ddea6774ecf40a8d26e9f15c43d8be9166ca2cb8"
       }
     },
     {
