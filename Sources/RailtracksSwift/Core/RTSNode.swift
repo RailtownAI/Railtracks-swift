@@ -22,7 +22,7 @@ public protocol RTSFunctionNode: RTSNode {
 }
 
 public extension RTSFunctionNode {
-    public func invoke() async throws -> RTSOutput {
+    func invoke() async throws -> RTSOutput {
         return try await callableRoutine.closure(inputs)
     }
 }

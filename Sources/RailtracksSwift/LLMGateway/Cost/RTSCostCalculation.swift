@@ -248,7 +248,7 @@ public actor RTSCostCalculator {
 
     /// Mirrors `get_model_cost_map()` (`litellm/litellm_core_utils/get_model_cost_map.py`).
     /// The LITELLM_LOCAL_MODEL_COST_MAP flag check is removed
-    /// The updatd refresh mechanism as follows
+    /// The updated refresh mechanism is as follows
     ///  1. Fetch fresh remote(fall back to TTL disk cache if fail) price map at first use of every launch, store map in both disk and memory
     ///  2. Every cacheTTL(24h) duration, flush the in memory and disk cache map and refetch remote(fall back to TTL disk cache if failed)
     private func loadModelCostMap() async throws -> [String: [String: Any]] {

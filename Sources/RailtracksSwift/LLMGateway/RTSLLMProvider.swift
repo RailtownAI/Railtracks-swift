@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import ConduitAdvanced
+import Conduit
 
 /// Type-safe strings for openAI model ID
 public enum RTSOpenAIModelID {

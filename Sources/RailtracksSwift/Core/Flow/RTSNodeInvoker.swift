@@ -30,7 +30,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
     }
     
     func invoke(
-        _ node: some RTSAgentNode,
+        _ node: any RTSAgentNode,
         input: RTSInput,
         session: RTSLLMSession,
         createdBy: (any RTSNode)? = nil

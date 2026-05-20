@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import ConduitAdvanced
+import Conduit
 
 /// Encapsulation layer for against the LLM connection service underneath
 /// If the llm model accessing library underneath is replaced, only files under LLMGateway directory should require update while the rest  can remain the same
@@ -37,18 +37,18 @@ public class RTSLLMGateway {
         case .openAI(modelIDString: let modelIDString):
             let openAIProvider = OpenAIProvider(apiKey: apiKey)
             let model = ModelIdentifier.openAI(modelIDString)
-            return RTSLLMSession.build(provider: openAIProvider, model: model, tools: agentNode.tools, invoker: invoker, agentNode: agentNode)
+            return RTSLLMSession.build(provider: openAIProvider, model: model, invoker: invoker, agentNode: agentNode)
         }
     }
 }
 
-extension Model: CustomStringConvertible {
+extension Model: @retroactive CustomStringConvertible {
     public var description: String {
         return "\(family.description)-\(id)"
     }
 }
 
-extension Model.Family: CustomStringConvertible {
+extension Model.Family: @retroactive CustomStringConvertible {
     public var description: String {
         switch self {
         case .mlx:
@@ -73,6 +73,8 @@ extension Model.Family: CustomStringConvertible {
             return "miniMax"
         case .custom:
             return "Custom"
+        case .gemini:
+            return "gemini"
         }
     }
 }

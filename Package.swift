@@ -19,7 +19,7 @@ let package = Package(
     ],
     dependencies: [
         .package(
-            url: "https://github.com/MarkSu-Railtown/Conduit",
+            url: "https://github.com/RailtownAI/Conduit",
             branch: "expose-input-token-count",
 //            exact: "0.3.14",
             traits: [
@@ -41,7 +41,7 @@ let package = Package(
             name: "RailtracksSwift",
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
-                .product(name: "ConduitAdvanced", package: "Conduit")
+                .product(name: "Conduit", package: "Conduit")
             ]
         ),
         .testTarget(

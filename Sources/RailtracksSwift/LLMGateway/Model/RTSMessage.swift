@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import ConduitAdvanced
+import Conduit
 
 // MARK: - RTSMessage
 

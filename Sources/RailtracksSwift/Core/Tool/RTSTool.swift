@@ -22,17 +22,17 @@ public protocol RTSToolNode: RTSFunctionNode {
 }
                 
 public extension RTSToolNode {
-    public var toolName: String {
+    var toolName: String {
         String(describing: type(of: self))
     }
-    public func name() -> String { toolName }
-    public func invoke() async throws -> RTSOutput { try await callableRoutine.closure(inputs) }
-    public func run(with inputs: RTSInput) async throws -> RTSOutput {
+    func name() -> String { toolName }
+    func invoke() async throws -> RTSOutput { try await callableRoutine.closure(inputs) }
+    func run(with inputs: RTSInput) async throws -> RTSOutput {
         var copy = self
         copy.inputs = inputs
         return try await copy.invoke()
     }
-    public func encode(to encoder: Encoder) throws {
+    func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: RTSToolNodeCodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(toolName, forKey: .name)

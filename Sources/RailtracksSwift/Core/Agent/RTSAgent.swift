@@ -12,7 +12,7 @@ public protocol RTSAgentNode: RTSNode {
     // TODO: reassess the need to have RTSAgentNode and RTSFunctionNode as protocol over concrete class
     var id: UUID { get }
     var agentName: String { get }
-    var tools: [any RTSToolNode] { get }
+    var tools: [any RTSToolNode] { get set }
     var llmProvider: RTSLLMProvider { get }
 }
 
@@ -49,7 +49,7 @@ public extension RTSAgentNode {
 public struct RTSAgent: RTSAgentNode {
     public let id: UUID = UUID()
     public let agentName: String
-    public let tools: [any RTSToolNode]
+    public var tools: [any RTSToolNode]
     public let llmProvider: RTSLLMProvider
     public var inputs: RTSInput = [:]
 

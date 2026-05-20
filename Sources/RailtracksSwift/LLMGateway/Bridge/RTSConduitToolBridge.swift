@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import ConduitAdvanced
+import Conduit
 
 struct RTSConduitToolBridge: Tool {
     typealias Arguments = GeneratedContent

@@ -31,11 +31,11 @@ public extension RailtracksSwift {
 // MARK: - API key access
 //
 public extension RailtracksSwift {
-    public enum SecretKeys {
+    enum SecretKeys {
         static let openAI = "OpenAI_API_KEY"
     }
     
-    public static func getOpenAIAPIKey(
+    static func getOpenAIAPIKey(
         filename: String = "Secrets",
     ) -> String? {
         guard let filePath = Bundle.main.path(forResource: filename, ofType: "plist") else {

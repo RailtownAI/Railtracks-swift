@@ -7,7 +7,7 @@
 
 import Foundation
 import Combine
-import ConduitAdvanced
+import Conduit
 
 protocol MessagePublisher {
     var messagePublisher: AnyPublisher<[RTSMessage], Never> { get }
@@ -102,15 +102,14 @@ extension RTSLLMSession {
     static func build<P: AIProvider & TextGenerator>(
         provider: P,
         model: P.ModelID,
-        tools: [any RTSToolNode],
         invoker: RTSNodeInvoker,
         agentNode: any RTSAgentNode
     ) -> RTSLLMSession {
         let agentName = agentNode.agentName
         let providerName = agentNode.llmProvider.providerName
-        log.debug("💎 RTSLLMSession: registering tools: [\(tools.map({ $0.name() }))]")
+        log.debug("💎 RTSLLMSession: registering tools: [\(agentNode.tools.map({ $0.name() }))]")
         let chatSession = ChatSession(provider: provider, model: model)
-        let conduitTools = tools.map { $0.asConduitTool(invoker: invoker, createdBy: agentNode) }
+        let conduitTools = agentNode.tools.map { $0.asConduitTool(invoker: invoker, createdBy: agentNode) }
         if !conduitTools.isEmpty {
             chatSession.config = chatSession.config.tools(conduitTools)
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)
@@ -150,7 +149,7 @@ extension RTSLLMSession {
                 }
             },
             message: {
-                chatSession.messages.map { $0.toRTSMessage(runID: runIDMap[$0.id]) }
+                chatSession.messages.map { $0.toRTSMessage(runID: runIDMap[$0.id], providerName: providerName) }
             },
             messageSubject: relay.subject
         )
