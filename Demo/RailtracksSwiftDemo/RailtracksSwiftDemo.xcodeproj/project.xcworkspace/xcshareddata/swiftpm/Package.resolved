@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/Conduit",
       "state" : {
-        "branch" : "expose-input-token-count",
-        "revision" : "1034144d321001f3065d8faf484d7b2a272762f9"
+        "revision" : "8e7a2d743d4217ed4319ec1b3ee271d56b1e591a",
+        "version" : "0.3.18"
       }
     },
     {

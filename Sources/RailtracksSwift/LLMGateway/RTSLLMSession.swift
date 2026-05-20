@@ -102,14 +102,13 @@ extension RTSLLMSession {
     static func build<P: AIProvider & TextGenerator>(
         provider: P,
         model: P.ModelID,
-        invoker: RTSNodeInvoker,
-        agentNode: any RTSAgentNode
+        agentNode: any RTSAgentNode,
+        conduitTools: [any Tool]
     ) -> RTSLLMSession {
         let agentName = agentNode.agentName
         let providerName = agentNode.llmProvider.providerName
-        log.debug("💎 RTSLLMSession: registering tools: [\(agentNode.tools.map({ $0.name() }))]")
+        log.debug("💎 RTSLLMSession: registering tools: [\(conduitTools.map({ $0.name }))]")
         let chatSession = ChatSession(provider: provider, model: model)
-        let conduitTools = agentNode.tools.map { $0.asConduitTool(invoker: invoker, createdBy: agentNode) }
         if !conduitTools.isEmpty {
             chatSession.config = chatSession.config.tools(conduitTools)
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)

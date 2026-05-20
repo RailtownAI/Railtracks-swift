@@ -21,6 +21,12 @@ public enum RTSOpenAIModelID {
     }
 }
 
+/// Provider kind without model information — used as dictionary key for API keys
+public enum RTSLLMProviderKind: Hashable, Sendable {
+    case openAI
+    // TODO: complete the rest of the cases
+}
+
 /// LLM Providers that store model ID as string in its associated value
 public enum RTSLLMProvider: CustomStringConvertible, Sendable {
     case openAI(modelIDString: String)
@@ -36,6 +42,12 @@ public enum RTSLLMProvider: CustomStringConvertible, Sendable {
     public var providerName: String {
         switch self {
         case .openAI: return "OpenAI"
+        }
+    }
+
+    public var kind: RTSLLMProviderKind {
+        switch self {
+        case .openAI: return .openAI
         }
     }
 }

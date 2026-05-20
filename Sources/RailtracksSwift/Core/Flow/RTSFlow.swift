@@ -33,56 +33,22 @@ public class RTSFlow {
         )
         await flowGraphCollector.setup()
         
-        var mutableAgent = agent
-        var subSessions: [RTSLLMSession] = []
-        mutableAgent.tools = wireAgentTools(
-            mutableAgent.tools,
-            parent: mutableAgent,
-            invoker: nodeInvoker,
-            gateway: gateway,
-            subSessions: &subSessions
-        )
-        let session = gateway.session(invoker: nodeInvoker, agentNode: mutableAgent)
+        let (session, subSessions) = gateway.session(invoker: nodeInvoker, agentNode: agent)
         flowGraphCollector.subscribeMessage(session)
         subSessions.forEach { flowGraphCollector.subscribeMessage($0) }
 
-        var input = mutableAgent.inputs
-        input[mutableAgent.inputKeyPrompt] = .string(prompt)
+        var input = agent.inputs
+        input[agent.inputKeyPrompt] = .string(prompt)
         if let systemMessage {
-            input[mutableAgent.inputKeySystemMessage] = .string(systemMessage)
+            input[agent.inputKeySystemMessage] = .string(systemMessage)
         }
 
-        let output = try await nodeInvoker.invoke(mutableAgent, input: input, session: session)
-        guard case let .string(result) = output[mutableAgent.outputKeyResult] else {
-            throw RTSError.missingOutput("Agent \(mutableAgent.agentName) missing result")
+        let output = try await nodeInvoker.invoke(agent, input: input, session: session)
+        guard case let .string(result) = output[agent.outputKeyResult] else {
+            throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
         }
         await flowGraphCollector.awaitCompletion()
         return result
     }
     
-    /// Recursion wiring so all the sub-agents being tools are wired up properly with sub-sessions
-    private func wireAgentTools(
-        _ tools: [any RTSToolNode],
-        parent: any RTSAgentNode,
-        invoker: RTSNodeInvoker,
-        gateway: RTSLLMGateway,
-        subSessions: inout [RTSLLMSession]
-    ) -> [any RTSToolNode] {
-        tools.map { tool -> any RTSToolNode in
-            guard var agentTool = tool as? RTSAgentTool else { return tool }
-            agentTool.wrappedAgent.tools = wireAgentTools(
-                agentTool.wrappedAgent.tools,
-                parent: agentTool.wrappedAgent,
-                invoker: invoker,
-                gateway: gateway,
-                subSessions: &subSessions
-            )
-            let subSession = gateway.session(invoker: invoker, agentNode: agentTool.wrappedAgent)
-            subSessions.append(subSession)
-            agentTool.callableRoutine = RTSClosure { [wrapped = agentTool.wrappedAgent, parent = parent] inputs in
-                try await invoker.invoke(wrapped, input: inputs, session: subSession, createdBy: parent)
-            }
-            return agentTool
-        }
-    }
 }

@@ -38,3 +38,43 @@ public extension RTSToolNode {
         RTSConduitToolBridge(node: self, nodeInvoker: invoker, createdBy: createdBy)
     }
 }
+
+struct RTSConduitAgentToolBridge: Tool {
+    typealias Arguments = GeneratedContent
+    typealias Output = String
+
+    private let agentTool: RTSAgentTool
+    private let subSession: RTSLLMSession
+    private let nodeInvoker: RTSNodeInvoker
+    private let createdBy: any RTSAgentNode
+
+    init(
+        agentTool: RTSAgentTool,
+        subSession: RTSLLMSession,
+        nodeInvoker: RTSNodeInvoker,
+        createdBy: any RTSAgentNode
+    ) {
+        self.agentTool = agentTool
+        self.subSession = subSession
+        self.nodeInvoker = nodeInvoker
+        self.createdBy = createdBy
+    }
+
+    var name: String { agentTool.name() }
+    var description: String { agentTool.toolDescription }
+    var parameters: GenerationSchema { agentTool.parameterSchema.toGenerationSchema() }
+
+    func call(arguments: GeneratedContent) async throws -> String {
+        log.debug("🌁 RTSConduitAgentToolBridge - \(agentTool.name()) is called with \(arguments.jsonString)")
+        let jsonData = Data(arguments.jsonString.utf8)
+        let toolArgs = try JSONDecoder().decode(RTSInput.self, from: jsonData)
+        var input = agentTool.wrappedAgent.inputs
+        input.merge(toolArgs) { _, new in new }
+        let output = try await nodeInvoker.invoke(agentTool.wrappedAgent, input: input, session: subSession, createdBy: createdBy)
+        guard let data = try? JSONEncoder().encode(output),
+              let result = String(data: data, encoding: .utf8) else {
+            throw RTSError.encodingFailed()
+        }
+        return result
+    }
+}

@@ -16,9 +16,11 @@ public protocol RTSToolNode: RTSFunctionNode {
     var toolName: String { get }
     var inputs: RTSInput { get set }
     var callableRoutine: RTSClosure { get }
-    
+
     var toolDescription: String { get }
     var parameterSchema: RTSToolSchema { get }
+
+    func invoke(runID: UUID) async throws -> RTSOutput
 }
                 
 public extension RTSToolNode {
@@ -27,6 +29,7 @@ public extension RTSToolNode {
     }
     func name() -> String { toolName }
     func invoke() async throws -> RTSOutput { try await callableRoutine.closure(inputs) }
+    func invoke(runID: UUID) async throws -> RTSOutput { try await invoke() }
     func run(with inputs: RTSInput) async throws -> RTSOutput {
         var copy = self
         copy.inputs = inputs

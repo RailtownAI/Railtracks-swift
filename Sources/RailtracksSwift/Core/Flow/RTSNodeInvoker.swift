@@ -43,14 +43,14 @@ public class RTSNodeInvoker: @unchecked Sendable {
     }
 
     func invoke(
-        _ node: some RTSNode,
+        _ node: some RTSToolNode,
         input: RTSInput,
         createdBy: (any RTSNode)? = nil
     ) async throws -> RTSOutput {
         var mutableNode = node
         mutableNode.inputs = input
-        return try await invokeCore(node, input: input, createdBy: createdBy) { _ in
-            try await mutableNode.invoke()
+        return try await invokeCore(node, input: input, createdBy: createdBy) { runID in
+            try await mutableNode.invoke(runID: runID)
         }
     }
 
@@ -79,7 +79,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
         let output: RTSOutput
         var invokeError: Error?
         do {
-//            output = try await mutableNode.invoke()
             output = try await execute(runID)
         } catch {
             invokeError = error
