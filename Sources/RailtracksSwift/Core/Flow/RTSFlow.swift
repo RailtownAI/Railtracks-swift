@@ -33,9 +33,10 @@ public class RTSFlow {
         )
         await flowGraphCollector.setup()
         
-        let (session, subSessions) = gateway.session(invoker: nodeInvoker, agentNode: agent)
+        let session = gateway.session(invoker: nodeInvoker, agentNode: agent) { [flowGraphCollector] newSession in
+            flowGraphCollector.subscribeMessage(newSession)
+        }
         flowGraphCollector.subscribeMessage(session)
-        subSessions.forEach { flowGraphCollector.subscribeMessage($0) }
 
         var input = agent.inputs
         input[agent.inputKeyPrompt] = .string(prompt)

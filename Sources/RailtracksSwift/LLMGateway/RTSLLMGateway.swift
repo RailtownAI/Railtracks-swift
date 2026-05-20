@@ -17,21 +17,34 @@ public class RTSLLMGateway {
         self.apiKeys = apiKeys
     }
 
-    func session(invoker: RTSNodeInvoker, agentNode: any RTSAgentNode) -> (RTSLLMSession, [RTSLLMSession]) {
-        buildSession(invoker: invoker, agentNode: agentNode)
+    func session(
+        invoker: RTSNodeInvoker,
+        agentNode: any RTSAgentNode,
+        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
+    ) -> RTSLLMSession {
+        Self.buildSession(apiKeys: apiKeys, invoker: invoker, agentNode: agentNode, onNewSession: onNewSession)
     }
 
-    private func buildSession(invoker: RTSNodeInvoker, agentNode: any RTSAgentNode) -> (RTSLLMSession, [RTSLLMSession]) {
-        var allSubSessions: [RTSLLMSession] = []
-
+    private static func buildSession(
+        apiKeys: [RTSLLMProviderKind: String],
+        invoker: RTSNodeInvoker,
+        agentNode: any RTSAgentNode,
+        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
+    ) -> RTSLLMSession {
         let conduitTools: [any Tool] = agentNode.tools.map { tool in
             if let agentTool = tool as? RTSAgentTool {
-                let (subSession, deeperSubSessions) = buildSession(invoker: invoker, agentNode: agentTool.wrappedAgent)
-                allSubSessions.append(subSession)
-                allSubSessions.append(contentsOf: deeperSubSessions)
+                let makeSession: @Sendable () -> RTSLLMSession = {
+                    RTSLLMGateway.buildSession(
+                        apiKeys: apiKeys,
+                        invoker: invoker,
+                        agentNode: agentTool.wrappedAgent,
+                        onNewSession: onNewSession
+                    )
+                }
                 return RTSConduitAgentToolBridge(
                     agentTool: agentTool,
-                    subSession: subSession,
+                    makeSession: makeSession,
+                    onNewSession: onNewSession,
                     nodeInvoker: invoker,
                     createdBy: agentNode
                 )
@@ -48,8 +61,7 @@ public class RTSLLMGateway {
         case .openAI(modelIDString: let modelIDString):
             let openAIProvider = OpenAIProvider(apiKey: apiKey)
             let model = ModelIdentifier.openAI(modelIDString)
-            let session = RTSLLMSession.build(provider: openAIProvider, model: model, agentNode: agentNode, conduitTools: conduitTools)
-            return (session, allSubSessions)
+            return RTSLLMSession.build(provider: openAIProvider, model: model, agentNode: agentNode, conduitTools: conduitTools)
         }
     }
 }
