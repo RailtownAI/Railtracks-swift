@@ -14,6 +14,7 @@ class ContentViewModel {
     enum ViewMode {
         case simple
         case math
+        case mathVerify
     }
     
     var libVersion: String = RailtracksSwift.version
