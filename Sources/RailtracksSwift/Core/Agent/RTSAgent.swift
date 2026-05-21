@@ -9,7 +9,6 @@ import Foundation
 import Logging
 
 public protocol RTSAgentNode: RTSNode {
-    // TODO: reassess the need to have RTSAgentNode and RTSFunctionNode as protocol over concrete class
     var id: UUID { get }
     var agentName: String { get }
     var tools: [any RTSToolNode] { get }

@@ -42,9 +42,9 @@ extension RTSFlowGraph {
 
         let run = RTSFlowRun(
             name: rootFinish?.name ?? flowName,
-            runID: rootFinish?.runID?.uuidString ?? "N/A", // TODO: runID shouldn't be empty
+            runID: rootFinish?.runID?.uuidString ?? "N/A",
             nodes: nodes,
-            status: .completed, // TODO: reflect actual status once error propagation is implemented
+            status: .completed, // TODO: 5893 - reflect actual status once error propagation is implemented
             edges: edges,
             steps: steps,
             startTime: startTime,

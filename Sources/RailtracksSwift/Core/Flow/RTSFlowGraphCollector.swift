@@ -22,9 +22,7 @@ actor RTSFlowGraphCollector {
     var startTime: Date?
     var endTime: Date?
 
-    // TODO: assuming single flow -> single run for now;
-    // TODO: if multiple run within a flow is allowed, will need to the followings in dictionary with run id as key
-    var steps: [RTSStamp] = []  // TODO: populate steps properly and generate JSON from here instead of grabbing from fields in nodeEvents
+    var steps: [RTSStamp] = []
     var nodeEvents: [RTSNodeEvent] = []
     var edgeEvents: [RTSEdgeEvent] = []
 
@@ -238,8 +236,8 @@ actor RTSFlowGraphCollector {
             try json.write(to: url)
         } catch {
             log.debug("☠️🎁 unable to encode flow graph to json and write to file: \(filename).json")
-            // TODO: throw error upward to app level instead of only capture in log here;
-            // TODO: log generation is side task from main execution, so would need to build independent error pipe
+            // TODO: 5893 - throw error upward to app level instead of only capture in log here;
+            // TODO: 5893 - log generation is side task from main execution, so would need to build independent error pipe
 //            throw RTSError.writeFileFailed("Write to file \(filename) failed")
         }
     }
