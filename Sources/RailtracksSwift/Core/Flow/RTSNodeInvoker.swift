@@ -37,7 +37,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
     ) async throws -> RTSOutput {
         var mutableNode = node
         mutableNode.inputs = input
-        return try await invokeCore(node, input: input, createdBy: createdBy) { runID in
+        return try await invokeCore(node, nodeType: .agent, input: input, createdBy: createdBy) { runID in
             try await mutableNode.invoke(runID: runID, session: session)
         }
     }
@@ -49,13 +49,14 @@ public class RTSNodeInvoker: @unchecked Sendable {
     ) async throws -> RTSOutput {
         var mutableNode = node
         mutableNode.inputs = input
-        return try await invokeCore(node, input: input, createdBy: createdBy) { runID in
+        return try await invokeCore(node, nodeType: .tool, input: input, createdBy: createdBy) { runID in
             try await mutableNode.invoke(runID: runID)
         }
     }
 
     private func invokeCore(
         _ node: some RTSNode,
+        nodeType: RTSFlowNodeType,
         input: RTSInput,
         createdBy: (any RTSNode)? = nil,
         execute: (UUID) async throws -> RTSOutput
@@ -67,7 +68,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             event = .startCreate(node.name())
         }
         let creationStamp = await stampFactory.makeStamp(event: event)
-        await publishNodeCreated(node, stamp: creationStamp, createdBy: createdBy)
+        await publishNodeCreated(node, nodeType: nodeType, stamp: creationStamp, createdBy: createdBy)
 
         let runID = UUID()
         var mutableNode = node
@@ -84,10 +85,10 @@ public class RTSNodeInvoker: @unchecked Sendable {
             invokeError = error
             output = [:]
         }
-        
+
         let completionStamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
         await publishEdgeFinished(edgeID: edgeID, stamp: completionStamp, from: createdBy, to: node, input: input, output: output, error: invokeError)
-        await publishNodeFinished(node, stamp: completionStamp, runID: runID, input: input, output: output, error: invokeError)
+        await publishNodeFinished(node, nodeType: nodeType, stamp: completionStamp, runID: runID, input: input, output: output, error: invokeError)
 
         if let invokeError { throw invokeError }
         return output
@@ -95,6 +96,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishNodeCreated(
         _ node: some RTSNode,
+        nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         createdBy: (any RTSNode)?
     ) async {
@@ -102,6 +104,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             RTSNodeEvent(
                 nodeID: node.id,
                 name: node.name(),
+                nodeType: nodeType,
                 stamp: stamp
             )
         )
@@ -109,6 +112,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishNodeFinished(
         _ node: some RTSNode,
+        nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         runID: UUID,
         input: RTSInput,
@@ -119,6 +123,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             RTSNodeEvent(
                 nodeID: node.id,
                 name: node.name(),
+                nodeType: nodeType,
                 stamp: stamp,
                 input: input,
                 output: error == nil ? output : nil,

@@ -13,7 +13,7 @@ import Logging
 /// then calls a verifier sub-agent to confirm the result before responding.
 @Observable
 class MathVerifyViewModel {
-    let prompt: String = "What is 50 + 20 x 8 - 4? Give me the final answer in a single number without any description."
+    let prompt: String = "What is 50 + 20 x 8 - 4 x 5? Give me the final answer in a single number without any description."
     var promptResult: String?
 
     func startPrompt() {
@@ -52,8 +52,12 @@ class MathVerifyViewModel {
                 name: "MathSolver",
                 tools: mathTools,
                 systemMessage: "You are a Math assistant. " +
-                    "Use the math tools to perform each calculation step. " +
-                    "After computing your final answer, use the MathVerifier tool to confirm it is correct before responding."
+                "Use the math tools to perform each calculation step. " +
+                "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +
+                "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. " +
+                "If there is multiplication in the math, you must use the provided multiplication tool to perform the calculation. " +
+                "If there is division in the math, you must use the provided division tool to perform the calculation. " +
+                "After computing your final answer, use the MathVerifier tool to confirm it is correct before responding."
             )
 
             let flow = RTSFlow(title: "Math Verify flow")

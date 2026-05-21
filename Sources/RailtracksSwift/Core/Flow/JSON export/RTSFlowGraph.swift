@@ -149,7 +149,7 @@ public struct RTSFlowGraphNodeCreation: Codable {
 
 // MARK: - RTSFlowNodeType
 
-public enum RTSFlowNodeType: String, Codable {
+public enum RTSFlowNodeType: String, Codable, Sendable {
     case agent = "Agent"
     case tool = "Tool"
 }

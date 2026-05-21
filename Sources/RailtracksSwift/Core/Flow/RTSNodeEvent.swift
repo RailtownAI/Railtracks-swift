@@ -11,6 +11,7 @@ import Foundation
 struct RTSNodeEvent {
     let id: UUID
     let name: String
+    let nodeType: RTSFlowNodeType
     let stamp: RTSStamp
     var input: RTSInput?
     var output: RTSOutput?
@@ -21,6 +22,7 @@ struct RTSNodeEvent {
     init(
         nodeID: UUID,
         name: String,
+        nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         input: RTSInput? = nil,
         output: RTSOutput? = nil,
@@ -30,6 +32,7 @@ struct RTSNodeEvent {
     ) {
         self.id = nodeID
         self.name = name
+        self.nodeType = nodeType
         self.stamp = stamp
         self.input = input
         self.output = output

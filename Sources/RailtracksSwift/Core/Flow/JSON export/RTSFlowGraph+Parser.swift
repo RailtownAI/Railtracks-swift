@@ -65,7 +65,7 @@ extension RTSFlowGraph {
     // MARK: - Node
 
     private static func makeNode(finish: RTSNodeEvent, create: RTSNodeEvent?) async -> RTSFlowGraphNode {
-        let nodeType = inferNodeType(from: create ?? finish)
+        let nodeType = (create ?? finish).nodeType
         let latency = create.map {
             RTSFlowGraphLatency(totalTime: finish.stamp.timestamp.timeIntervalSince($0.stamp.timestamp))
         }
@@ -140,16 +140,6 @@ extension RTSFlowGraph {
             status: status,
             output: output
         )
-    }
-
-    // Heuristic: .startCreate = root agent, .create = tool (only tools use createdBy in current design).
-    // TODO: add explicit nodeType to RTSNodeEvent when sub-agents are introduced
-    private static func inferNodeType(from event: RTSNodeEvent) -> RTSFlowNodeType {
-        switch event.stamp.event {
-        case .startCreate:     return .agent
-        case .create:          return .tool
-        case .finishExecution: return .agent
-        }
     }
 
     // MARK: - LLM Details
