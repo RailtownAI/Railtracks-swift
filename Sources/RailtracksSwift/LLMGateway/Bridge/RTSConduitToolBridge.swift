@@ -44,14 +44,14 @@ struct RTSConduitAgentToolBridge: Tool {
     typealias Output = String
 
     private let agentTool: RTSAgentTool
-    private let makeSession: @Sendable () -> RTSLLMSession
+    private let makeSession: @Sendable () throws -> RTSLLMSession
     private let onNewSession: @Sendable (RTSLLMSession) -> Void
     private let nodeInvoker: RTSNodeInvoker
     private let createdBy: any RTSAgentNode
 
     init(
         agentTool: RTSAgentTool,
-        makeSession: @escaping @Sendable () -> RTSLLMSession,
+        makeSession: @escaping @Sendable () throws -> RTSLLMSession,
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
         nodeInvoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode
@@ -73,9 +73,9 @@ struct RTSConduitAgentToolBridge: Tool {
         let toolArgs = try JSONDecoder().decode(RTSInput.self, from: jsonData)
         var input = agentTool.wrappedAgent.inputs
         input.merge(toolArgs) { _, new in new }
-        let session = makeSession()
+        let session = try makeSession()
         onNewSession(session)
-        let output = try await nodeInvoker.invoke(agentTool.wrappedAgent, input: input, session: session, createdBy: createdBy)
+        let output = try await nodeInvoker.invokeAgent(agentTool.wrappedAgent, input: input, session: session, createdBy: createdBy)
         guard let data = try? JSONEncoder().encode(output),
               let result = String(data: data, encoding: .utf8) else {
             throw RTSError.encodingFailed()

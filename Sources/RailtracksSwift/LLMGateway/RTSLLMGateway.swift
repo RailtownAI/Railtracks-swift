@@ -21,8 +21,8 @@ public class RTSLLMGateway {
         invoker: RTSNodeInvoker,
         agentNode: any RTSAgentNode,
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
-    ) -> RTSLLMSession {
-        Self.buildSession(apiKeys: apiKeys, invoker: invoker, agentNode: agentNode, onNewSession: onNewSession)
+    ) throws -> RTSLLMSession {
+        try Self.buildSession(apiKeys: apiKeys, invoker: invoker, agentNode: agentNode, onNewSession: onNewSession)
     }
 
     private static func buildSession(
@@ -30,11 +30,11 @@ public class RTSLLMGateway {
         invoker: RTSNodeInvoker,
         agentNode: any RTSAgentNode,
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
-    ) -> RTSLLMSession {
+    ) throws -> RTSLLMSession {
         let conduitTools: [any Tool] = agentNode.tools.map { tool in
             if let agentTool = tool as? RTSAgentTool {
-                let makeSession: @Sendable () -> RTSLLMSession = {
-                    RTSLLMGateway.buildSession(
+                let makeSession: @Sendable () throws -> RTSLLMSession = {
+                    try RTSLLMGateway.buildSession(
                         apiKeys: apiKeys,
                         invoker: invoker,
                         agentNode: agentTool.wrappedAgent,
@@ -55,7 +55,7 @@ public class RTSLLMGateway {
 
         let provider = agentNode.llmProvider
         guard let apiKey = apiKeys[provider.kind] else {
-            fatalError("No API key provided for \(provider.providerName)")
+            throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
         }
         switch provider {
         case .openAI(modelIDString: let modelIDString):
