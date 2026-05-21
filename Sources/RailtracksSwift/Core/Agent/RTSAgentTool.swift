@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct RTSAgentTool {
+public struct RTSAgentTool: Sendable {
     var wrappedAgent: any RTSAgentNode
     let description: String
     let parameters: RTSToolSchema

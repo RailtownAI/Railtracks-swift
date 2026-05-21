@@ -131,8 +131,11 @@ extension RTSFlowGraph {
 
     private static func makeEdgeDetails(from event: RTSEdgeEvent, status: RTSFlowStatus) -> RTSFlowGraphEdgeDetails {
         let inputKwargs: [String: RTSGeneratedContent] = (event.input ?? [:]).mapValues { $0.toGeneratedContent() }
-        let output: RTSGeneratedContent? = event.output.map { output in
-            RTSGeneratedContent(kind: .structure(output.mapValues { $0.toGeneratedContent() }))
+        let output: RTSEdgeOutput = switch event.nodeType {
+        case .tool:
+            .structured(event.output.map { RTSGeneratedContent(kind: .structure($0.mapValues { $0.toGeneratedContent() })) })
+        case .agent:
+            .agentStatus(event.error == nil ? "Success" : "Failed")
         }
         return RTSFlowGraphEdgeDetails(
             inputArgs: [],

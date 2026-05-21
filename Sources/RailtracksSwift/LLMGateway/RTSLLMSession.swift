@@ -53,12 +53,11 @@ public final class RTSLLMSession: Sendable {
 
     private func run(_ prompt: String, runID: UUID?) async throws -> String {
         let response = try await _run(prompt, runID)
+        #if DEBUG
         do {
             let encoder = JSONEncoder()
-            #if DEBUG
             // petty format cost extra storage and will be an issue when JSON file size is of concern
             encoder.outputFormatting = .prettyPrinted
-            #endif
             let json = try encoder.encode(self.messages())
             log.trace("💎 Messages: \(String(data: json, encoding: .utf8) ?? "<invalid JSON data>")")
             let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -69,6 +68,7 @@ public final class RTSLLMSession: Sendable {
         } catch {
             log.debug("☠️💎 RTSLLMSession: failed to write message log: \(error)")
         }
+        #endif
         return response
     }
 
@@ -85,8 +85,7 @@ public final class RTSLLMSession: Sendable {
     }
     
     public func logFileName() -> String {
-        // TODO: implement json file name logic
-        return "temporary_json_log"
+        return "debug_raw_message_json_log"
     }
 }
 

@@ -71,11 +71,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         await publishNodeCreated(node, nodeType: nodeType, stamp: creationStamp, createdBy: createdBy)
 
         let runID = UUID()
-        var mutableNode = node
-        mutableNode.inputs = input
-
         let edgeID = createdBy == nil ? runID : UUID()
-        await publishEdgeCreated(edgeID: edgeID, stamp: creationStamp, from: createdBy, to: node, input: input)
+        await publishEdgeCreated(edgeID: edgeID, nodeType: nodeType, stamp: creationStamp, from: createdBy, to: node, input: input)
 
         let output: RTSOutput
         var invokeError: Error?
@@ -87,7 +84,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         }
 
         let completionStamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
-        await publishEdgeFinished(edgeID: edgeID, stamp: completionStamp, from: createdBy, to: node, input: input, output: output, error: invokeError)
+        await publishEdgeFinished(edgeID: edgeID, nodeType: nodeType, stamp: completionStamp, from: createdBy, to: node, input: input, output: output, error: invokeError)
         await publishNodeFinished(node, nodeType: nodeType, stamp: completionStamp, runID: runID, input: input, output: output, error: invokeError)
 
         if let invokeError { throw invokeError }
@@ -135,6 +132,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishEdgeCreated(
         edgeID: UUID,
+        nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         from source: (any RTSNode)?,
         to target: some RTSNode,
@@ -144,6 +142,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             RTSEdgeEvent(
                 id: edgeID,
                 stamp: stamp,
+                nodeType: nodeType,
                 sourceNodeID: source?.id,
                 targetNodeID: target.id,
                 sourceName: source?.name(),
@@ -155,6 +154,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishEdgeFinished(
         edgeID: UUID,
+        nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         from source: (any RTSNode)?,
         to target: some RTSNode,
@@ -166,6 +166,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             RTSEdgeEvent(
                 id: edgeID,
                 stamp: stamp,
+                nodeType: nodeType,
                 sourceNodeID: source?.id,
                 targetNodeID: target.id,
                 sourceName: source?.name(),
