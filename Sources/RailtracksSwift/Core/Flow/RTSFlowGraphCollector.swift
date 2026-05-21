@@ -236,13 +236,14 @@ actor RTSFlowGraphCollector {
                 .appendingPathExtension("json")
             try json.write(to: url)
         } catch {
-            // TODO: throw error upward to app level instead of only capture in log here
             log.debug("☠️🎁 unable to encode flow graph to json and write to file: \(filename).json")
+            // TODO: throw error upward to app level instead of only capture in log here;
+            // TODO: log generation is side task from main execution, so would need to build independent error pipe
+//            throw RTSError.writeFileFailed("Write to file \(filename) failed")
         }
     }
     
     func generateJSONFileName() -> String {
-        // TODO: implement json file name logic, assess permission of public for app-side injection
-        return "output_json_log"
+        return "\(flowName)_\(sessionID.uuidString)"
     }
 }

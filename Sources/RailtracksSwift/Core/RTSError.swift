@@ -12,4 +12,5 @@ public enum RTSError: Error {
     case missingOutput(String)
     case encodingFailed(String? = nil)
     case decodingFailed(String? = nil)
+    case writeFileFailed(String? = nil)
 }
