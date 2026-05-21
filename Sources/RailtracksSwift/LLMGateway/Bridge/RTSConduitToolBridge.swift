@@ -24,7 +24,7 @@ struct RTSConduitToolBridge: Tool {
         log.debug("🌁 RTSConduitToolBridge - \(node.name()) is called with \(arguments.jsonString)")
         let jsonData = Data(arguments.jsonString.utf8)
         let input = try JSONDecoder().decode(RTSInput.self, from: jsonData)
-        let output = try await nodeInvoker.invoke(node, input: input, createdBy: createdBy)
+        let output = try await nodeInvoker.invokeTool(node, input: input, createdBy: createdBy)
         guard let data = try? JSONEncoder().encode(output),
               let result = String(data: data, encoding: .utf8) else {
             throw RTSError.encodingFailed()

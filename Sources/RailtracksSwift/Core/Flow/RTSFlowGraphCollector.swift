@@ -89,7 +89,7 @@ actor RTSFlowGraphCollector {
         cancellables.removeAll()
     }
     
-    nonisolated func subscribeMessage(_ publisher: MessagePublisher) {
+    func subscribeMessage(_ publisher: MessagePublisher) async {
         publisher.messagePublisher
             .sink { messages in
                 Task { [weak self] in

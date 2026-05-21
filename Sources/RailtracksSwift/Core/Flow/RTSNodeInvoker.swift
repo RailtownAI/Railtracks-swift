@@ -29,7 +29,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         self.stampFactory = stampFactory
     }
     
-    func invoke(
+    func invokeAgent(
         _ node: any RTSAgentNode,
         input: RTSInput,
         session: RTSLLMSession,
@@ -42,7 +42,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         }
     }
 
-    func invoke(
+    func invokeTool(
         _ node: some RTSToolNode,
         input: RTSInput,
         createdBy: (any RTSNode)? = nil

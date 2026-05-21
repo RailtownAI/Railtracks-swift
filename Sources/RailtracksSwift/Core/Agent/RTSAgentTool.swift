@@ -50,5 +50,27 @@ extension RTSAgentTool: RTSToolNode {
     public var parameterSchema: RTSToolSchema {
         return parameters
     }
+    
+    /**
+    Summary of the call chain for a tool call:
+    
+    Conduit LLM runtime
+      → RTSConduitToolBridge.call          (regular tool)
+          → RTSNodeInvoker.invoke(RTSToolNode)
+              → invokeCore { mutableNode.invoke(runID:) }
+                  → RTSToolNode.invoke(runID:)
+                      → RTSToolNode.invoke()
+                          → callableRoutine.closure(inputs)
 
+      → RTSConduitAgentToolBridge.call     (agent-as-tool)
+          → RTSNodeInvoker.invoke(RTSAgentNode)
+              → invokeCore { mutableNode.invoke(runID:session:) }
+                  → RTSAgentNode.invoke(runID:session:)
+                      → RTSLLMSession.run(...)
+     
+     AgentTool should never go through regular tool path or be called directly
+     */
+    public func invoke(runID: UUID) async throws -> RTSOutput {
+        throw RTSError.invalidInvocation("RTSAgentTool must be invoked via RTSConduitAgentToolBridge, not directly through RTSToolNode")
+    }
 }

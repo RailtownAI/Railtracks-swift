@@ -34,9 +34,13 @@ public class RTSFlow {
         await flowGraphCollector.setup()
         
         let session = gateway.session(invoker: nodeInvoker, agentNode: agent) { [flowGraphCollector] newSession in
-            flowGraphCollector.subscribeMessage(newSession)
+            Task {
+                await flowGraphCollector.subscribeMessage(newSession)
+            }
         }
-        flowGraphCollector.subscribeMessage(session)
+        Task {
+            await flowGraphCollector.subscribeMessage(session)
+        }
 
         var input = agent.inputs
         input[agent.inputKeyPrompt] = .string(prompt)
@@ -44,7 +48,7 @@ public class RTSFlow {
             input[agent.inputKeySystemMessage] = .string(systemMessage)
         }
 
-        let output = try await nodeInvoker.invoke(agent, input: input, session: session)
+        let output = try await nodeInvoker.invokeAgent(agent, input: input, session: session)
         guard case let .string(result) = output[agent.outputKeyResult] else {
             throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
         }
