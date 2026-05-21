@@ -89,13 +89,14 @@ actor RTSFlowGraphCollector {
         cancellables.removeAll()
     }
     
-    func subscribeMessage(_ publisher: MessagePublisher) async {
-        publisher.messagePublisher
-            .sink { messages in
-                Task { [weak self] in
-                    await self?.processMessages(messages)
-                }
+    func subscribeMessage(_ publisher: MessagePublisher) {
+        let handler: @Sendable ([RTSMessage]) -> Void = { [weak self] messages in
+            Task { [weak self] in
+                await self?.processMessages(messages)
             }
+        }
+        publisher.messagePublisher
+            .sink(receiveValue: handler)
             .store(in: &cancellables)
     }
     
