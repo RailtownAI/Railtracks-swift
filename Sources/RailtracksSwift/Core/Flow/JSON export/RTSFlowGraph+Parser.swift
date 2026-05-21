@@ -42,9 +42,9 @@ extension RTSFlowGraph {
 
         let run = RTSFlowRun(
             name: rootFinish?.name ?? flowName,
-            runID: rootFinish?.runID?.uuidString ?? "N/A", // TODO: runID shouldn't be empty
+            runID: rootFinish?.runID?.uuidString ?? "N/A",
             nodes: nodes,
-            status: .completed, // TODO: reflect actual status once error propagation is implemented
+            status: .completed, // TODO: 5893 - reflect actual status once error propagation is implemented
             edges: edges,
             steps: steps,
             startTime: startTime,
@@ -65,7 +65,7 @@ extension RTSFlowGraph {
     // MARK: - Node
 
     private static func makeNode(finish: RTSNodeEvent, create: RTSNodeEvent?) async -> RTSFlowGraphNode {
-        let nodeType = inferNodeType(from: create ?? finish)
+        let nodeType = (create ?? finish).nodeType
         let latency = create.map {
             RTSFlowGraphLatency(totalTime: finish.stamp.timestamp.timeIntervalSince($0.stamp.timestamp))
         }
@@ -131,8 +131,11 @@ extension RTSFlowGraph {
 
     private static func makeEdgeDetails(from event: RTSEdgeEvent, status: RTSFlowStatus) -> RTSFlowGraphEdgeDetails {
         let inputKwargs: [String: RTSGeneratedContent] = (event.input ?? [:]).mapValues { $0.toGeneratedContent() }
-        let output: RTSGeneratedContent? = event.output.map { output in
-            RTSGeneratedContent(kind: .structure(output.mapValues { $0.toGeneratedContent() }))
+        let output: RTSEdgeOutput = switch event.nodeType {
+        case .tool:
+            .structured(event.output.map { RTSGeneratedContent(kind: .structure($0.mapValues { $0.toGeneratedContent() })) })
+        case .agent:
+            .agentStatus(event.error == nil ? "Success" : "Failed")
         }
         return RTSFlowGraphEdgeDetails(
             inputArgs: [],
@@ -140,16 +143,6 @@ extension RTSFlowGraph {
             status: status,
             output: output
         )
-    }
-
-    // Heuristic: .startCreate = root agent, .create = tool (only tools use createdBy in current design).
-    // TODO: add explicit nodeType to RTSNodeEvent when sub-agents are introduced
-    private static func inferNodeType(from event: RTSNodeEvent) -> RTSFlowNodeType {
-        switch event.stamp.event {
-        case .startCreate:     return .agent
-        case .create:          return .tool
-        case .finishExecution: return .agent
-        }
     }
 
     // MARK: - LLM Details

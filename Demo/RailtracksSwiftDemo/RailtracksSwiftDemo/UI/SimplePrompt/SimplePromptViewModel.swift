@@ -22,13 +22,7 @@ class SimplePromptViewModel {
                 Log.error("No API key found")
                 return
             }
-            guard let gateway = RTSLLMGateway(
-                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
-                apiKey: apiKey
-            ) else {
-                Log.error("Cannot establish LLM gateway")
-                return
-            }
+            let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
             
             let flow = RTSFlow(title: "Simple prompt flow")
 

@@ -11,6 +11,7 @@ import Foundation
 struct RTSEdgeEvent {
     let id: UUID
     let stamp: RTSStamp
+    let nodeType: RTSFlowNodeType
     let sourceNodeID: UUID?
     let targetNodeID: UUID
     let sourceName: String?

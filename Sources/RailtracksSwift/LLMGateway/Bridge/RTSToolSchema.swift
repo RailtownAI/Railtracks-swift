@@ -6,10 +6,10 @@
 //
 
 import Foundation
-import ConduitAdvanced
+import Conduit
 
-public struct RTSToolSchema {
-    public struct Parameter {
+public struct RTSToolSchema: Sendable {
+    public struct Parameter: Sendable {
         public let name: String
         public let description: String
         public let type: RTSValueType

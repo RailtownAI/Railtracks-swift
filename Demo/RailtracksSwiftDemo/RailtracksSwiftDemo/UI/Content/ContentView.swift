@@ -25,6 +25,12 @@ struct ContentView: View {
                 }
                 .background(viewModel.mode == .math ? Color.accentColor.opacity(0.2) : Color.clear)
                 .cornerRadius(8)
+                
+                Button("Verified Math") {
+                    viewModel.mode = .mathVerify
+                }
+                .background(viewModel.mode == .mathVerify ? Color.accentColor.opacity(0.2) : Color.clear)
+                .cornerRadius(8)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -36,6 +42,8 @@ struct ContentView: View {
                 SimplePromptView()
             case .math:
                 MathView()
+            case .mathVerify:
+                MathVerifyView()
             }
         }
         .padding()

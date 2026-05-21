@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import ConduitAdvanced
+import Conduit
 
 /// Type-safe strings for openAI model ID
 public enum RTSOpenAIModelID {
@@ -19,6 +19,12 @@ public enum RTSOpenAIModelID {
             return OpenAIModelID.gpt4o.rawValue
         }
     }
+}
+
+/// Provider kind without model information — used as dictionary key for API keys
+public enum RTSLLMProviderKind: Hashable, Sendable {
+    case openAI
+    // TODO: complete the rest of the cases
 }
 
 /// LLM Providers that store model ID as string in its associated value
@@ -36,6 +42,12 @@ public enum RTSLLMProvider: CustomStringConvertible, Sendable {
     public var providerName: String {
         switch self {
         case .openAI: return "OpenAI"
+        }
+    }
+
+    public var kind: RTSLLMProviderKind {
+        switch self {
+        case .openAI: return .openAI
         }
     }
 }
