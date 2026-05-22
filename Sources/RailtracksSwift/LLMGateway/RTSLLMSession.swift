@@ -18,7 +18,8 @@ public final class RTSLLMSession: Sendable {
     private let _run: @Sendable (String, UUID?) async throws -> String
     private let _setSystemPrompt: @Sendable (String, UUID?) -> Void
     private let _messages: (@Sendable () -> [RTSMessage])
-    nonisolated(unsafe) let messageSubject: PassthroughSubject<[RTSMessage], Never>
+    let messageSubject: BufferedPassthroughSubject<[RTSMessage]>
+    private let agentName: String
 
     /// - Parameter run: Sends a prompt to the underlying LLM and returns the response text.
     ///   The optional `UUID` is a `runID` that stamps all new messages produced during this call
@@ -35,12 +36,14 @@ public final class RTSLLMSession: Sendable {
         run: @escaping @Sendable (String, UUID?) async throws -> String,
         setSystemPrompt: @escaping @Sendable (String, UUID?) -> Void,
         message: @escaping @Sendable () -> [RTSMessage],
-        messageSubject: PassthroughSubject<[RTSMessage], Never>
+        messageSubject: BufferedPassthroughSubject<[RTSMessage]>,
+        agentName: String
     ) {
         self._run = run
         self._setSystemPrompt = setSystemPrompt
         self._messages = message
         self.messageSubject = messageSubject
+        self.agentName = agentName
     }
 
     public func run(_ prompt: String) async throws -> String {
@@ -61,7 +64,7 @@ public final class RTSLLMSession: Sendable {
             let json = try encoder.encode(self.messages())
             log.trace("💎 Messages: \(String(data: json, encoding: .utf8) ?? "<invalid JSON data>")")
             let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent(logFileName())
+                .appendingPathComponent("debug_\(agentName)_\(runID?.uuidString ?? "nil")_messages")
                 .appendingPathExtension("json")
             try json.write(to: url)
             log.debug("💎 RTSLLMSession: message log written to \(url.path)")
@@ -83,15 +86,11 @@ public final class RTSLLMSession: Sendable {
     public func messages() -> [RTSMessage] {
         return _messages()
     }
-    
-    public func logFileName() -> String {
-        return "debug_raw_message_json_log"
-    }
 }
 
 extension RTSLLMSession: MessagePublisher {
     var messagePublisher: AnyPublisher<[RTSMessage], Never> {
-        return messageSubject.eraseToAnyPublisher()
+        return messageSubject.replayPublisher
     }
 }
 
@@ -113,7 +112,7 @@ extension RTSLLMSession {
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)
         }
         let runIDMap = RunIDMap()
-        let relay = SendablePassthroughSubject<[RTSMessage]>()
+        let relay = BufferedPassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
             run: { prompt, runID in
                 // Capturing ids before send to filter out messages that doesn't belong to latest prompt
@@ -149,7 +148,8 @@ extension RTSLLMSession {
             message: {
                 chatSession.messages.map { $0.toRTSMessage(runID: runIDMap[$0.id], providerName: providerName) }
             },
-            messageSubject: relay.subject
+            messageSubject: relay,
+            agentName: agentName
         )
     }
 }
