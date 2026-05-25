@@ -16,9 +16,9 @@ public protocol RTSAgentNode: RTSNode {
 }
 
 public extension RTSAgentNode {
-    var inputKeySystemMessage: String { "systemMessage" }
-    var inputKeyPrompt: String { "prompt" }
-    var outputKeyResult: String { "result" }
+    public var inputKeySystemMessage: String { "systemMessage" }
+    public var inputKeyPrompt: String { "prompt" }
+    public var outputKeyResult: String { "result" }
 
     var agentName: String {
         String(describing: type(of: self))
