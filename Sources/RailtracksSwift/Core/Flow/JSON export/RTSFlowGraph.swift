@@ -10,6 +10,7 @@ import Foundation
 // MARK: - RTSFlowGraph
 
 /// A structure representation of JSON output that can by consumed by python visualizer
+@EncodeNulls
 public struct RTSFlowGraph: Codable {
     /// Name of the flow
     public let flowName: String
@@ -38,17 +39,6 @@ public struct RTSFlowGraph: Codable {
         case runs
     }
 
-    /// Custom econder to overwrite the default `encodeIfPresent` and allow output of value of `null`
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(flowName, forKey: .flowName)
-        try container.encode(flowID, forKey: .flowID)
-        try container.encode(sessionID, forKey: .sessionID)
-        try container.encode(sessionName, forKey: .sessionName)
-        try container.encode(startTime, forKey: .startTime)
-        try container.encode(endTime, forKey: .endTime)
-        try container.encode(runs, forKey: .runs)
-    }
 }
 
 // MARK: - RTSFlowRun
@@ -92,6 +82,7 @@ public struct RTSFlowGraphStamp: Codable {
 
 // MARK: - RTSFlowGraphNode
 
+@EncodeNulls
 public struct RTSFlowGraphNode: Codable {
     public let identifier: String
     public let nodeType: RTSFlowNodeType
@@ -106,21 +97,13 @@ public struct RTSFlowGraphNode: Codable {
         case name, stamp, details, parent
     }
 
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(identifier, forKey: .identifier)
-        try container.encode(nodeType, forKey: .nodeType)
-        try container.encode(name, forKey: .name)
-        try container.encode(stamp, forKey: .stamp)
-        try container.encode(details, forKey: .details)
-        try container.encode(parent, forKey: .parent)
-    }
 }
 
 // MARK: - RTSFlowGraphNodeCreation
 
 /// Flat creation-time snapshot of a node, used as the parent reference.
 /// Mirrors RTSFlowGraphNode without the recursive parent field.
+@EncodeNulls
 public struct RTSFlowGraphNodeCreation: Codable {
     public let identifier: String
     public let nodeType: RTSFlowNodeType
@@ -136,15 +119,6 @@ public struct RTSFlowGraphNodeCreation: Codable {
         case name, stamp, details, parent
     }
 
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(identifier, forKey: .identifier)
-        try container.encode(nodeType, forKey: .nodeType)
-        try container.encode(name, forKey: .name)
-        try container.encode(stamp, forKey: .stamp)
-        try container.encode(details, forKey: .details)
-        try container.encode(parent, forKey: .parent)
-    }
 }
 
 // MARK: - RTSFlowNodeType
@@ -219,6 +193,7 @@ public struct RTSFlowGraphLatency: Codable {
 
 // MARK: - RTSFlowGraphEdge
 
+@EncodeNulls
 public struct RTSFlowGraphEdge: Codable {
     public let source: String?
     public let target: String
@@ -231,22 +206,13 @@ public struct RTSFlowGraphEdge: Codable {
         case source, target, identifier, stamp, details, parent
     }
 
-    /// Custom econder to overwrite the default `encodeIfPresent` and allow output of value of `null`
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(source, forKey: .source)
-        try container.encode(target, forKey: .target)
-        try container.encode(identifier, forKey: .identifier)
-        try container.encode(stamp, forKey: .stamp)
-        try container.encode(details, forKey: .details)
-        try container.encode(parent, forKey: .parent)
-    }
 }
 
 // MARK: - RTSFlowGraphEdgeCreation
 
 /// Flat creation-time snapshot of an edge, used as the parent reference.
 /// Mirrors RTSFlowGraphEdge without the recursive parent field.
+@EncodeNulls
 public struct RTSFlowGraphEdgeCreation: Codable {
     public let source: String?
     public let target: String
@@ -260,16 +226,6 @@ public struct RTSFlowGraphEdgeCreation: Codable {
         case source, target, identifier, stamp, details, parent
     }
 
-    /// Custom econder to overwrite the default `encodeIfPresent` and allow output of value of `null`
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(source, forKey: .source)
-        try container.encode(target, forKey: .target)
-        try container.encode(identifier, forKey: .identifier)
-        try container.encode(stamp, forKey: .stamp)
-        try container.encode(details, forKey: .details)
-        try container.encode(parent, forKey: .parent)
-    }
 }
 
 // MARK: - RTSFlowGraphEdgeDetails
