@@ -40,7 +40,7 @@ let package = Package(
     ],
     targets: [
         .macro(
-            name: "EncodeNullMacro",
+            name: "RTSMacro",
             dependencies: [
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax")
@@ -53,7 +53,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Conduit", package: "Conduit"),
-                "EncodeNullMacro"
+                "RTSMacro"
             ]
         ),
         .testTarget(

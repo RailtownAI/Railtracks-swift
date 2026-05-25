@@ -13,9 +13,12 @@ public protocol RTSAgentNode: RTSNode {
     var agentName: String { get }
     var tools: [any RTSToolNode] { get }
     var llmProvider: RTSLLMProvider { get }
+    var outputSchema: RTSOutputSchema? { get }
 }
 
 public extension RTSAgentNode {
+    var outputSchema: RTSOutputSchema? { nil }
+
     public var inputKeySystemMessage: String { "systemMessage" }
     public var inputKeyPrompt: String { "prompt" }
     public var outputKeyResult: String { "result" }
@@ -50,17 +53,20 @@ public struct RTSAgent: RTSAgentNode {
     public let agentName: String
     public let tools: [any RTSToolNode]
     public let llmProvider: RTSLLMProvider
+    public let outputSchema: RTSOutputSchema?
     public var inputs: RTSInput = [:]
 
     public init(
         llmProvider: RTSLLMProvider,
         name: String? = nil,
         tools: [any RTSToolNode] = [],
-        systemMessage: String? = nil
+        systemMessage: String? = nil,
+        outputSchema: RTSOutputSchema? = nil
     ) {
         self.agentName = name ?? "Agent"
         self.tools = tools
         self.llmProvider = llmProvider
+        self.outputSchema = outputSchema
         if let systemMessage {
             inputs[inputKeySystemMessage] = .string(systemMessage)
         }

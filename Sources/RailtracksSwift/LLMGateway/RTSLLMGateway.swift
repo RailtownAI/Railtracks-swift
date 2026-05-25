@@ -61,7 +61,7 @@ public class RTSLLMGateway {
         case .openAI(modelIDString: let modelIDString):
             let openAIProvider = OpenAIProvider(apiKey: apiKey)
             let model = ModelIdentifier.openAI(modelIDString)
-            return RTSLLMSession.build(provider: openAIProvider, model: model, agentNode: agentNode, conduitTools: conduitTools)
+            return try RTSLLMSession.build(provider: openAIProvider, model: model, agentNode: agentNode, conduitTools: conduitTools)
         }
     }
 }

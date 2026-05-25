@@ -1,18 +1,10 @@
-import SwiftCompilerPlugin
 import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-@main
-struct EncodeNullPlugin: CompilerPlugin {
-    let providingMacros: [Macro.Type] = [
-        EncodeNullsMacro.self
-    ]
-}
-
 /// Generates `encode(to:)` for the attached type, encoding each stored instance property
 /// and emitting `null` for `nil` optionals instead of omitting the key.
-public struct EncodeNullsMacro: MemberMacro {
+public struct RTSEncodeNullsMacro: MemberMacro {
     public static func expansion(
         of node: AttributeSyntax,
         providingMembersOf decl: some DeclGroupSyntax,
