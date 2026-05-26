@@ -115,7 +115,7 @@ extension RTSLLMSession {
             let generationSchema = try schema.toGenerationSchema()
             chatSession.config = chatSession.config
                 .responseFormat(.jsonSchema(name: schema.name, schema: generationSchema))
-                .maxTokens(nil)
+                .maxTokens(4096)
         }
         let runIDMap = RunIDMap()
         let relay = BufferedPassthroughSubject<[RTSMessage]>()
