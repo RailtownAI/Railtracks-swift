@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/Conduit",
       "state" : {
-        "revision" : "8e7a2d743d4217ed4319ec1b3ee271d56b1e591a",
-        "version" : "0.3.18"
+        "branch" : "5912-openAI-request-fix",
+        "revision" : "154a9fa2cba467c5ff1d50c9b1fda95cf24e522f"
       }
     },
     {
