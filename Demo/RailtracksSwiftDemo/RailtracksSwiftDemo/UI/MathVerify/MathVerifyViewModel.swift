@@ -26,7 +26,7 @@ class MathVerifyViewModel {
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
 
             let verifierAgent = RTSAgent(
-                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
+                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt5Mini.modelIDString),
                 name: "MathVerifier",
                 systemMessage: "You are a math verification assistant. Given a math problem and a proposed answer, verify whether the answer is correct. Respond with 'Correct' or 'Incorrect' followed by a brief explanation."
             )

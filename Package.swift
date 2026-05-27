@@ -21,7 +21,8 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/RailtownAI/Conduit",
-            exact: "0.3.18",
+            branch: "main",
+//            exact: "0.3.18",
             traits: [
                 .trait(name: "OpenAI"),
                 .trait(name: "OpenRouter"),
@@ -40,7 +41,7 @@ let package = Package(
     ],
     targets: [
         .macro(
-            name: "EncodeNullMacro",
+            name: "RTSMacro",
             dependencies: [
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax")
@@ -53,7 +54,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Conduit", package: "Conduit"),
-                "EncodeNullMacro"
+                "RTSMacro"
             ]
         ),
         .testTarget(

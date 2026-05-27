@@ -102,7 +102,7 @@ extension RTSLLMSession {
         model: P.ModelID,
         agentNode: any RTSAgentNode,
         conduitTools: [any Tool]
-    ) -> RTSLLMSession {
+    ) throws -> RTSLLMSession {
         let agentName = agentNode.agentName
         let providerName = agentNode.llmProvider.providerName
         log.debug("💎 RTSLLMSession: registering tools: [\(conduitTools.map({ $0.name }))]")
@@ -110,6 +110,12 @@ extension RTSLLMSession {
         if !conduitTools.isEmpty {
             chatSession.config = chatSession.config.tools(conduitTools)
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)
+        }
+        if let schema = agentNode.outputSchema {
+            let generationSchema = try schema.toGenerationSchema()
+            chatSession.config = chatSession.config
+                .responseFormat(.jsonSchema(name: schema.name, schema: generationSchema))
+                .maxTokens(agentNode.outputSchemaMaxToken)
         }
         let runIDMap = RunIDMap()
         let relay = BufferedPassthroughSubject<[RTSMessage]>()

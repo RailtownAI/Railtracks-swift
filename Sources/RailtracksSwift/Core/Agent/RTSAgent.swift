@@ -13,16 +13,19 @@ public protocol RTSAgentNode: RTSNode {
     var agentName: String { get }
     var tools: [any RTSToolNode] { get }
     var llmProvider: RTSLLMProvider { get }
+    var outputSchema: RTSOutputSchema? { get }
+    var outputSchemaMaxToken: Int { get }
 }
 
 public extension RTSAgentNode {
-    var inputKeySystemMessage: String { "systemMessage" }
-    var inputKeyPrompt: String { "prompt" }
-    var outputKeyResult: String { "result" }
+    public var inputKeySystemMessage: String { "systemMessage" }
+    public var inputKeyPrompt: String { "prompt" }
+    public var outputKeyResult: String { "result" }
 
     var agentName: String {
         String(describing: type(of: self))
     }
+    var outputSchemaMaxToken: Int { 4096 }
 
     func name() -> String { agentName }
 
@@ -50,17 +53,23 @@ public struct RTSAgent: RTSAgentNode {
     public let agentName: String
     public let tools: [any RTSToolNode]
     public let llmProvider: RTSLLMProvider
+    public let outputSchema: RTSOutputSchema?
+    public let outputSchemaMaxToken: Int
     public var inputs: RTSInput = [:]
 
     public init(
         llmProvider: RTSLLMProvider,
         name: String? = nil,
         tools: [any RTSToolNode] = [],
-        systemMessage: String? = nil
+        systemMessage: String? = nil,
+        outputSchema: RTSOutputSchema? = nil,
+        outputSchemaMaxToken: Int = 4096
     ) {
         self.agentName = name ?? "Agent"
         self.tools = tools
         self.llmProvider = llmProvider
+        self.outputSchema = outputSchema
+        self.outputSchemaMaxToken = outputSchemaMaxToken
         if let systemMessage {
             inputs[inputKeySystemMessage] = .string(systemMessage)
         }
