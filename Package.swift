@@ -21,7 +21,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/RailtownAI/Conduit",
-            branch: "5912-openAI-request-fix",
+            branch: "main",
 //            exact: "0.3.18",
             traits: [
                 .trait(name: "OpenAI"),
