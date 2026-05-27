@@ -17,7 +17,6 @@ public protocol RTSAgentNode: RTSNode {
 }
 
 public extension RTSAgentNode {
-    var outputSchema: RTSOutputSchema? { nil }
 
     public var inputKeySystemMessage: String { "systemMessage" }
     public var inputKeyPrompt: String { "prompt" }
