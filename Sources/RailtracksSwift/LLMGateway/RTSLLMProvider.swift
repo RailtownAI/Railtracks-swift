@@ -64,30 +64,49 @@ public enum RTSOpenAIModelID {
 /// Provider kind without model information — used as dictionary key for API keys
 public enum RTSLLMProviderKind: Hashable, Sendable {
     case openAI
+    case appleAI
     // TODO: complete the rest of the cases
 }
 
 /// LLM Providers that store model ID as string in its associated value
 public enum RTSLLMProvider: CustomStringConvertible, Sendable {
     case openAI(modelIDString: String)
+    case appleAI
     // TODO: complete the rest of the cases
     
     public var description: String {
         switch self {
         case .openAI(let modelIDString):
             return "OpenAI-\(modelIDString)"
+        case .appleAI:
+            return "AppleAI-AppleFoundationModel-on-device"
         }
     }
 
     public var providerName: String {
         switch self {
-        case .openAI: return "OpenAI"
+        case .openAI: 
+            return "OpenAI"
+        case .appleAI: 
+            return "AppleAI"
         }
     }
 
     public var kind: RTSLLMProviderKind {
         switch self {
-        case .openAI: return .openAI
+        case .openAI:
+            return .openAI
+        case .appleAI:
+            return .appleAI
+        }
+    }
+    
+    var requireAPIKeys: Bool {
+        switch self {
+        case .openAI:
+            return true
+        case .appleAI:
+            return false
         }
     }
 }
