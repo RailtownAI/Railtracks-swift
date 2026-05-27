@@ -1,5 +1,5 @@
 //
-//  RTSOutputSchema+GenerationSchema.swift
+//  RTSOutputSchema+Conduit.swift
 //  RailtracksSwift
 //
 //  Created by Mark Su on 2026-05-25.
@@ -7,6 +7,9 @@
 
 import Foundation
 import Conduit
+
+// These conversions are internal to the LLMGateway layer.
+// Nothing outside of LLMGateway/ should call these directly.
 
 ///  RTSOutputSchema → GenerationSchema conversion
 extension RTSOutputSchema {
