@@ -100,13 +100,4 @@ public enum RTSLLMProvider: CustomStringConvertible, Sendable {
             return .appleAI
         }
     }
-    
-    var requireAPIKeys: Bool {
-        switch self {
-        case .openAI:
-            return true
-        case .appleAI:
-            return false
-        }
-    }
 }

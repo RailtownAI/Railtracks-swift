@@ -15,7 +15,11 @@ enum Log {
     private static let _bootstrap: Void = {
         LoggingSystem.bootstrap { label in
             var handler = StreamLogHandler.standardOutput(label: label)
-            handler.logLevel = .trace
+            #if DEBUG
+            handler.logLevel = .debug
+            #else
+            handler.logLevel = .info
+            #endif
             return handler
         }
     }()

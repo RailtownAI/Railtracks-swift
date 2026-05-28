@@ -17,8 +17,12 @@ struct AdditionToolApple: RTSAppleAIToolNode {
     let toolName = "Addition"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        guard case let .number(left) = inputs["a"] else { throw RTSError.missingInput("a") }
-        guard case let .number(right) = inputs["b"] else { throw RTSError.missingInput("b") }
+        guard case let .number(left) = inputs["a"] else {
+            throw RTSError.missingInput("a")
+        }
+        guard case let .number(right) = inputs["b"] else {
+            throw RTSError.missingInput("b")
+        }
         Log.debug("🔢+ Addition tool used!!!")
         return ["result": .number(left + right)]
     }
@@ -26,16 +30,13 @@ struct AdditionToolApple: RTSAppleAIToolNode {
 
     // parameterSchema derived from @Guide descriptions below
     @Generable struct Arguments: Encodable {
-        @Guide(description: "First number to add") var a: Double
-        @Guide(description: "Second number to add") var b: Double
+        @Guide(description: "First number to add")
+        var a: Double
+        @Guide(description: "Second number to add")
+        var b: Double
     }
 
     // call(arguments:) bridged to callableRoutine automatically
-    func run(with a: Double, _ b: Double) async throws -> Double {
-        let output = try await run(with: ["a": RTSValue.number(a), "b": RTSValue.number(b)])
-        guard case .number(let result) = output["result"] else { throw RTSError.missingOutput("result") }
-        return result
-    }
 }
 
 struct SubtractionToolApple: RTSAppleAIToolNode {
@@ -45,22 +46,22 @@ struct SubtractionToolApple: RTSAppleAIToolNode {
     let toolName = "Subtraction"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        guard case let .number(minuend) = inputs["a"] else { throw RTSError.missingInput("a") }
-        guard case let .number(subtrahend) = inputs["b"] else { throw RTSError.missingInput("b") }
+        guard case let .number(minuend) = inputs["a"] else {
+            throw RTSError.missingInput("a")
+        }
+        guard case let .number(subtrahend) = inputs["b"] else {
+            throw RTSError.missingInput("b")
+        }
         Log.debug("🔢- Subtraction tool used!!!")
         return ["result": .number(minuend - subtrahend)]
     }
     var toolDescription: String = "Subtracts two numbers and returns the result."
 
     @Generable struct Arguments: Encodable {
-        @Guide(description: "First number as minuend in subtraction") var a: Double
-        @Guide(description: "Second number as subtrahend in subtraction") var b: Double
-    }
-
-    func run(with a: Double, _ b: Double) async throws -> Double {
-        let output = try await run(with: ["a": RTSValue.number(a), "b": RTSValue.number(b)])
-        guard case .number(let result) = output["result"] else { throw RTSError.missingOutput("result") }
-        return result
+        @Guide(description: "First number as minuend in subtraction")
+        var a: Double
+        @Guide(description: "Second number as subtrahend in subtraction")
+        var b: Double
     }
 }
 
@@ -71,22 +72,22 @@ struct MultiplicationToolApple: RTSAppleAIToolNode {
     let toolName = "Multiplication"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        guard case let .number(left) = inputs["a"] else { throw RTSError.missingInput("a") }
-        guard case let .number(right) = inputs["b"] else { throw RTSError.missingInput("b") }
+        guard case let .number(left) = inputs["a"] else {
+            throw RTSError.missingInput("a")
+        }
+        guard case let .number(right) = inputs["b"] else {
+            throw RTSError.missingInput("b")
+        }
         Log.debug("🔢* Multiplication tool used!!!")
         return ["result": .number(left * right)]
     }
     var toolDescription: String = "Multiplies two numbers and returns the result."
 
     @Generable struct Arguments: Encodable {
-        @Guide(description: "First number to multiply") var a: Double
-        @Guide(description: "Second number to multiply") var b: Double
-    }
-
-    func run(with a: Double, _ b: Double) async throws -> Double {
-        let output = try await run(with: ["a": RTSValue.number(a), "b": RTSValue.number(b)])
-        guard case .number(let result) = output["result"] else { throw RTSError.missingOutput("result") }
-        return result
+        @Guide(description: "First number to multiply")
+        var a: Double
+        @Guide(description: "Second number to multiply")
+        var b: Double
     }
 }
 
@@ -97,8 +98,12 @@ struct DivisionToolApple: RTSAppleAIToolNode {
     let toolName = "Division"
     var inputs: RTSInput = [:]
     let callableRoutine = RTSClosure { inputs in
-        guard case let .number(left) = inputs["a"] else { throw RTSError.missingInput("a") }
-        guard case let .number(right) = inputs["b"] else { throw RTSError.missingInput("b") }
+        guard case let .number(left) = inputs["a"] else {
+            throw RTSError.missingInput("a")
+        }
+        guard case let .number(right) = inputs["b"] else {
+            throw RTSError.missingInput("b")
+        }
         guard right != 0 else { return ["result": .number(.nan)] }
         Log.debug("🔢/ Division tool used!!!")
         return ["result": .number(left / right)]
@@ -106,13 +111,9 @@ struct DivisionToolApple: RTSAppleAIToolNode {
     var toolDescription: String = "Divides two numbers and returns the result."
 
     @Generable struct Arguments: Encodable {
-        @Guide(description: "First number as the dividend in division") var a: Double
-        @Guide(description: "Second number as the divisor in division") var b: Double
-    }
-
-    func run(with a: Double, _ b: Double) async throws -> Double {
-        let output = try await run(with: ["a": RTSValue.number(a), "b": RTSValue.number(b)])
-        guard case .number(let result) = output["result"] else { throw RTSError.missingOutput("result") }
-        return result
+        @Guide(description: "First number as the dividend in division")
+        var a: Double
+        @Guide(description: "Second number as the divisor in division")
+        var b: Double
     }
 }

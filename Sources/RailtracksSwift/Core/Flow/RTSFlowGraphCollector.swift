@@ -22,7 +22,6 @@ actor RTSFlowGraphCollector {
     var startTime: Date?
     var endTime: Date?
 
-    var steps: [RTSStamp] = []
     var nodeEvents: [RTSNodeEvent] = []
     var edgeEvents: [RTSEdgeEvent] = []
 
@@ -204,7 +203,6 @@ actor RTSFlowGraphCollector {
         log.debug("🎁 generating JSON file for flow: \(flowName) | sessionID: \(sessionID))")
         log.debug("🎁 total nodes: \(nodeEvents.count)")
         log.debug("🎁 total edges: \(edgeEvents.count)")
-        log.debug("🎁 total steps: \(steps.count)")
         
         guard let rootNodeID = rootNodeID, let startTime = startTime, let endTime = endTime else {
             log.debug("☠️🎁 unable to generate JSON output from the flow due to missing data")

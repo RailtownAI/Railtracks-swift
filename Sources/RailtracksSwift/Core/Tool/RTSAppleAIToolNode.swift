@@ -62,13 +62,18 @@ public extension RTSAppleAIToolNode where Arguments: Generable {
         RTSToolSchema(parameters: Self.extractParameters(from: Arguments.generationSchema))
     }
 
+    //TODO: return nil if failure instead of empty array?
+    /// This `extractParameters(from:)` function heavily depend on existing Apple structure stays consistent
     private static func extractParameters(from schema: GenerationSchema) -> [RTSToolSchema.Parameter] {
         guard
             let kindValue      = Mirror(reflecting: schema).children.first(where: { $0.label == "kind" })?.value,
             let structureValue = Mirror(reflecting: kindValue).children.first(where: { $0.label == "structure" })?.value,
             let propertiesAny  = Mirror(reflecting: structureValue).children.first(where: { $0.label == "properties" })?.value,
             let propertiesArr  = propertiesAny as? [Any]
-        else { return [] }
+        else {
+            log.error("☠️ unable to extract parameters from schema. Mirror reflection is broken.")
+            return []
+        }
 
         return propertiesArr.compactMap { prop in
             let m = Mirror(reflecting: prop)

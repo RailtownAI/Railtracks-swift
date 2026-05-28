@@ -165,7 +165,8 @@ private extension Transcript.Entry {
 
 /// Extracts joined text from `segments[].text` via Mirror.
 /// Falls back to `String(describing:)` if the expected structure is absent.
-/// This is target specifically against how Transcript.Entry is currently structured.
+///
+/// This is targeted specifically against how Transcript.Entry is currently structured.
 /// Will need to be updated if Transcript.Entry changes.
 private func extractText(from value: Any) -> String {
     let m = Mirror(reflecting: value)
