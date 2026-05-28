@@ -22,10 +22,10 @@ class MathAppleViewModel {
             let gateway = RTSLLMGateway(apiKeys: [:])
 
             let tools: [any RTSToolNode] = [
-                AdditionTool(),
-                SubtractionTool(),
-                MultiplicationTool(),
-                DivisionTool()
+                AdditionToolApple(),
+                SubtractionToolApple(),
+                MultiplicationToolApple(),
+                DivisionToolApple()
             ]
 
             let flow = RTSFlow(title: "Math Assistant (AppleAI)")

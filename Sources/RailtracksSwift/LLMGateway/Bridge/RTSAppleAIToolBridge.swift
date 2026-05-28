@@ -9,7 +9,7 @@ import Foundation
 import FoundationModels
 
 /// Wraps an `RTSAppleAIToolNode` and routes `call(arguments:)` through `RTSNodeInvoker`,
-/// so AppleAI tool invocations appear in the flow graph trace exactly like OpenAI tool calls.
+/// so AppleAI tool invocations appear in the flow graph trace exactly like Conduit tool calls.
 ///
 /// Must be generic (unlike `RTSConduitToolBridge`) because FoundationModels derives the
 /// argument schema from the concrete `Arguments` type at compile time.

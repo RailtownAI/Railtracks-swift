@@ -202,13 +202,13 @@ extension RTSLLMSession {
     }
 }
 
-// MARK: - runIDMap
-
 private extension RTSMessage {
     func stamped(runID: UUID?) -> RTSMessage {
         RTSMessage(id: id, role: role, content: content, timestamp: timestamp, metadata: metadata, runID: runID)
     }
 }
+
+// MARK: - runIDMap
 
 private final class RunIDMap: @unchecked Sendable {
     /// [messageID: runID]

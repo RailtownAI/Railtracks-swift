@@ -22,7 +22,7 @@ final class AppleAISession: @unchecked Sendable {
     private var _messages: [RTSMessage] = []
     private let lock = NSLock()
 
-    init(tools: [any Tool] = []) {
+    private init(tools: [any Tool] = []) {
         self.sessionTools = tools
         self.session = Self.makeSession(instruction: nil, tools: tools)
     }
@@ -64,25 +64,29 @@ final class AppleAISession: @unchecked Sendable {
         createdBy: any RTSAgentNode
     ) -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
-        var unsupported: [any RTSToolNode] = []
+        var unsupportedTools: [any RTSToolNode] = []
         for tool in tools {
             if let appleTool = tool as? any RTSAppleAIToolNode {
                 let bridge = appleTool.makeAppleAIBridge(invoker: invoker, createdBy: createdBy)
                           ?? (appleTool as any Tool)
                 appleTools.append(bridge)
             } else {
-                unsupported.append(tool)
+                unsupportedTools.append(tool)
             }
         }
-        return (AppleAISession(tools: appleTools), unsupported)
+        return (AppleAISession(tools: appleTools), unsupportedTools)
     }
 
     private static func makeSession(instruction: String?, tools: [any Tool]) -> LanguageModelSession {
         switch (instruction, tools.isEmpty) {
-        case (let inst?, false): return LanguageModelSession(tools: tools, instructions: inst)
-        case (let inst?, true):  return LanguageModelSession(instructions: inst)
-        case (nil, false):       return LanguageModelSession(tools: tools)
-        case (nil, true):        return LanguageModelSession()
+        case (let inst?, false):
+            return LanguageModelSession(tools: tools, instructions: inst)
+        case (let inst?, true):
+            return LanguageModelSession(instructions: inst)
+        case (nil, false):
+            return LanguageModelSession(tools: tools)
+        case (nil, true):
+            return LanguageModelSession()
         }
     }
 }
@@ -161,6 +165,8 @@ private extension Transcript.Entry {
 
 /// Extracts joined text from `segments[].text` via Mirror.
 /// Falls back to `String(describing:)` if the expected structure is absent.
+/// This is target specifically against how Transcript.Entry is currently structured.
+/// Will need to be updated if Transcript.Entry changes.
 private func extractText(from value: Any) -> String {
     let m = Mirror(reflecting: value)
     guard let segsVal = m.children.first(where: { $0.label == "segments" })?.value else {
