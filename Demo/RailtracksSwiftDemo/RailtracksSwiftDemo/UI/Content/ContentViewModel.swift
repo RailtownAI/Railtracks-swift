@@ -14,11 +14,12 @@ class ContentViewModel {
     enum ViewMode {
         case simple
         case math
+        case mathApple
         case mathVerify
     }
     
     var libVersion: String = RailtracksSwift.version
-    var mode: ViewMode = .mathVerify
+    var mode: ViewMode = .mathApple
     
     var openAIAPIKey: String? {
         RailtracksSwift.getOpenAIAPIKey()

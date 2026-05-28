@@ -46,22 +46,30 @@ final class AppleAISession: @unchecked Sendable {
         lock.withLock {
             _messages.append(contentsOf: newMessages)
         }
-        // NOTE: if respond(to:) does not return String directly, use response.content
-        return String(describing: response)
+        // TODO: extract response.promptTokenCount and response.responseTokenCount via Mirror
+        // and return alongside content so RTSLLMSession can stamp them onto the assistant RTSMessage metadata
+        return response.content
     }
 
     func messages() -> [RTSMessage] {
         lock.withLock { _messages }
     }
 
-    /// Filters `agentNode.tools` to those conforming to `RTSAppleAIToolNode` and builds a session.
-    /// Returns the non-conforming tools separately so the caller can warn about them.
-    static func build(fromAgentTools tools: [any RTSToolNode]) -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
+    /// Builds an `AppleAISession` from `agentNode.tools`, wrapping each `RTSAppleAIToolNode`
+    /// in an `RTSAppleAIToolBridge` so tool calls are tracked as nodes via `RTSNodeInvoker`.
+    /// Returns non-conforming tools separately so the caller can warn about them.
+    static func build(
+        fromAgentTools tools: [any RTSToolNode],
+        invoker: RTSNodeInvoker,
+        createdBy: any RTSAgentNode
+    ) -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
         var unsupported: [any RTSToolNode] = []
         for tool in tools {
             if let appleTool = tool as? any RTSAppleAIToolNode {
-                appleTools.append(appleTool as any Tool)
+                let bridge = appleTool.makeAppleAIBridge(invoker: invoker, createdBy: createdBy)
+                          ?? (appleTool as any Tool)
+                appleTools.append(bridge)
             } else {
                 unsupported.append(tool)
             }
@@ -82,20 +90,86 @@ final class AppleAISession: @unchecked Sendable {
 // MARK: - Transcript.Entry → RTSMessage
 
 private extension Transcript.Entry {
-    // NOTE: adjust String(describing:) extractions if FoundationModels exposes typed text
-    // accessors (e.g. instructions.text, response.content). Add tool cases once their
-    // exact enum case names are confirmed from the FoundationModels API.
     func toRTSMessage() -> RTSMessage? {
         let timestamp = Date()
         switch self {
-        case .instructions(let v):
-            return RTSMessage(id: UUID(), role: .system,    content: .text(String(describing: v)), timestamp: timestamp, metadata: nil, runID: nil)
-        case .prompt(let v):
-            return RTSMessage(id: UUID(), role: .user,      content: .text(String(describing: v)), timestamp: timestamp, metadata: nil, runID: nil)
-        case .response(let v):
-            return RTSMessage(id: UUID(), role: .assistant, content: .text(String(describing: v)), timestamp: timestamp, metadata: nil, runID: nil)
+        case .instructions(let instructions):
+            return RTSMessage(
+                id: UUID(),
+                role: .system,
+                content: .text(extractText(from: instructions)),
+                timestamp: timestamp,
+                metadata: nil,
+                runID: nil
+            )
+        case .prompt(let prompt):
+            return RTSMessage(
+                id: UUID(),
+                role: .user,
+                content: .text(extractText(from: prompt)),
+                timestamp: timestamp,
+                metadata: nil,
+                runID: nil
+            )
+        case .response(let response):
+            return RTSMessage(
+                id: UUID(),
+                role: .assistant,
+                content: .text(extractText(from: response)),
+                timestamp: timestamp,
+                metadata: nil,
+                runID: nil
+            )
+        case .toolCalls(let toolCalls):
+            let text = Mirror(reflecting: toolCalls)
+                .children.first(where: { $0.label == "calls" })
+                .flatMap { $0.value as? [Any] }
+                .map { calls in
+                    calls.compactMap { call -> String? in
+                        let m = Mirror(reflecting: call)
+                        guard let name = m.children.first(where: { $0.label == "toolName" })?.value as? String,
+                              let args = m.children.first(where: { $0.label == "rawArguments" })?.value as? String
+                        else { return nil }
+                        return "\(name): \(args)"
+                    }.joined(separator: "\n")
+                } ?? String(describing: toolCalls)
+            return RTSMessage(
+                id: UUID(),
+                role: .assistant,
+                content: .text(text),
+                timestamp: timestamp,
+                metadata: nil,
+                runID: nil
+            )
+        case .toolOutput(let toolOutput):
+            let m = Mirror(reflecting: toolOutput)
+            let toolName = m.children.first(where: { $0.label == "toolName" })?.value as? String ?? ""
+            let text = "[\(toolName)] \(extractText(from: toolOutput))"
+            return RTSMessage(
+                id: UUID(),
+                role: .tool,
+                content: .text(text),
+                timestamp: timestamp,
+                metadata: nil,
+                runID: nil
+            )
         @unknown default:
             return nil
         }
     }
+}
+
+/// Extracts joined text from `segments[].text` via Mirror.
+/// Falls back to `String(describing:)` if the expected structure is absent.
+private func extractText(from value: Any) -> String {
+    let m = Mirror(reflecting: value)
+    guard let segsVal = m.children.first(where: { $0.label == "segments" })?.value else {
+        return String(describing: value)
+    }
+    let texts = Mirror(reflecting: segsVal).children.compactMap { child -> String? in
+        guard let textVal = Mirror(reflecting: child.value).children.first(where: { $0.label == "text" })?.value
+        else { return nil }
+        return String(describing: textVal)
+    }
+    return texts.isEmpty ? String(describing: value) : texts.joined(separator: " ")
 }

@@ -113,6 +113,8 @@ extension RTSLLMSession {
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
+                    // TODO: once AppleAISession.send() returns token counts, stamp them onto
+                    // the assistant message here via RTSMessageMetadata(tokenCount:inputTokenCount:)
                     relay.send(newMessages.map { $0.stamped(runID: runID) })
                 }
                 return response

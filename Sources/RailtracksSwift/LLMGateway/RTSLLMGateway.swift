@@ -34,7 +34,11 @@ public class RTSLLMGateway {
         let provider = agentNode.llmProvider
         switch provider {
         case .appleAI:
-            let (appleAISession, unsupported) = AppleAISession.build(fromAgentTools: agentNode.tools)
+            let (appleAISession, unsupported) = AppleAISession.build(
+                fromAgentTools: agentNode.tools,
+                invoker: invoker,
+                createdBy: agentNode
+            )
             if !unsupported.isEmpty {
                 log.warning("⚠️ [\(agentNode.agentName)] \(unsupported.count) tool(s) ignored — conform to RTSAppleAIToolNode to use tools with AppleAI: [\(unsupported.map(\.toolName))]")
             }

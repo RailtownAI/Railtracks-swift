@@ -40,13 +40,19 @@ import FoundationModels
 /// }
 /// ```
 ///
-/// Note: tool invocations via `LanguageModelSession` are called directly by the model
-/// and do not pass through `RTSNodeInvoker`, so they will not appear in the flow graph trace.
-public protocol RTSAppleAIToolNode: RTSToolNode, Tool {}
+/// Note: tool invocations via `LanguageModelSession` pass through `RTSAppleAIToolBridge` and
+/// `RTSNodeInvoker`, so they appear in the flow graph trace the same way OpenAI tools do.
+public protocol RTSAppleAIToolNode: RTSToolNode, Tool {
+    /// Returns a bridge that routes `call(arguments:)` through `RTSNodeInvoker` for flow graph
+    /// tracking. The default implementation in `RTSAppleAIToolBridge.swift` handles conformers
+    /// where `Arguments: Encodable, Output == String`; returns `nil` otherwise.
+    func makeAppleAIBridge(invoker: RTSNodeInvoker, createdBy: any RTSAgentNode) -> (any Tool)?
+}
 
 public extension RTSAppleAIToolNode {
     var name: String { toolName }
     var description: String { toolDescription }
+    func makeAppleAIBridge(invoker: RTSNodeInvoker, createdBy: any RTSAgentNode) -> (any Tool)? { nil }
 }
 
 public extension RTSAppleAIToolNode where Arguments: Generable {
@@ -84,9 +90,9 @@ public extension RTSAppleAIToolNode where Arguments: Generable {
     }
 }
 
-public extension RTSAppleAIToolNode where Arguments: Encodable, Output == String {
+public extension RTSAppleAIToolNode where Arguments: Encodable & Generable, Output == String {
     /// Bridges FoundationModels tool invocation to the existing `callableRoutine`.
-    /// Requires `Arguments: Encodable` (add it alongside `@Generable`) and `Output == String`.
+    /// Requires `Arguments: Encodable & Generable` (add `Encodable` alongside `@Generable`) and `Output == String`.
     func call(arguments: Arguments) async throws -> String {
         let data = try JSONEncoder().encode(arguments)
         let input = try JSONDecoder().decode(RTSInput.self, from: data)

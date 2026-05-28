@@ -14,7 +14,16 @@ struct MathView: View {
     var body: some View {
         VStack(spacing: 8) {
             Text("Prompt: " + viewModel.prompt)
-            Text("Result: " + (viewModel.promptResult ?? "waiting..."))
+            VStack {
+                Text("Result:")
+                TextField(
+                    "Result",
+                    text: $viewModel.promptResult,
+                    axis: .vertical
+                )
+                .textFieldStyle(.roundedBorder)
+                .padding()
+            }
         }
         .padding()
         .task {
