@@ -37,7 +37,11 @@ let package = Package(
         .package(
             url: "https://github.com/swiftlang/swift-syntax.git",
             from: "600.0.0"
-        )
+        ),
+        .package(
+            url: "https://github.com/FabricioSffair/RailtracksInstrumentationKit",
+            branch: "main"
+        ),
     ],
     targets: [
         .macro(
@@ -54,6 +58,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Conduit", package: "Conduit"),
+                .product(name: "RailtracksInstrumentationKit", package: "RailtracksInstrumentationKit"),
                 "RTSMacro"
             ]
         ),

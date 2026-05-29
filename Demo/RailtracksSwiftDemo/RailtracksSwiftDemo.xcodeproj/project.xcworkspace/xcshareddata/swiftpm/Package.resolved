@@ -20,6 +20,15 @@
       }
     },
     {
+      "identity" : "railtracksinstrumentationkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FabricioSffair/RailtracksInstrumentationKit",
+      "state" : {
+        "branch" : "main",
+        "revision" : "9960142e62eec9ed72aa8d202619ac4189b4f676"
+      }
+    },
+    {
       "identity" : "swift-asn1",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-asn1.git",
