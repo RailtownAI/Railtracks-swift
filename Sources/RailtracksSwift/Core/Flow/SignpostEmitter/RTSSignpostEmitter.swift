@@ -8,6 +8,10 @@
 import Foundation
 import RailtracksInstrumentationKit
 
+// TODO: RTSSignpostEmitter and RTSSignpostEmitting can be migrated to a separate
+// RailtracksSwiftInstruments target so RailtracksInstrumentationKit is an optional
+// dependency rather than required for all RailtracksSwift consumers.
+
 /// Default `RTSSignpostEmitting` conformer. Routes each call directly to the
 /// matching `RailtracksSignposts` API — no internal state except the
 /// `AgentRunHandle` map needed to pair interval begin/end calls.
@@ -37,7 +41,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         )
         let handle = RailtracksSignposts.begin(event)
         log.trace("🚧 emitting begin: \(event) | \(handle)")
-        lock.withLock { handles[nodeID] = handle }
+        lock.withLock { handles[runID] = handle }
     }
 
     func emitNodeEnd(
@@ -50,7 +54,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         output: RTSOutput?,
         error: Error?
     ) {
-        guard let handle = lock.withLock({ handles.removeValue(forKey: nodeID) }) else { return }
+        guard let handle = lock.withLock({ handles.removeValue(forKey: runID) }) else { return }
         log.trace("🚧 emitting end: \(handle)")
         RailtracksSignposts.end(handle, error: error != nil)
     }

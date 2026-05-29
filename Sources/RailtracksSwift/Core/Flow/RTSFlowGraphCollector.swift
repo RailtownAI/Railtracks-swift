@@ -194,7 +194,12 @@ actor RTSFlowGraphCollector {
             let parentIdentifier: String
             let parentTypeStr: String
             if let sourceID = edgeEvent.sourceNodeID {
-                parentIdentifier = edgeIDByNodeID[sourceID]?.uuidString ?? sourceID.uuidString
+                if let parentEdgeID = edgeIDByNodeID[sourceID] {
+                    parentIdentifier = parentEdgeID.uuidString
+                } else {
+                    log.warning("⚠️🎁 no edgeID found for sourceNodeID: \(sourceID) — graph edge for \(edgeEvent.targetName) will have incorrect parentID")
+                    parentIdentifier = ""
+                }
                 parentTypeStr = edgeEvents.first(where: { $0.targetNodeID == sourceID })?.nodeType.rawValue ?? ""
             } else {
                 parentIdentifier = ""
