@@ -17,7 +17,7 @@ actor RTSFlowGraphCollector {
     }
 
     let stampFactory: RTSStampFactory
-    let signpostEmitter: any RTSSignpostEmitting
+    let signpostEmitter: (any RTSSignpostEmitting)?
     var sessionID: UUID
     var flowName: String
     var startTime: Date?
@@ -38,11 +38,12 @@ actor RTSFlowGraphCollector {
     init(
         stampFactory: RTSStampFactory,
         flowName: String,
+        sessionID: UUID,
         nodeEventPublisher: NodeEventPublishers,
-        signpostEmitter: any RTSSignpostEmitting
+        signpostEmitter: (any RTSSignpostEmitting)? = nil
     ) {
         self.stampFactory = stampFactory
-        self.sessionID = UUID()
+        self.sessionID = sessionID
         self.flowName = flowName
         self.signpostEmitter = signpostEmitter
         (self.completionStream, self.streamContinuation) = AsyncStream<Void>.makeStream()
@@ -186,7 +187,7 @@ actor RTSFlowGraphCollector {
             // Edge create event — emit FlowEdge as soon as the parent→child
             // relationship is established, before the child even executes.
             if let sourceID = edgeEvent.sourceNodeID {
-                signpostEmitter.emitEdge(
+                signpostEmitter?.emitEdge(
                     source: sourceID.uuidString,
                     target: edgeEvent.targetNodeID.uuidString,
                     runID: edgeEvent.id.uuidString
@@ -272,6 +273,7 @@ extension RTSFlowGraphCollector {
     /// so `nodeEvent.messages` is complete and all ancestor edge events are
     /// already in `edgeEvents`.
     private func emitNodePointEvents(_ nodeEvent: RTSNodeEvent) {
+        guard let signpostEmitter else { return }
         guard let runID = nodeEvent.runID else { return }
 
         let nodeIDStr = nodeEvent.id.uuidString

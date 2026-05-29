@@ -28,10 +28,15 @@ public class RTSFlow {
         systemMessage: String? = nil
     ) async throws -> String {
         let stampFactory = RTSStampFactory()
-        let nodeInvoker = RTSNodeInvoker(stampFactory: stampFactory, signpostEmitter: signpostEmitter)
+        let nodeInvoker = RTSNodeInvoker(
+            stampFactory: stampFactory,
+            sessionID: id,
+            signpostEmitter: signpostEmitter
+        )
         let flowGraphCollector = RTSFlowGraphCollector(
             stampFactory: stampFactory,
             flowName: title,
+            sessionID: id,
             nodeEventPublisher: nodeInvoker,
             signpostEmitter: signpostEmitter
         )

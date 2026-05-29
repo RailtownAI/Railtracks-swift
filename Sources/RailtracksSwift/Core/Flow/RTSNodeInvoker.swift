@@ -19,16 +19,22 @@ protocol NodeEventPublishers {
 /// All node invoking should go through this, otherwise will have even record inconsistency
 public class RTSNodeInvoker: @unchecked Sendable {
     let stampFactory: RTSStampFactory
-    let signpostEmitter: any RTSSignpostEmitting
+    let sessionID: UUID
+    let signpostEmitter: (any RTSSignpostEmitting)?
 
     let nodeCreateEventSubject = PassthroughSubject<RTSNodeEvent, Never>()
     let nodeInvokeEventSubject = PassthroughSubject<RTSNodeEvent, Never>()
     let edgeCreateEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
     let edgeFinishEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
 
-    init(stampFactory: RTSStampFactory, signpostEmitter: (any RTSSignpostEmitting)? = nil) {
+    init(
+        stampFactory: RTSStampFactory,
+        sessionID: UUID,
+        signpostEmitter: (any RTSSignpostEmitting)? = nil
+    ) {
         self.stampFactory = stampFactory
-        self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
+        self.sessionID = sessionID
+        self.signpostEmitter = signpostEmitter
     }
     
     func invokeAgent(
@@ -98,10 +104,11 @@ public class RTSNodeInvoker: @unchecked Sendable {
             input: input
         )
 
-        signpostEmitter.emitNodeStart(
+        signpostEmitter?.emitNodeStart(
             nodeID: node.id,
             nodeName: node.name(),
             nodeType: nodeType,
+            sessionID: sessionID,
             parentName: createdBy?.name() ?? "",
             runID: runID,
             input: input
@@ -116,10 +123,11 @@ public class RTSNodeInvoker: @unchecked Sendable {
             output = [:]
         }
 
-        signpostEmitter.emitNodeEnd(
+        signpostEmitter?.emitNodeEnd(
             nodeID: node.id,
             nodeName: node.name(),
             nodeType: nodeType,
+            sessionID: sessionID,
             parentName: createdBy?.name() ?? "",
             runID: runID,
             output: invokeError == nil ? output : nil,

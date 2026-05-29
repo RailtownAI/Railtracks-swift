@@ -20,13 +20,79 @@ public protocol RTSSignpostEmitting: Sendable {
 
     // MARK: - Interval (called by RTSNodeInvoker, real-time)
 
-    func emitNodeStart(nodeID: UUID, nodeName: String, nodeType: RTSFlowNodeType, parentName: String, runID: UUID, input: RTSInput)
-    func emitNodeEnd(nodeID: UUID, nodeName: String, nodeType: RTSFlowNodeType, parentName: String, runID: UUID, output: RTSOutput?, error: Error?)
+    func emitNodeStart(
+        nodeID: UUID,
+        nodeName: String,
+        nodeType: RTSFlowNodeType,
+        sessionID: UUID,
+        parentName: String,
+        runID: UUID,
+        input: RTSInput
+    )
+    
+    func emitNodeEnd(
+        nodeID: UUID,
+        nodeName: String,
+        nodeType: RTSFlowNodeType,
+        sessionID: UUID,
+        parentName: String,
+        runID: UUID,
+        output: RTSOutput?,
+        error: Error?
+    )
 
     // MARK: - Point events (called by RTSFlowGraphCollector, with complete data)
 
-    func emitGraphNode(nodeID: String, parentID: String, sessionID: String, runID: String, nodeType: String, parentType: String, error: Bool, parentError: Bool, cost: Double, model: String, parentName: String, name: String)
-    func emitTreeNode(nodeID: String, sessionID: String, runID: String, nodeType: String, model: String, provider: String, cost: Double, latency: Double, inputTokens: Int, outputTokens: Int, error: Bool, ancestors: [String], name: String)
-    func emitEdge(source: String, target: String, runID: String)
-    func emitIO(nodeID: String, sessionID: String, runID: String, messageID: String, source: String, direction: String, role: String, model: String, provider: String, cost: Double, latency: Double, inputTokens: Int, outputTokens: Int, displayRole: String, toolName: String, content: String)
+    func emitGraphNode(
+        nodeID: String,
+        parentID: String,
+        sessionID: String,
+        runID: String,
+        nodeType: String,
+        parentType: String,
+        error: Bool,
+        parentError: Bool,
+        cost: Double,
+        model: String,
+        parentName: String,
+        name: String
+    )
+    func emitTreeNode(
+        nodeID: String,
+        sessionID: String,
+        runID: String,
+        nodeType: String,
+        model: String,
+        provider: String,
+        cost: Double,
+        latency: Double,
+        inputTokens: Int,
+        outputTokens: Int,
+        error: Bool,
+        ancestors: [String],
+        name: String
+    )
+    func emitEdge(
+        source: String,
+        target: String,
+        runID: String
+    )
+    func emitIO(
+        nodeID: String,
+        sessionID: String,
+        runID: String,
+        messageID: String,
+        source: String,
+        direction: String,
+        role: String,
+        model: String,
+        provider: String,
+        cost: Double,
+        latency: Double,
+        inputTokens: Int,
+        outputTokens: Int,
+        displayRole: String,
+        toolName: String,
+        content: String
+    )
 }
