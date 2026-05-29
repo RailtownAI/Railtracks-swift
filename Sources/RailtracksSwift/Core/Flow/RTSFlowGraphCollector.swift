@@ -190,7 +190,7 @@ actor RTSFlowGraphCollector {
             // so each tool call appears as its own execution-level node.
             // Map the target's instance UUID → this edge ID so child nodes can
             // correctly reference the right parent invocation as their parentId.
-            let nodeIdentifier = edgeEvent.id.uuidString
+            let nodeIdentifier = (edgeEvent.runID ?? edgeEvent.id).uuidString
             let parentIdentifier: String
             let parentTypeStr: String
             if let sourceID = edgeEvent.sourceNodeID {
@@ -205,12 +205,12 @@ actor RTSFlowGraphCollector {
                 parentIdentifier = ""
                 parentTypeStr = ""
             }
-            edgeIDByNodeID[edgeEvent.targetNodeID] = edgeEvent.id
+            edgeIDByNodeID[edgeEvent.targetNodeID] = edgeEvent.runID ?? edgeEvent.id
             signpostEmitter?.emitGraphNode(
                 nodeID: nodeIdentifier,
                 parentID: parentIdentifier,
                 sessionID: sessionID.uuidString,
-                runID: "",
+                runID: nodeIdentifier,
                 nodeType: edgeEvent.nodeType.rawValue,
                 parentType: parentTypeStr,
                 error: false,

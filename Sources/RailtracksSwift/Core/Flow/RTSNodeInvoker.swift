@@ -94,9 +94,10 @@ public class RTSNodeInvoker: @unchecked Sendable {
         )
 
         let runID = UUID()
-        let edgeID = runID
+        let edgeID = createdBy == nil ? runID : UUID()
         await publishEdgeCreated(
             edgeID: edgeID,
+            runID: runID,
             nodeType: nodeType,
             stamp: creationStamp,
             from: createdBy,
@@ -200,6 +201,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishEdgeCreated(
         edgeID: UUID,
+        runID: UUID,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         from source: (any RTSNode)?,
@@ -209,6 +211,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         edgeCreateEventSubject.send(
             RTSEdgeEvent(
                 id: edgeID,
+                runID: runID,
                 stamp: stamp,
                 nodeType: nodeType,
                 sourceNodeID: source?.id,
@@ -233,6 +236,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         edgeFinishEventSubject.send(
             RTSEdgeEvent(
                 id: edgeID,
+                runID: nil,
                 stamp: stamp,
                 nodeType: nodeType,
                 sourceNodeID: source?.id,
