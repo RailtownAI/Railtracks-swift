@@ -29,6 +29,7 @@ actor RTSFlowGraphCollector {
     internal var rootNodeID: UUID?
     private var messageBuffer: [UUID: [RTSMessage]] = [:]
     private var collectionState: CollectionState = .collecting
+    private var edgeIDByNodeID: [UUID: UUID] = [:]
 
     private let completionStream: AsyncStream<Void>
     private let streamContinuation: AsyncStream<Void>.Continuation
@@ -172,7 +173,8 @@ actor RTSFlowGraphCollector {
 
         var isCollectionFinished = false
         switch edgeEvent.stamp.event {
-        case .finishExecution where edgeEvent.sourceNodeID == nil:
+        case .finishExecution:
+            guard edgeEvent.sourceNodeID == nil else { break }
             switch collectionState {
             case .collecting:
                 collectionState = .edgeComplete
@@ -183,13 +185,40 @@ actor RTSFlowGraphCollector {
                 log.debug("☠️🎁 should not be processing edge event if collector state is finished")
             }
 
-        default:
-            // Edge create event — emit FlowEdge as soon as the parent→child
-            // relationship is established, before the child even executes.
+        case .create, .startCreate:
+            // Use the edge ID (unique per invocation) as the graph node identifier
+            // so each tool call appears as its own execution-level node.
+            // Map the target's instance UUID → this edge ID so child nodes can
+            // correctly reference the right parent invocation as their parentId.
+            let nodeIdentifier = edgeEvent.id.uuidString
+            let parentIdentifier: String
+            let parentTypeStr: String
             if let sourceID = edgeEvent.sourceNodeID {
+                parentIdentifier = edgeIDByNodeID[sourceID]?.uuidString ?? sourceID.uuidString
+                parentTypeStr = edgeEvents.first(where: { $0.targetNodeID == sourceID })?.nodeType.rawValue ?? ""
+            } else {
+                parentIdentifier = ""
+                parentTypeStr = ""
+            }
+            edgeIDByNodeID[edgeEvent.targetNodeID] = edgeEvent.id
+            signpostEmitter?.emitGraphNode(
+                nodeID: nodeIdentifier,
+                parentID: parentIdentifier,
+                sessionID: sessionID.uuidString,
+                runID: "",
+                nodeType: edgeEvent.nodeType.rawValue,
+                parentType: parentTypeStr,
+                error: false,
+                parentError: false,
+                cost: 0,
+                model: "",
+                parentName: edgeEvent.sourceName ?? "",
+                name: edgeEvent.targetName
+            )
+            if edgeEvent.sourceNodeID != nil {
                 signpostEmitter?.emitEdge(
-                    source: sourceID.uuidString,
-                    target: edgeEvent.targetNodeID.uuidString,
+                    source: parentIdentifier,
+                    target: nodeIdentifier,
                     runID: edgeEvent.id.uuidString
                 )
             }
@@ -282,13 +311,6 @@ extension RTSFlowGraphCollector {
         let hasError = nodeEvent.error != nil
         let nodeTypeStr = nodeEvent.nodeType.rawValue
 
-        // Parent info: find the edge create event pointing to this node
-        let parentEdge = edgeEvents
-            .first(where: { $0.targetNodeID == nodeEvent.id && $0.sourceNodeID != nil })
-        let parentIDStr = parentEdge?.sourceNodeID?.uuidString ?? ""
-        let parentName = parentEdge?.sourceName ?? ""
-        let parentTypeStr = parentEdge?.nodeType.rawValue ?? ""
-        
         // Latency: difference between the node's create and finish stamps
         let createStamp = nodeEvents
             .first(where: { $0.id == nodeEvent.id && $0.runID == nil })?.stamp.timestamp
@@ -308,22 +330,6 @@ extension RTSFlowGraphCollector {
 
         // Ancestor chain: walk edgeEvents upward from this node to the root
         let ancestorChain = buildAncestors(for: nodeEvent.id)
-
-        // FlowGraphNode — emitted for every node
-        signpostEmitter.emitGraphNode(
-            nodeID: nodeIDStr,
-            parentID: parentIDStr,
-            sessionID: sessionIDStr,
-            runID: runIDStr,
-            nodeType: nodeTypeStr,
-            parentType: parentTypeStr,
-            error: hasError,
-            parentError: false,
-            cost: 0,
-            model: model,
-            parentName: parentName,
-            name: nodeEvent.name
-        )
 
         // FlowTreeNode — skip root (no ancestors) and non-leaf tools
         // (tools that invoked children contribute no LLM metrics that

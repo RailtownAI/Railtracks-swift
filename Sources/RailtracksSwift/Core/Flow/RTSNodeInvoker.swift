@@ -94,7 +94,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         )
 
         let runID = UUID()
-        let edgeID = createdBy == nil ? runID : UUID()
+        let edgeID = runID
         await publishEdgeCreated(
             edgeID: edgeID,
             nodeType: nodeType,
