@@ -97,6 +97,48 @@ extension RTSLLMSession: MessagePublisher {
 // MARK: - static Builder
 
 extension RTSLLMSession {
+    static func build(
+        appleAI: AppleAISession,
+        agentNode: any RTSAgentNode
+    ) -> RTSLLMSession {
+        let agentName = agentNode.agentName
+        let runIDMap = RunIDMap()
+        let relay = BufferedPassthroughSubject<[RTSMessage]>()
+        return RTSLLMSession(
+            run: { prompt, runID in
+                let beforeCount = appleAI.messages().count
+                let response = try await appleAI.send(prompt)
+                if let runID {
+                    let newMessages = Array(appleAI.messages().dropFirst(beforeCount))
+                    for message in newMessages {
+                        runIDMap.set(runID, for: message.id)
+                    }
+                    // TODO: once AppleAISession.send() returns token counts, stamp them onto
+                    // the assistant message here via RTSMessageMetadata(tokenCount:inputTokenCount:)
+                    relay.send(newMessages.map { $0.stamped(runID: runID) })
+                }
+                return response
+            },
+            setSystemPrompt: { message, runID in
+                // setInstruction recreates the session so transcript resets —
+                // capture new messages after the reset, not before.
+                appleAI.setInstruction(message)
+                if let runID {
+                    let newMessages = appleAI.messages()
+                    for message in newMessages {
+                        runIDMap.set(runID, for: message.id)
+                    }
+                    relay.send(newMessages.map { $0.stamped(runID: runID) })
+                }
+            },
+            message: {
+                appleAI.messages().map { $0.stamped(runID: runIDMap[$0.id]) }
+            },
+            messageSubject: relay,
+            agentName: agentName
+        )
+    }
+
     static func build<P: AIProvider & TextGenerator>(
         provider: P,
         model: P.ModelID,
@@ -157,6 +199,12 @@ extension RTSLLMSession {
             messageSubject: relay,
             agentName: agentName
         )
+    }
+}
+
+private extension RTSMessage {
+    func stamped(runID: UUID?) -> RTSMessage {
+        RTSMessage(id: id, role: role, content: content, timestamp: timestamp, metadata: metadata, runID: runID)
     }
 }
 

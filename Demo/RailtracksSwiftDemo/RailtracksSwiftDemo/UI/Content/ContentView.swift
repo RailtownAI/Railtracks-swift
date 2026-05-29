@@ -26,6 +26,12 @@ struct ContentView: View {
                 .background(viewModel.mode == .math ? Color.accentColor.opacity(0.2) : Color.clear)
                 .cornerRadius(8)
                 
+                Button("Math(AppleAI)") {
+                    viewModel.mode = .mathApple
+                }
+                .background(viewModel.mode == .mathApple ? Color.accentColor.opacity(0.2) : Color.clear)
+                .cornerRadius(8)
+                
                 Button("Verified Math") {
                     viewModel.mode = .mathVerify
                 }
@@ -42,6 +48,8 @@ struct ContentView: View {
                 SimplePromptView()
             case .math:
                 MathView()
+            case .mathApple:
+                MathAppleView()
             case .mathVerify:
                 MathVerifyView()
             }

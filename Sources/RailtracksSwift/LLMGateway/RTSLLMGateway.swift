@@ -31,34 +31,44 @@ public class RTSLLMGateway {
         agentNode: any RTSAgentNode,
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
     ) throws -> RTSLLMSession {
-        let conduitTools: [any Tool] = agentNode.tools.map { tool in
-            if let agentTool = tool as? RTSAgentTool {
-                let makeSession: @Sendable () throws -> RTSLLMSession = {
-                    try RTSLLMGateway.buildSession(
-                        apiKeys: apiKeys,
-                        invoker: invoker,
-                        agentNode: agentTool.wrappedAgent,
-                        onNewSession: onNewSession
-                    )
-                }
-                return RTSConduitAgentToolBridge(
-                    agentTool: agentTool,
-                    makeSession: makeSession,
-                    onNewSession: onNewSession,
-                    nodeInvoker: invoker,
-                    createdBy: agentNode
-                )
-            } else {
-                return tool.asConduitTool(invoker: invoker, createdBy: agentNode)
-            }
-        }
-
         let provider = agentNode.llmProvider
-        guard let apiKey = apiKeys[provider.kind] else {
-            throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
-        }
         switch provider {
+        case .appleAI:
+            let (appleAISession, unsupported) = AppleAISession.build(
+                fromAgentTools: agentNode.tools,
+                invoker: invoker,
+                createdBy: agentNode
+            )
+            if !unsupported.isEmpty {
+                log.warning("⚠️ [\(agentNode.agentName)] \(unsupported.count) tool(s) ignored — conform to RTSAppleAIToolNode to use tools with AppleAI: [\(unsupported.map(\.toolName))]")
+            }
+            return RTSLLMSession.build(appleAI: appleAISession, agentNode: agentNode)
+
         case .openAI(modelIDString: let modelIDString):
+            let conduitTools: [any Tool] = agentNode.tools.map { tool in
+                if let agentTool = tool as? RTSAgentTool {
+                    let makeSession: @Sendable () throws -> RTSLLMSession = {
+                        try RTSLLMGateway.buildSession(
+                            apiKeys: apiKeys,
+                            invoker: invoker,
+                            agentNode: agentTool.wrappedAgent,
+                            onNewSession: onNewSession
+                        )
+                    }
+                    return RTSConduitAgentToolBridge(
+                        agentTool: agentTool,
+                        makeSession: makeSession,
+                        onNewSession: onNewSession,
+                        nodeInvoker: invoker,
+                        createdBy: agentNode
+                    )
+                } else {
+                    return tool.asConduitTool(invoker: invoker, createdBy: agentNode)
+                }
+            }
+            guard let apiKey = apiKeys[provider.kind] else {
+                throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
+            }
             let openAIProvider = OpenAIProvider(apiKey: apiKey)
             let model = ModelIdentifier.openAI(modelIDString)
             return try RTSLLMSession.build(provider: openAIProvider, model: model, agentNode: agentNode, conduitTools: conduitTools)
