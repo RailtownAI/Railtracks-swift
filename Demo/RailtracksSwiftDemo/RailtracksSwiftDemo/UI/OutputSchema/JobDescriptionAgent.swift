@@ -35,7 +35,6 @@ struct JobDescriptionAgent: RTSAgentNode {
     public init() {
         self.agentName = "Job Description Agent"
         self.llmProvider = .appleAI
-//        self.llmProvider = .openAI(modelIDString: RTSOpenAIModelID.gpt5Mini.modelIDString)
         let systemMessage: String = Self.systemMessage
         self.outputSchema = JobDescription.rtsSchema
         
