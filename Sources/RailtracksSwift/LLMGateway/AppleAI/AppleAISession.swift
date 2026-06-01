@@ -16,6 +16,13 @@ import FoundationModels
 /// so this class recreates the session when a new instruction is applied.
 /// Messages are appended immediately after each `send` or `setInstruction`
 /// so timestamps reflect when each entry was actually produced.
+struct AppleAIResponse {
+    let text: String
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let latency: Double?
+}
+
 final class AppleAISession: @unchecked Sendable {
     private var session: LanguageModelSession
     private let sessionTools: [any Tool]
@@ -40,24 +47,35 @@ final class AppleAISession: @unchecked Sendable {
         }
     }
 
-    func send(_ prompt: String) async throws -> String {
+    func send(_ prompt: String) async throws -> AppleAIResponse {
         let currentSession = lock.withLock { session }
         let beforeCount = currentSession.transcript.count
         let responseText: String
+        let metrics: AppleAIResponse
         if let schema = outputSchema {
             let response = try await currentSession.respond(to: prompt, schema: schema)
             responseText = generatedContentToJSONString(response.content) ?? String(describing: response.content)
+            metrics = extractResponseMetrics(from: response, text: responseText)
         } else {
             let response = try await currentSession.respond(to: prompt)
             responseText = response.content
+            metrics = extractResponseMetrics(from: response, text: responseText)
         }
         let newMessages = currentSession.transcript.dropFirst(beforeCount).compactMap { $0.toRTSMessage() }
         lock.withLock {
             _messages.append(contentsOf: newMessages)
         }
-        // TODO: extract response.promptTokenCount and response.responseTokenCount via Mirror
-        // and return alongside content so RTSLLMSession can stamp them onto the assistant RTSMessage metadata
-        return responseText
+        return metrics
+    }
+
+    private func extractResponseMetrics(from response: some Any, text: String) -> AppleAIResponse {
+        let m = Mirror(reflecting: response)
+        let input = m.children.first(where: { $0.label == "promptTokenCount" })
+            .flatMap { $0.value as? Int? } ?? nil
+        let output = m.children.first(where: { $0.label == "responseTokenCount" })
+            .flatMap { $0.value as? Int? } ?? nil
+        let latency = m.children.first(where: { $0.label == "duration" })?.value as? Double
+        return AppleAIResponse(text: text, inputTokens: input, outputTokens: output, latency: latency)
     }
 
     func messages() -> [RTSMessage] {

@@ -113,11 +113,21 @@ extension RTSLLMSession {
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
-                    // TODO: once AppleAISession.send() returns token counts, stamp them onto
-                    // the assistant message here via RTSMessageMetadata(tokenCount:inputTokenCount:)
-                    relay.send(newMessages.map { $0.stamped(runID: runID) })
+                    let stamped = newMessages.map { message -> RTSMessage in
+                        var m = message.stamped(runID: runID)
+                        if m.role == .assistant {
+                            m = m.stampingTokenCounts(
+                                input: response.inputTokens,
+                                output: response.outputTokens,
+                                latency: response.latency,
+                                providerName: RTSLLMProvider.appleAI.providerName
+                            )
+                        }
+                        return m
+                    }
+                    relay.send(stamped)
                 }
-                return response
+                return response.text
             },
             setSystemPrompt: { message, runID in
                 // setInstruction recreates the session so transcript resets —
@@ -204,7 +214,42 @@ extension RTSLLMSession {
 
 private extension RTSMessage {
     func stamped(runID: UUID?) -> RTSMessage {
-        RTSMessage(id: id, role: role, content: content, timestamp: timestamp, metadata: metadata, runID: runID)
+        RTSMessage(
+            id: id,
+            role: role,
+            content: content,
+            timestamp: timestamp,
+            metadata: metadata,
+            runID: runID
+        )
+    }
+
+    func stampingTokenCounts(
+        input: Int?,
+        output: Int?,
+        latency: Double?,
+        providerName: String?
+    ) -> RTSMessage {
+        let existing = metadata
+        let updated = RTSMessageMetadata(
+            tokenCount: output ?? existing?.tokenCount,
+            inputTokenCount: input ?? existing?.inputTokenCount,
+            generationTime: latency ?? existing?.generationTime,
+            model: existing?.model ?? providerName,
+            providerName: providerName ?? existing?.providerName,
+            tokensPerSecond: existing?.tokensPerSecond,
+            providerExtra: existing?.providerExtra,
+            custom: existing?.custom,
+            toolCalls: existing?.toolCalls
+        )
+        return RTSMessage(
+            id: id,
+            role: role,
+            content: content,
+            timestamp: timestamp,
+            metadata: updated,
+            runID: runID
+        )
     }
 }
 

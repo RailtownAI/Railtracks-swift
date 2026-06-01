@@ -62,14 +62,14 @@ public enum RTSOpenAIModelID {
 }
 
 /// Provider kind without model information — used as dictionary key for API keys
-public enum RTSLLMProviderKind: Hashable, Sendable {
+public enum RTSLLMProviderKind: Hashable, CaseIterable, Sendable {
     case openAI
     case appleAI
     // TODO: complete the rest of the cases
 }
 
 /// LLM Providers that store model ID as string in its associated value
-public enum RTSLLMProvider: CustomStringConvertible, Sendable {
+public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     case openAI(modelIDString: String)
     case appleAI
     // TODO: complete the rest of the cases
@@ -98,6 +98,32 @@ public enum RTSLLMProvider: CustomStringConvertible, Sendable {
             return .openAI
         case .appleAI:
             return .appleAI
+        }
+    }
+
+    public var isLocal: Bool {
+        switch self {
+        case .appleAI:
+            return true
+        case .openAI:
+            return false
+        }
+    }
+
+    /// Returns whether a provider name string belongs to a local (zero-cost) provider.
+    /// Used by the JSON export layer, which only has the name string from message metadata.
+    static func isLocal(providerName: String) -> Bool {
+        return allCases.first { $0.providerName == providerName }?.isLocal ?? false
+    }
+
+    public static var allCases: [RTSLLMProvider] {
+        RTSLLMProviderKind.allCases.map { kind in
+            switch kind {
+            case .openAI:
+                return .openAI(modelIDString: "")
+            case .appleAI:
+                return .appleAI
+            }
         }
     }
 }
