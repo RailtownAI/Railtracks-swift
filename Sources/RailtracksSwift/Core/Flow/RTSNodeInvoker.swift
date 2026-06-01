@@ -19,14 +19,22 @@ protocol NodeEventPublishers {
 /// All node invoking should go through this, otherwise will have even record inconsistency
 public class RTSNodeInvoker: @unchecked Sendable {
     let stampFactory: RTSStampFactory
-    
+    let sessionID: UUID
+    let signpostEmitter: (any RTSSignpostEmitting)?
+
     let nodeCreateEventSubject = PassthroughSubject<RTSNodeEvent, Never>()
     let nodeInvokeEventSubject = PassthroughSubject<RTSNodeEvent, Never>()
     let edgeCreateEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
     let edgeFinishEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
-    
-    init(stampFactory: RTSStampFactory) {
+
+    init(
+        stampFactory: RTSStampFactory,
+        sessionID: UUID,
+        signpostEmitter: (any RTSSignpostEmitting)? = nil
+    ) {
         self.stampFactory = stampFactory
+        self.sessionID = sessionID
+        self.signpostEmitter = signpostEmitter
     }
     
     func invokeAgent(
@@ -37,7 +45,12 @@ public class RTSNodeInvoker: @unchecked Sendable {
     ) async throws -> RTSOutput {
         var mutableNode = node
         mutableNode.inputs = input
-        return try await invokeCore(node, nodeType: .agent, input: input, createdBy: createdBy) { runID in
+        return try await invokeCore(
+            node,
+            nodeType: .agent,
+            input: input,
+            createdBy: createdBy
+        ) { runID in
             try await mutableNode.invoke(runID: runID, session: session)
         }
     }
@@ -49,7 +62,12 @@ public class RTSNodeInvoker: @unchecked Sendable {
     ) async throws -> RTSOutput {
         var mutableNode = node
         mutableNode.inputs = input
-        return try await invokeCore(node, nodeType: .tool, input: input, createdBy: createdBy) { runID in
+        return try await invokeCore(
+            node,
+            nodeType: .tool,
+            input: input,
+            createdBy: createdBy
+        ) { runID in
             try await mutableNode.invoke(runID: runID)
         }
     }
@@ -68,11 +86,34 @@ public class RTSNodeInvoker: @unchecked Sendable {
             event = .startCreate(node.name())
         }
         let creationStamp = await stampFactory.makeStamp(event: event)
-        await publishNodeCreated(node, nodeType: nodeType, stamp: creationStamp, createdBy: createdBy)
+        await publishNodeCreated(
+            node,
+            nodeType: nodeType,
+            stamp: creationStamp,
+            createdBy: createdBy
+        )
 
         let runID = UUID()
         let edgeID = createdBy == nil ? runID : UUID()
-        await publishEdgeCreated(edgeID: edgeID, nodeType: nodeType, stamp: creationStamp, from: createdBy, to: node, input: input)
+        await publishEdgeCreated(
+            edgeID: edgeID,
+            runID: runID,
+            nodeType: nodeType,
+            stamp: creationStamp,
+            from: createdBy,
+            to: node,
+            input: input
+        )
+
+        signpostEmitter?.emitNodeStart(
+            nodeID: node.id,
+            nodeName: node.name(),
+            nodeType: nodeType,
+            sessionID: sessionID,
+            parentName: createdBy?.name() ?? "",
+            runID: runID,
+            input: input
+        )
 
         let output: RTSOutput
         var invokeError: Error?
@@ -83,9 +124,37 @@ public class RTSNodeInvoker: @unchecked Sendable {
             output = [:]
         }
 
+        signpostEmitter?.emitNodeEnd(
+            nodeID: node.id,
+            nodeName: node.name(),
+            nodeType: nodeType,
+            sessionID: sessionID,
+            parentName: createdBy?.name() ?? "",
+            runID: runID,
+            output: invokeError == nil ? output : nil,
+            error: invokeError
+        )
+
         let completionStamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
-        await publishEdgeFinished(edgeID: edgeID, nodeType: nodeType, stamp: completionStamp, from: createdBy, to: node, input: input, output: output, error: invokeError)
-        await publishNodeFinished(node, nodeType: nodeType, stamp: completionStamp, runID: runID, input: input, output: output, error: invokeError)
+        await publishEdgeFinished(
+            edgeID: edgeID,
+            nodeType: nodeType,
+            stamp: completionStamp,
+            from: createdBy,
+            to: node,
+            input: input,
+            output: output,
+            error: invokeError
+        )
+        await publishNodeFinished(
+            node,
+            nodeType: nodeType,
+            stamp: completionStamp,
+            runID: runID,
+            input: input,
+            output: output,
+            error: invokeError
+        )
 
         if let invokeError { throw invokeError }
         return output
@@ -132,6 +201,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishEdgeCreated(
         edgeID: UUID,
+        runID: UUID,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         from source: (any RTSNode)?,
@@ -141,6 +211,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         edgeCreateEventSubject.send(
             RTSEdgeEvent(
                 id: edgeID,
+                runID: runID,
                 stamp: stamp,
                 nodeType: nodeType,
                 sourceNodeID: source?.id,
@@ -165,6 +236,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         edgeFinishEventSubject.send(
             RTSEdgeEvent(
                 id: edgeID,
+                runID: nil,
                 stamp: stamp,
                 nodeType: nodeType,
                 sourceNodeID: source?.id,

@@ -10,6 +10,7 @@ import Foundation
 /// Edge snapshot
 struct RTSEdgeEvent {
     let id: UUID
+    let runID: UUID?
     let stamp: RTSStamp
     let nodeType: RTSFlowNodeType
     let sourceNodeID: UUID?

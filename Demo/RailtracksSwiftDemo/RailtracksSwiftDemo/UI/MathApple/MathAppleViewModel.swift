@@ -52,6 +52,7 @@ class MathAppleViewModel {
 
             let agent = RTSAgent(
                 llmProvider: .appleAI,
+                name: "AppleAI Math Assistant Agent",
                 tools: tools,
                 systemMessage: "You are a Math assistant. " +
                 "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +

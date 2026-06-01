@@ -11,11 +11,14 @@ import Foundation
 public class RTSFlow {
     let id: UUID = UUID()
     let title: String
-    
+    let signpostEmitter: any RTSSignpostEmitting
+
     public init(
-        title: String
+        title: String,
+        signpostEmitter: (any RTSSignpostEmitting)? = nil
     ) {
         self.title = title
+        self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
     }
 
     public func run(
@@ -25,11 +28,17 @@ public class RTSFlow {
         systemMessage: String? = nil
     ) async throws -> String {
         let stampFactory = RTSStampFactory()
-        let nodeInvoker = RTSNodeInvoker(stampFactory: stampFactory)
+        let nodeInvoker = RTSNodeInvoker(
+            stampFactory: stampFactory,
+            sessionID: id,
+            signpostEmitter: signpostEmitter
+        )
         let flowGraphCollector = RTSFlowGraphCollector(
             stampFactory: stampFactory,
             flowName: title,
-            nodeEventPublisher: nodeInvoker
+            sessionID: id,
+            nodeEventPublisher: nodeInvoker,
+            signpostEmitter: signpostEmitter
         )
         await flowGraphCollector.setup()
         
