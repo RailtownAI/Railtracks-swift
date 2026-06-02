@@ -14,5 +14,6 @@ public enum RTSError: Error {
     case decodingFailed(String? = nil)
     case writeFileFailed(String? = nil)
     case invalidInvocation(String)
+    case invalidSchema(String)
     case missingAPIKey(String)
 }

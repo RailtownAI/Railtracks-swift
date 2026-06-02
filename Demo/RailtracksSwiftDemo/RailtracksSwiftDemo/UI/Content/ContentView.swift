@@ -37,6 +37,12 @@ struct ContentView: View {
                 }
                 .background(viewModel.mode == .mathVerify ? Color.accentColor.opacity(0.2) : Color.clear)
                 .cornerRadius(8)
+                
+                Button("Output Schema") {
+                    viewModel.mode = .outputSchema
+                }
+                .background(viewModel.mode == .outputSchema ? Color.accentColor.opacity(0.2) : Color.clear)
+                .cornerRadius(8)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -52,6 +58,8 @@ struct ContentView: View {
                 MathAppleView()
             case .mathVerify:
                 MathVerifyView()
+            case .outputSchema:
+                OutputSchemaView()
             }
         }
         .padding()

@@ -16,14 +16,23 @@ import FoundationModels
 /// so this class recreates the session when a new instruction is applied.
 /// Messages are appended immediately after each `send` or `setInstruction`
 /// so timestamps reflect when each entry was actually produced.
+struct AppleAIResponse {
+    let text: String
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let latency: Double?
+}
+
 final class AppleAISession: @unchecked Sendable {
     private var session: LanguageModelSession
     private let sessionTools: [any Tool]
+    private let outputSchema: GenerationSchema?
     private var _messages: [RTSMessage] = []
     private let lock = NSLock()
 
-    private init(tools: [any Tool] = []) {
+    private init(tools: [any Tool] = [], outputSchema: GenerationSchema? = nil) {
         self.sessionTools = tools
+        self.outputSchema = outputSchema
         self.session = Self.makeSession(instruction: nil, tools: tools)
     }
 
@@ -38,17 +47,35 @@ final class AppleAISession: @unchecked Sendable {
         }
     }
 
-    func send(_ prompt: String) async throws -> String {
+    func send(_ prompt: String) async throws -> AppleAIResponse {
         let currentSession = lock.withLock { session }
         let beforeCount = currentSession.transcript.count
-        let response = try await currentSession.respond(to: prompt)
+        let responseText: String
+        let metrics: AppleAIResponse
+        if let schema = outputSchema {
+            let response = try await currentSession.respond(to: prompt, schema: schema)
+            responseText = generatedContentToJSONString(response.content) ?? String(describing: response.content)
+            metrics = extractResponseMetrics(from: response, text: responseText)
+        } else {
+            let response = try await currentSession.respond(to: prompt)
+            responseText = response.content
+            metrics = extractResponseMetrics(from: response, text: responseText)
+        }
         let newMessages = currentSession.transcript.dropFirst(beforeCount).compactMap { $0.toRTSMessage() }
         lock.withLock {
             _messages.append(contentsOf: newMessages)
         }
-        // TODO: extract response.promptTokenCount and response.responseTokenCount via Mirror
-        // and return alongside content so RTSLLMSession can stamp them onto the assistant RTSMessage metadata
-        return response.content
+        return metrics
+    }
+
+    private func extractResponseMetrics(from response: some Any, text: String) -> AppleAIResponse {
+        let m = Mirror(reflecting: response)
+        let input = m.children.first(where: { $0.label == "promptTokenCount" })
+            .flatMap { $0.value as? Int }
+        let output = m.children.first(where: { $0.label == "responseTokenCount" })
+            .flatMap { $0.value as? Int }
+        let latency = m.children.first(where: { $0.label == "duration" })?.value as? Double
+        return AppleAIResponse(text: text, inputTokens: input, outputTokens: output, latency: latency)
     }
 
     func messages() -> [RTSMessage] {
@@ -74,7 +101,18 @@ final class AppleAISession: @unchecked Sendable {
                 unsupportedTools.append(tool)
             }
         }
-        return (AppleAISession(tools: appleTools), unsupportedTools)
+        let schema: GenerationSchema?
+        if let rtsSchema = createdBy.outputSchema {
+            do {
+                schema = try rtsSchema.toFoundationModelsSchema()
+            } catch {
+                log.warning("⚠️🍎 [\(createdBy.agentName)] outputSchema conversion failed, running without structured output: \(error)")
+                schema = nil
+            }
+        } else {
+            schema = nil
+        }
+        return (AppleAISession(tools: appleTools, outputSchema: schema), unsupportedTools)
     }
 
     private static func makeSession(instruction: String?, tools: [any Tool]) -> LanguageModelSession {
@@ -87,6 +125,66 @@ final class AppleAISession: @unchecked Sendable {
             return LanguageModelSession(tools: tools)
         case (nil, true):
             return LanguageModelSession()
+        }
+    }
+}
+
+// MARK: - GeneratedContent → JSON String
+
+private extension AppleAISession {
+    /// Serializes a `GeneratedContent` structured response to a JSON string.
+    /// Uses Mirror reflection on Apple's internal `GeneratedJSON.Storage` enum — the same
+    /// approach as `extractText` and `extractParameters` elsewhere in this file.
+    func generatedContentToJSONString(_ content: GeneratedContent) -> String? {
+        guard let anyValue = extractAny(from: content) else { return nil }
+        guard JSONSerialization.isValidJSONObject(anyValue) else { return nil }
+        guard let data = try? JSONSerialization.data(withJSONObject: anyValue),
+              let str = String(data: data, encoding: .utf8) else { return nil }
+        return str
+    }
+
+    private func extractAny(from content: GeneratedContent) -> Any? {
+        let m = Mirror(reflecting: content)
+        guard let jsonVal = m.children.first(where: { $0.label == "value" })?.value else { return nil }
+        return extractAnyFromJSON(jsonVal)
+    }
+
+    private func extractAnyFromJSON(_ json: Any) -> Any? {
+        let m = Mirror(reflecting: json)
+        guard let storage = m.children.first(where: { $0.label == "storage" })?.value else { return nil }
+        return extractAnyFromStorage(storage)
+    }
+
+    private func extractAnyFromStorage(_ storage: Any) -> Any? {
+        let m = Mirror(reflecting: storage)
+        guard let child = m.children.first else { return NSNull() }
+        switch child.label {
+        case "string": return child.value as? String
+        case "number": return child.value as? Double
+        case "bool":   return child.value as? Bool
+        case "null":   return NSNull()
+        case "array":
+            return Mirror(reflecting: child.value).children.map { extractAnyFromJSON($0.value) as Any }
+        case "object":
+            // The associated value is an internal struct with `order: [String]` and
+            // `properties: [String: GeneratedJSON]` — not a flat dictionary.
+            let objMirror = Mirror(reflecting: child.value)
+            guard let propertiesAny = objMirror.children.first(where: { $0.label == "properties" })?.value else {
+                return [String: Any]()
+            }
+            var dict: [String: Any] = [:]
+            for entry in Mirror(reflecting: propertiesAny).children {
+                // Each entry is a (key: String, value: GeneratedJSON) Dictionary element
+                let pair = Mirror(reflecting: entry.value)
+                if let key = pair.children.first(where: { $0.label == "key" })?.value as? String,
+                   let val = pair.children.first(where: { $0.label == "value" })?.value {
+                    dict[key] = extractAnyFromJSON(val) as Any
+                }
+            }
+            return dict
+        default:
+            log.warning("⚠️🍎 Unknown GeneratedJSON storage case '\(child.label as Any)' in structured output")
+            return String(describing: child.value)
         }
     }
 }

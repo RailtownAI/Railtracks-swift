@@ -156,8 +156,11 @@ extension RTSFlowGraph {
             let inputTokens = message.metadata?.inputTokenCount ?? 0
             let outputTokens = message.metadata?.tokenCount ?? 0
             let modelName = message.metadata?.model ?? "unknown" // TODO: model not always populated on assistant messages
+            let providerName = message.metadata?.providerName ?? ""
             let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
-            let cost = try? await RTSCostCalculator.shared.calculateCost(model: modelName, usage: usage)
+            let cost = RTSLLMProvider.isLocal(providerName: providerName)
+                ? nil
+                : try? await RTSCostCalculator.shared.calculateCost(model: modelName, usage: usage)
             details.append(RTSFlowGraphLLMDetail(
                 modelName: modelName,
                 modelProvider: message.metadata?.providerName ?? "unknown",

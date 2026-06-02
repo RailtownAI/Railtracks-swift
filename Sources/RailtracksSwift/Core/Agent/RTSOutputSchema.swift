@@ -13,11 +13,11 @@
 /// RTSOutputSchema(
 ///     name: "JobDescription",
 ///     type: .object(name: "JobDescription", properties: [
-///         RTSOutputSchema(name: "title",        type: .string),
-///         RTSOutputSchema(name: "salary",       type: .number, isOptional: true),
-///         RTSOutputSchema(name: "tags",         type: .array(of: .string)),
-///         RTSOutputSchema(name: "level",        type: .stringEnum(name: "Level", choices: ["junior", "mid", "senior"])),
-///         RTSOutputSchema(name: "address",      type: .object(name: "Address", properties: [
+///         RTSOutputSchema(name: "title",    type: .string),
+///         RTSOutputSchema(name: "salary",   type: .number, isOptional: true),
+///         RTSOutputSchema(name: "tags",     type: .array(of: .string)),
+///         RTSOutputSchema(name: "level",    type: .stringEnum(name: "Level", choices: ["junior", "mid", "senior"])),
+///         RTSOutputSchema(name: "address",  type: .object(name: "Address", properties: [
 ///             RTSOutputSchema(name: "city",    type: .string),
 ///             RTSOutputSchema(name: "country", type: .string),
 ///         ])),
