@@ -84,18 +84,37 @@ final class AppleAISession: @unchecked Sendable {
         lock.withLock { _messages }
     }
 
-    /// Builds an `AppleAISession` from `agentNode.tools`, wrapping each `RTSAppleAIToolNode`
-    /// in an `RTSAppleAIToolBridge` so tool calls are tracked as nodes via `RTSNodeInvoker`.
+    /// Builds an `AppleAISession` from `agentNode.tools`, wrapping each tool in its
+    /// appropriate bridge. `RTSAgentTool` becomes `RTSAppleAIAgentToolBridge`;
+    /// `RTSAppleAIToolNode` becomes `RTSAppleAIToolBridge`. Other tools are unsupported.
     /// Returns non-conforming tools separately so the caller can warn about them.
     static func build(
         fromAgentTools tools: [any RTSToolNode],
         invoker: RTSNodeInvoker,
-        createdBy: any RTSAgentNode
+        createdBy: any RTSAgentNode,
+        makeSubSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
+        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
     ) -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
         var unsupportedTools: [any RTSToolNode] = []
         for tool in tools {
-            if let appleTool = tool as? any RTSAppleAIToolNode {
+            if let agentTool = tool as? RTSAgentTool {
+                do {
+                    let schema = try agentTool.parameters.toFoundationModelsSchema()
+                    let bridge = RTSAppleAIAgentToolBridge(
+                        agentTool: agentTool,
+                        parameters: schema,
+                        makeSession: { try makeSubSession(agentTool.wrappedAgent) },
+                        onNewSession: onNewSession,
+                        nodeInvoker: invoker,
+                        createdBy: createdBy
+                    )
+                    appleTools.append(bridge)
+                } catch {
+                    log.warning("⚠️🍎 [\(createdBy.agentName)] RTSAgentTool '\(agentTool.toolName)' schema conversion failed, tool dropped: \(error)")
+                    unsupportedTools.append(tool)
+                }
+            } else if let appleTool = tool as? any RTSAppleAIToolNode {
                 let bridge = appleTool.makeAppleAIBridge(invoker: invoker, createdBy: createdBy)
                           ?? (appleTool as any Tool)
                 appleTools.append(bridge)

@@ -37,7 +37,16 @@ public class RTSLLMGateway {
             let (appleAISession, unsupported) = AppleAISession.build(
                 fromAgentTools: agentNode.tools,
                 invoker: invoker,
-                createdBy: agentNode
+                createdBy: agentNode,
+                makeSubSession: { subAgent in
+                    try RTSLLMGateway.buildSession(
+                        apiKeys: apiKeys,
+                        invoker: invoker,
+                        agentNode: subAgent,
+                        onNewSession: onNewSession
+                    )
+                },
+                onNewSession: onNewSession
             )
             if !unsupported.isEmpty {
                 log.warning("⚠️ [\(agentNode.agentName)] \(unsupported.count) tool(s) ignored — conform to RTSAppleAIToolNode to use tools with AppleAI: [\(unsupported.map(\.toolName))]")
