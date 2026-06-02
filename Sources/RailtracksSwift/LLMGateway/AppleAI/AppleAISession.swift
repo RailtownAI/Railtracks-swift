@@ -71,9 +71,9 @@ final class AppleAISession: @unchecked Sendable {
     private func extractResponseMetrics(from response: some Any, text: String) -> AppleAIResponse {
         let m = Mirror(reflecting: response)
         let input = m.children.first(where: { $0.label == "promptTokenCount" })
-            .flatMap { $0.value as? Int? } ?? nil
+            .flatMap { $0.value as? Int }
         let output = m.children.first(where: { $0.label == "responseTokenCount" })
-            .flatMap { $0.value as? Int? } ?? nil
+            .flatMap { $0.value as? Int }
         let latency = m.children.first(where: { $0.label == "duration" })?.value as? Double
         return AppleAIResponse(text: text, inputTokens: input, outputTokens: output, latency: latency)
     }

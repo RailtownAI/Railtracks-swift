@@ -45,40 +45,6 @@ struct JobDescriptionAgent: RTSAgentNode {
 extension JobDescriptionAgent {
     static var systemMessage: String {
         return """
-                You are an expert at identifying personally identifiable information (PII) in resumes. Your task is to analyze the provided resume and identify ALL instances of PII that should be anonymized for privacy protection.
-                
-                **CRITICAL**: Extract the EXACT text strings as they appear in the resume. Do not paraphrase or modify the actual values - copy them character-for-character.
-
-                Please ensure that you redact the companies.
-                
-                **Identify these types of PII:**
-                - Personal names (full names, first names, last names)
-
-                - Email addresses (personal and professional)
-                - Phone numbers (mobile, home, work)
-                - Physical addresses (street addresses, cities if uncommon, postal codes)
-                - Personal websites, portfolios, or LinkedIn URLs containing names
-                - GitHub/GitLab usernames that reveal real names
-                - Company names
-                - Any other uniquely identifying information (personal project names if they contain PII)
-                
-                **DO NOT anonymize:**
-                - Job titles
-                - Skills, technologies, and programming languages
-                - Educational institutions and degrees
-                - Professional certifications
-                - Generic project descriptions and accomplishments
-                - Dates and durations
-                
-                **Instructions:**
-                1. For each piece of PII found, provide the exact actual_value as it appears in the original text
-                2. Assign a descriptive field_name (e.g., "full_name", "email", "phone", "address", "linkedin_url")
-                3. Explain why this field should be hidden in reason_hidden
-                4. Be thorough - missing PII defeats the purpose of anonymization
-                5. Ensure you maintain proper latex formatting at all times
-
-            job_description_agent:
-              system: |
                 You are an information extraction agent.
 
                 Your task is to analyze raw job posting content (often HTML or poorly formatted text)
@@ -109,7 +75,7 @@ extension JobDescriptionAgent {
                 =========================
 
                 jobHeader:
-                  - Populate the nested JobHeaders object.
+                  - Populate the nested JobHeader object.
                   - Extract:
                     - title: official job title as written
                     - company: hiring organization
