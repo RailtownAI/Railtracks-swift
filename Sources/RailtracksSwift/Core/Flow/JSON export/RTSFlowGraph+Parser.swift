@@ -8,7 +8,6 @@
 import Foundation
 
 extension RTSFlowGraph {
-    /// Create a RTSFlowGraph instance based on the data provided.
     static func make(
         flowName: String,
         sessionID: UUID,

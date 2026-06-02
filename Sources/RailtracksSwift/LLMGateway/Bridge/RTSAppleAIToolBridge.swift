@@ -27,7 +27,7 @@ struct RTSAppleAIToolBridge<WrappedTool: RTSAppleAIToolNode>: Tool
     var description: String { wrappedTool.description }
 
     func call(arguments: WrappedTool.Arguments) async throws -> String {
-        log.debug("🍎 RTSConduitToolBridge - \(wrappedTool.name()) is called with \(arguments)")
+        log.debug("🍎 RTSAppleAIToolBridge - \(wrappedTool.name()) is called with \(arguments)")
         let data = try JSONEncoder().encode(arguments)
         let input = try JSONDecoder().decode(RTSInput.self, from: data)
         let output = try await nodeInvoker.invokeTool(wrappedTool, input: input, createdBy: createdBy)
