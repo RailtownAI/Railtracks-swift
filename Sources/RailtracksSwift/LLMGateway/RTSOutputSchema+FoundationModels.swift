@@ -14,7 +14,7 @@ import FoundationModels
 extension RTSOutputSchema {
     func toFoundationModelsSchema() throws -> GenerationSchema {
         guard case .object(let objectName, let properties) = type else {
-            throw RTSError.invalidInvocation("RTSOutputSchema root must be an .object type")
+            throw RTSError.invalidSchema("RTSOutputSchema root must be an .object type")
         }
         var dependencies: [DynamicGenerationSchema] = []
         let root = DynamicGenerationSchema(
