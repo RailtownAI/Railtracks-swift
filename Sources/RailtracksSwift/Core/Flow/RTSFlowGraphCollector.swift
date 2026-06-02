@@ -336,29 +336,21 @@ extension RTSFlowGraphCollector {
         // Ancestor chain: walk edgeEvents upward from this node to the root
         let ancestorChain = buildAncestors(for: nodeEvent.id)
 
-        // FlowTreeNode — skip root (no ancestors) and non-leaf tools
-        // (tools that invoked children contribute no LLM metrics that
-        // their leaf descendants don't already carry)
-        let isRoot = ancestorChain.isEmpty
-        let isTool = nodeEvent.nodeType == .tool
-        let isNonLeafTool = isTool && edgeEvents.contains(where: { $0.sourceNodeID == nodeEvent.id })
-        if !isRoot && !isNonLeafTool {
-            signpostEmitter.emitTreeNode(
-                nodeID: nodeIDStr,
-                sessionID: sessionIDStr,
-                runID: runIDStr,
-                nodeType: nodeTypeStr,
-                model: model,
-                provider: provider,
-                cost: 0,
-                latency: latency,
-                inputTokens: totalInputTokens,
-                outputTokens: totalOutputTokens,
-                error: hasError,
-                ancestors: ancestorChain,
-                name: nodeEvent.name
-            )
-        }
+        signpostEmitter.emitTreeNode(
+            nodeID: nodeIDStr,
+            sessionID: sessionIDStr,
+            runID: runIDStr,
+            nodeType: nodeTypeStr,
+            model: model,
+            provider: provider,
+            cost: 0,
+            latency: latency,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            error: hasError,
+            ancestors: ancestorChain,
+            name: nodeEvent.name
+        )
 
         // FlowIO — one event per LLM message, numbered per direction bucket
         var inputIdx = 0

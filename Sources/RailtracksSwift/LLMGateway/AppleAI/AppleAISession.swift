@@ -62,6 +62,8 @@ final class AppleAISession: @unchecked Sendable {
             metrics = extractResponseMetrics(from: response, text: responseText)
         }
         let newMessages = currentSession.transcript.dropFirst(beforeCount).compactMap { $0.toRTSMessage() }
+        let rawCount = currentSession.transcript.count - beforeCount
+        log.debug("🍎 send: \(rawCount) new transcript entries, \(newMessages.count) converted to RTSMessage")
         lock.withLock {
             _messages.append(contentsOf: newMessages)
         }
@@ -256,6 +258,7 @@ private extension Transcript.Entry {
                 runID: nil
             )
         @unknown default:
+            log.debug("🍎 toRTSMessage: unhandled Transcript.Entry case: \(self)")
             return nil
         }
     }
