@@ -125,6 +125,30 @@ RTSAgent(
 )
 ```
 
+### Structured Output
+
+Annotate any `Codable` struct with `@RTSSchema` to generate an `RTSOutputSchema` the library can pass to the model. Supported by both `.openAI` and `.appleAI`.
+
+```swift
+@RTSSchema
+struct JobResult: Codable {
+    let title: String
+    let summary: String
+    let skills: [String]
+}
+
+let agent = RTSAgent(
+    llmProvider: .appleAI,   // or .openAI(...)
+    systemMessage: "Extract job info as structured data.",
+    outputSchema: JobResult.rtsSchema
+)
+
+let raw = try await flow.run(agent: agent, prompt: jobText, gateway: gateway)
+let result = try JobResult.decode(from: raw)
+```
+
+Nested types are supported — annotate each nested struct with `@RTSSchema` as well.
+
 ### RTSToolNode
 
 Protocol for tools used with OpenAI (via Conduit). Implement `callableRoutine`, `toolDescription`, and `parameterSchema`.
