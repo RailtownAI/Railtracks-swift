@@ -44,7 +44,12 @@ struct RTSConduitAgentToolBridge: Tool {
         input.merge(toolArgs) { _, new in new }
         let session = try makeSession()
         onNewSession(session)
-        let output = try await nodeInvoker.invokeAgent(agentTool.wrappedAgent, input: input, session: session, createdBy: createdBy)
+        let output = try await nodeInvoker.invokeAgent(
+            agentTool.wrappedAgent,
+            input: input,
+            session: session,
+            createdBy: createdBy
+        )
         guard let data = try? JSONEncoder().encode(output),
               let result = String(data: data, encoding: .utf8) else {
             throw RTSError.encodingFailed()

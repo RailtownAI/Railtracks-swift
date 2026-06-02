@@ -52,16 +52,27 @@ struct RTSAppleAIAgentToolBridge: Tool {
         for param in agentTool.parameters.parameters {
             switch param.type {
             case .string:
-                if let v = try? arguments.value(String.self, forProperty: param.name) { input[param.name] = .string(v) }
+                if let value = try? arguments.value(String.self, forProperty: param.name) {
+                    input[param.name] = .string(value)
+                }
             case .number:
-                if let v = try? arguments.value(Double.self, forProperty: param.name) { input[param.name] = .number(v) }
+                if let value = try? arguments.value(Double.self, forProperty: param.name) {
+                    input[param.name] = .number(value)
+                }
             case .bool:
-                if let v = try? arguments.value(Bool.self, forProperty: param.name) { input[param.name] = .bool(v) }
+                if let value = try? arguments.value(Bool.self, forProperty: param.name) {
+                    input[param.name] = .bool(value)
+                }
             }
         }
         let session = try makeSession()
         onNewSession(session)
-        let output = try await nodeInvoker.invokeAgent(agentTool.wrappedAgent, input: input, session: session, createdBy: createdBy)
+        let output = try await nodeInvoker.invokeAgent(
+            agentTool.wrappedAgent,
+            input: input,
+            session: session,
+            createdBy: createdBy
+        )
         guard let data = try? JSONEncoder().encode(output),
               let result = String(data: data, encoding: .utf8) else {
             throw RTSError.encodingFailed()

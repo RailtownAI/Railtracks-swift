@@ -25,38 +25,49 @@ class MathVerifyViewModel {
             }
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
 
+            // Tier 3: independently re-computes the answer using math tools
+            let stepCalculatorAgent = RTSAgent(
+                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt5Mini.modelIDString),
+                name: "MathStepCalculator",
+                tools: [AdditionTool(), SubtractionTool(), MultiplicationTool(), DivisionTool()],
+                systemMessage: "You are a step-by-step math calculator. " +
+                "Given a math problem, use the provided math tools to compute each operation in the correct order. " +
+                "Return only the final numeric result."
+            )
+
+            let stepCalculatorTool = RTSAgentTool(
+                agent: stepCalculatorAgent,
+                description: "Independently re-computes a math problem step by step using math tools. Use this to get an independent calculation to compare against a proposed answer.",
+                parameters: RTSToolSchema(parameters: [
+                    .init(name: "prompt", description: "The math problem to independently compute", type: .string)
+                ])
+            )
+
+            // Tier 2: verifies by delegating re-computation to MathStepCalculator
             let verifierAgent = RTSAgent(
                 llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt5Mini.modelIDString),
                 name: "MathVerifier",
-                systemMessage: "You are a math verification assistant. Given a math problem and a proposed answer, verify whether the answer is correct. Respond with 'Correct' or 'Incorrect' followed by a brief explanation."
+                tools: [stepCalculatorTool],
+                systemMessage: "You are a math verification assistant. " +
+                "Given a math problem and a proposed answer, use the MathStepCalculator tool to independently re-compute the answer. " +
+                "Compare the re-computed result with the proposed answer and respond with 'Correct' or 'Incorrect' followed by a brief explanation."
             )
 
             let verifierTool = RTSAgentTool(
                 agent: verifierAgent,
-                description: "Verifies a proposed answer to a math problem. Use this to double-check your calculated answer before responding.",
+                description: "Verifies a proposed answer by delegating an independent re-computation to a step calculator sub-agent.",
                 parameters: RTSToolSchema(parameters: [
                     .init(name: "prompt", description: "The math problem and proposed answer to verify", type: .string)
                 ])
             )
 
-            let mathTools: [any RTSToolNode] = [
-                AdditionTool(),
-                SubtractionTool(),
-                MultiplicationTool(),
-                DivisionTool(),
-                verifierTool
-            ]
-
+            // Tier 1: solves the problem then calls the verifier
             let solverAgent = RTSAgent(
                 llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
                 name: "MathSolver",
-                tools: mathTools,
+                tools: [AdditionTool(), SubtractionTool(), MultiplicationTool(), DivisionTool(), verifierTool],
                 systemMessage: "You are a Math assistant. " +
-                "Use the math tools to perform each calculation step. " +
-                "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +
-                "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. " +
-                "If there is multiplication in the math, you must use the provided multiplication tool to perform the calculation. " +
-                "If there is division in the math, you must use the provided division tool to perform the calculation. " +
+                "Use the math tools to perform each calculation step by step. " +
                 "After computing your final answer, use the MathVerifier tool to confirm it is correct before responding."
             )
 
