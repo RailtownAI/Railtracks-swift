@@ -42,9 +42,14 @@ public class RTSFlow {
         )
         await flowGraphCollector.setup()
         
-        let session = try gateway.session(invoker: nodeInvoker, agentNode: agent) { [flowGraphCollector] newSession in
+        let session = try gateway.session(
+            invoker: nodeInvoker,
+            agentNode: agent
+        ) { [flowGraphCollector] newSession in
+            // subscription for descendant agents
             Task { await flowGraphCollector.subscribeMessage(newSession) }
         }
+        // subscription for root agent
         Task { await flowGraphCollector.subscribeMessage(session) }
 
         var input = agent.inputs

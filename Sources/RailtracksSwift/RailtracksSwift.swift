@@ -8,7 +8,7 @@ internal let log = RTSLoggers.rtsLog
 
 /// General namespace for the library
 public enum RailtracksSwift {
-    public static let version = "0.1.0"
+    public static let version = "0.1.1"
 }
 
 //
@@ -23,8 +23,9 @@ public extension RailtracksSwift {
         return hexString
     }
     
-    // TODO: assess the need for static function "call" for Node-alike protocol or equivalent logic
-    // TODO: call function's main responsibility is to inject context prior to node invoke/execution
+    // TODO: when implementing context or context-injection for agent
+    // assess the need for static function "call" for Node-alike protocol or equivalent logic
+    // call function's main responsibility is to inject context prior to node invoke/execution
 }
 
 //

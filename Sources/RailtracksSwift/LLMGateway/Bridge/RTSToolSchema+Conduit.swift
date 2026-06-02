@@ -1,30 +1,12 @@
 //
-//  RTSToolSchema.swift
+//  RTSToolSchema+Conduit.swift
 //  RailtracksSwift
 //
-//  Created by Mark Su on 2026-05-05.
+//  Created by Mark Su on 2026-06-02.
 //
 
 import Foundation
 import Conduit
-
-public struct RTSToolSchema: Sendable {
-    public struct Parameter: Sendable {
-        public let name: String
-        public let description: String
-        public let type: RTSValueType
-        public init(name: String, description: String, type: RTSValueType) {
-            self.name = name
-            self.description = description
-            self.type = type
-        }
-    }
-    
-    public let parameters: [Parameter]
-    public init(parameters: [Parameter]) {
-        self.parameters = parameters
-    }
-}
 
 extension RTSToolSchema {
     func toGenerationSchema() -> GenerationSchema {
@@ -42,4 +24,4 @@ extension RTSToolSchema {
             }
         )
     }
-} 
+}

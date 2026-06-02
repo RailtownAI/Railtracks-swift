@@ -57,6 +57,7 @@ public protocol RTSSignpostEmitting: Sendable {
         parentName: String,
         name: String
     )
+    
     func emitTreeNode(
         nodeID: String,
         sessionID: String,
@@ -72,11 +73,13 @@ public protocol RTSSignpostEmitting: Sendable {
         ancestors: [String],
         name: String
     )
+    
     func emitEdge(
         source: String,
         target: String,
         runID: String
     )
+    
     func emitIO(
         nodeID: String,
         sessionID: String,
