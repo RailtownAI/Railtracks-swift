@@ -10,7 +10,7 @@ import Conduit
 
 /// Encapsulation layer for against the LLM connection service underneath
 /// If the llm model accessing library underneath is replaced, only files under LLMGateway directory should require update while the rest  can remain the same
-public struct RTSLLMGateway {
+public struct RTSLLMGateway: Sendable {
     private let apiKeys: [RTSLLMProviderKind: String]
 
     public init(apiKeys: [RTSLLMProviderKind: String]) {
