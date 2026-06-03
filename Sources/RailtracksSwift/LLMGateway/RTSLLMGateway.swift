@@ -10,7 +10,7 @@ import Conduit
 
 /// Encapsulation layer for against the LLM connection service underneath
 /// If the llm model accessing library underneath is replaced, only files under LLMGateway directory should require update while the rest  can remain the same
-public class RTSLLMGateway {
+public struct RTSLLMGateway: Sendable {
     private let apiKeys: [RTSLLMProviderKind: String]
 
     public init(apiKeys: [RTSLLMProviderKind: String]) {
@@ -37,7 +37,16 @@ public class RTSLLMGateway {
             let (appleAISession, unsupported) = AppleAISession.build(
                 fromAgentTools: agentNode.tools,
                 invoker: invoker,
-                createdBy: agentNode
+                createdBy: agentNode,
+                makeSubSession: { subAgent in
+                    try RTSLLMGateway.buildSession(
+                        apiKeys: apiKeys,
+                        invoker: invoker,
+                        agentNode: subAgent,
+                        onNewSession: onNewSession
+                    )
+                },
+                onNewSession: onNewSession
             )
             if !unsupported.isEmpty {
                 log.warning("⚠️ [\(agentNode.agentName)] \(unsupported.count) tool(s) ignored — conform to RTSAppleAIToolNode to use tools with AppleAI: [\(unsupported.map(\.toolName))]")
