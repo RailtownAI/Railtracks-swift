@@ -12,16 +12,22 @@ public struct RTSAgentTool: Sendable {
     let description: String
     let parameters: RTSToolSchema
     public var callableRoutine: RTSClosure
+    public var inputTransform: (@Sendable (RTSInput) async throws -> RTSInput)?
+    public var outputTransform: (@Sendable (RTSOutput) async throws -> RTSOutput)?
 
     public init(
         agent: any RTSAgentNode,
         description: String,
-        parameters: RTSToolSchema
+        parameters: RTSToolSchema,
+        inputTransform: (@Sendable (RTSInput) async throws -> RTSInput)? = nil,
+        outputTransform: (@Sendable (RTSOutput) async throws -> RTSOutput)? = nil
     ) {
         self.wrappedAgent = agent
         self.description = description
         self.parameters = parameters
         self.callableRoutine = RTSClosure { _ in [:] }
+        self.inputTransform = inputTransform
+        self.outputTransform = outputTransform
     }
 }
 

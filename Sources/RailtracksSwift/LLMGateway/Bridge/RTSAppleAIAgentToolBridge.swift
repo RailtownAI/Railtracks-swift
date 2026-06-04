@@ -65,14 +65,20 @@ struct RTSAppleAIAgentToolBridge: Tool {
                 }
             }
         }
+        if let transform = agentTool.inputTransform {
+            input = try await transform(input)
+        }
         let session = try makeSession()
         onNewSession(session)
-        let output = try await nodeInvoker.invokeAgent(
+        var output = try await nodeInvoker.invokeAgent(
             agentTool.wrappedAgent,
             input: input,
             session: session,
             createdBy: createdBy
         )
+        if let transform = agentTool.outputTransform {
+            output = try await transform(output)
+        }
         guard let data = try? JSONEncoder().encode(output),
               let result = String(data: data, encoding: .utf8) else {
             throw RTSError.encodingFailed()
