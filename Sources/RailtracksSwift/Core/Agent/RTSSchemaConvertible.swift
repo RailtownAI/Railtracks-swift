@@ -10,11 +10,11 @@ import Foundation
 /// Conforming types can describe their shape as an `RTSOutputSchema`.
 ///
 /// Apply `@RTSSchema` to a struct for automatic synthesis.
-public protocol RTSSchemaConvertible {
+public protocol RTSSchemaConvertible: Codable, Sendable {
     static var rtsSchema: RTSOutputSchema { get }
 }
 
-public extension RTSSchemaConvertible where Self: Decodable {
+public extension RTSSchemaConvertible {
     /// Decodes the agent's JSON result string into this type.
     ///
     /// ```swift

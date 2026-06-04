@@ -192,12 +192,24 @@ private extension RTSStamp {
 private extension RTSValue {
     func toGeneratedContent() -> RTSGeneratedContent {
         switch self {
-        case .null:               return RTSGeneratedContent(kind: .null)
-        case .bool(let v):        return RTSGeneratedContent(kind: .bool(v))
-        case .number(let v):      return RTSGeneratedContent(kind: .number(v))
-        case .string(let v):      return RTSGeneratedContent(kind: .string(v))
-        case .array(let elements): return RTSGeneratedContent(kind: .array(elements.map { $0.toGeneratedContent() }))
-        case .object(let props):  return RTSGeneratedContent(kind: .structure(props.mapValues { $0.toGeneratedContent() }))
+        case .null:
+            return RTSGeneratedContent(kind: .null)
+        case .bool(let v):
+            return RTSGeneratedContent(kind: .bool(v))
+        case .number(let v):
+            return RTSGeneratedContent(kind: .number(v))
+        case .string(let v):
+            return RTSGeneratedContent(kind: .string(v))
+        case .array(let elements):
+            return RTSGeneratedContent(kind: .array(elements.map { $0.toGeneratedContent() }))
+        case .object(let props):
+            return RTSGeneratedContent(kind: .structure(props.mapValues { $0.toGeneratedContent() }))
+        case .data(let value):
+            guard let data = try? JSONEncoder().encode(value),
+                  let decoded = try? JSONDecoder().decode(RTSValue.self, from: data) else {
+                return RTSGeneratedContent(kind: .null)
+            }
+            return decoded.toGeneratedContent()
         }
     }
 }

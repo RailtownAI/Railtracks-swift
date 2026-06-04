@@ -17,6 +17,10 @@ public enum RTSValue: Codable, Sendable {
     case string(String)
     case array([RTSValue])
     case object([String: RTSValue])
+    /// Carries a typed `RTSSchemaConvertible` value in-memory without JSON round-tripping.
+    /// Encodes as the value's native JSON representation. Not decodable back to `.data` —
+    /// decoding will produce `.object` or another primitive case.
+    case data(any RTSSchemaConvertible)
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -64,6 +68,8 @@ public enum RTSValue: Codable, Sendable {
               for (key, value) in dict {
                   try container.encode(value, forKey: AnyCodingKey(key))
               }
+          case .data(let value):
+              try value.encode(to: encoder)
           }
       }
                       
