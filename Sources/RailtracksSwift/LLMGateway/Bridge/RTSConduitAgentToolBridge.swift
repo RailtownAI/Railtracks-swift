@@ -45,6 +45,14 @@ struct RTSConduitAgentToolBridge: Tool {
         if let transform = agentTool.inputTransform {
             input = try await transform(input)
         }
+        let promptKey = agentTool.wrappedAgent.inputKeyPrompt
+        if input[promptKey] == nil {
+            log.warning("⚠️ 🌁 '\(agentTool.name())' has no '\(promptKey)' in input — auto-wrapping all parameters as JSON string under '\(promptKey)'")
+            if let data = try? JSONEncoder().encode(input),
+               let json = String(data: data, encoding: .utf8) {
+                input[promptKey] = .string(json)
+            }
+        }
         let session = try makeSession()
         onNewSession(session)
         var output = try await nodeInvoker.invokeAgent(
