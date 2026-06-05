@@ -78,7 +78,7 @@ struct RTSAppleAIAgentToolBridge: Tool {
                         input[param.name] = .array(value.map { .bool($0) })
                     }
                 case .array:
-                    break
+                    log.warning("⚠️ 🍎 '\(agentTool.name())' parameter '\(param.name)' uses nested arrays which are not supported — value dropped")
                 }
             }
         }
@@ -87,9 +87,6 @@ struct RTSAppleAIAgentToolBridge: Tool {
         if let transform = agentTool.inputTransform {
             input = try await transform(input)
         }
-        if let systemMessage, input[systemKey] == nil {
-            input[systemKey] = systemMessage
-        }
         let promptKey = agentTool.wrappedAgent.inputKeyPrompt
         if input[promptKey] == nil {
             log.warning("⚠️ 🍎 '\(agentTool.name())' has no '\(promptKey)' in input — auto-wrapping all parameters as JSON string under '\(promptKey)'")
@@ -97,6 +94,9 @@ struct RTSAppleAIAgentToolBridge: Tool {
                let json = String(data: data, encoding: .utf8) {
                 input[promptKey] = .string(json)
             }
+        }
+        if let systemMessage, input[systemKey] == nil {
+            input[systemKey] = systemMessage
         }
         let session = try makeSession()
         onNewSession(session)

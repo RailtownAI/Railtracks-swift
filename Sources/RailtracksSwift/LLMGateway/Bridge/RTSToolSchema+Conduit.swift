@@ -22,7 +22,12 @@ extension RTSToolSchema {
         )
         // Schema construction only fails for duplicate names or undefined refs —
         // neither applies to our flat, statically-defined parameter schemas.
-        return (try? GenerationSchema(root: root, dependencies: [])) ?? GenerationSchema(type: GeneratedContent.self, properties: [])
+        do {
+            return try GenerationSchema(root: root, dependencies: [])
+        } catch {
+            log.error("☠️ RTSToolSchema.toGenerationSchema() failed to build schema — falling back to empty schema: \(error)")
+            return GenerationSchema(type: GeneratedContent.self, properties: [])
+        }
     }
 }
 
