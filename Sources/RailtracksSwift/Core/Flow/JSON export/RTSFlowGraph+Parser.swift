@@ -204,12 +204,6 @@ private extension RTSValue {
             return RTSGeneratedContent(kind: .array(elements.map { $0.toGeneratedContent() }))
         case .object(let props):
             return RTSGeneratedContent(kind: .structure(props.mapValues { $0.toGeneratedContent() }))
-        case .data(let value):
-            guard let data = try? JSONEncoder().encode(value),
-                  let decoded = try? JSONDecoder().decode(RTSValue.self, from: data) else {
-                return RTSGeneratedContent(kind: .null)
-            }
-            return decoded.toGeneratedContent()
         }
     }
 }
