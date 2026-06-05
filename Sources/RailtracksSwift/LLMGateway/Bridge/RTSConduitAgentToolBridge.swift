@@ -37,7 +37,8 @@ struct RTSConduitAgentToolBridge: Tool {
     var parameters: GenerationSchema { agentTool.parameterSchema.toGenerationSchema() }
 
     func call(arguments: GeneratedContent) async throws -> String {
-        log.debug("🌁 RTSConduitAgentToolBridge - \(agentTool.name()) is called with \(arguments.jsonString)")
+        log.debug("🌁 RTSConduitAgentToolBridge - \(agentTool.name()) is called")
+        log.trace("🌁 RTSConduitAgentToolBridge - \(agentTool.name()) is called with \(arguments.jsonString)")
         let jsonData = Data(arguments.jsonString.utf8)
         let toolArgs = try JSONDecoder().decode(RTSInput.self, from: jsonData)
         var input = agentTool.wrappedAgent.inputs
