@@ -13,35 +13,28 @@ extension RTSToolSchema {
         let root = DynamicGenerationSchema(
             name: "Arguments",
             properties: parameters.map { param in
-                let schema: DynamicGenerationSchema
-                switch param.type {
-                case .string:
-                    schema = DynamicGenerationSchema(type: String.self)
-                case .number:
-                    schema = DynamicGenerationSchema(type: Double.self)
-                case .bool:
-                    schema = DynamicGenerationSchema(type: Bool.self)
-                case .array(let elementType):
-                    let elementSchema: DynamicGenerationSchema
-                    switch elementType {
-                    case .string:
-                        elementSchema = DynamicGenerationSchema(type: String.self)
-                    case .number:
-                        elementSchema = DynamicGenerationSchema(type: Double.self)
-                    case .bool:
-                        elementSchema = DynamicGenerationSchema(type: Bool.self)
-                    case .array:
-                        elementSchema = DynamicGenerationSchema(type: String.self)
-                    }
-                    schema = DynamicGenerationSchema(arrayOf: elementSchema)
-                }
-                return DynamicGenerationSchema.Property(
+                DynamicGenerationSchema.Property(
                     name: param.name,
                     description: param.description,
-                    schema: schema
+                    schema: param.type.toFoundationModelsDynamicSchema()
                 )
             }
         )
         return try GenerationSchema(root: root, dependencies: [])
+    }
+}
+
+private extension RTSValueType {
+    func toFoundationModelsDynamicSchema() -> DynamicGenerationSchema {
+        switch self {
+        case .string:
+            return DynamicGenerationSchema(type: String.self)
+        case .number:
+            return DynamicGenerationSchema(type: Double.self)
+        case .bool:
+            return DynamicGenerationSchema(type: Bool.self)
+        case .array(let element):
+            return DynamicGenerationSchema(arrayOf: element.toFoundationModelsDynamicSchema())
+        }
     }
 }
