@@ -63,6 +63,23 @@ struct RTSAppleAIAgentToolBridge: Tool {
                 if let value = try? arguments.value(Bool.self, forProperty: param.name) {
                     input[param.name] = .bool(value)
                 }
+            case .array(let elementType):
+                switch elementType {
+                case .string:
+                    if let value = try? arguments.value([String].self, forProperty: param.name) {
+                        input[param.name] = .array(value.map { .string($0) })
+                    }
+                case .number:
+                    if let value = try? arguments.value([Double].self, forProperty: param.name) {
+                        input[param.name] = .array(value.map { .number($0) })
+                    }
+                case .bool:
+                    if let value = try? arguments.value([Bool].self, forProperty: param.name) {
+                        input[param.name] = .array(value.map { .bool($0) })
+                    }
+                case .array:
+                    break
+                }
             }
         }
         if let transform = agentTool.inputTransform {

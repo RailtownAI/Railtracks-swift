@@ -20,6 +20,17 @@ extension RTSToolSchema {
                     return GenerationSchema.Property(name: param.name, description: param.description, type: Double.self)
                 case .bool:
                     return GenerationSchema.Property(name: param.name, description: param.description, type: Bool.self)
+                case .array(let elementType):
+                    switch elementType {
+                    case .string:
+                        return GenerationSchema.Property(name: param.name, description: param.description, type: [String].self)
+                    case .number:
+                        return GenerationSchema.Property(name: param.name, description: param.description, type: [Double].self)
+                    case .bool:
+                        return GenerationSchema.Property(name: param.name, description: param.description, type: [Bool].self)
+                    case .array:
+                        return GenerationSchema.Property(name: param.name, description: param.description, type: [String].self)
+                    }
                 }
             }
         )

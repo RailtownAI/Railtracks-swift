@@ -94,6 +94,9 @@ public enum RTSValue: Codable, Sendable {
 }
 
 /// Value type used for tool parameter schema
-public enum RTSValueType: Sendable {
-    case string, number, bool
+public indirect enum RTSValueType: Sendable {
+    case string
+    case number
+    case bool
+    case array(RTSValueType)
 }

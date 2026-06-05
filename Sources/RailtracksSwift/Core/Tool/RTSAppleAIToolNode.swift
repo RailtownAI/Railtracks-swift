@@ -77,18 +77,29 @@ public extension RTSAppleAIToolNode where Arguments: Generable {
 
         return propertiesArr.compactMap { prop in
             let m = Mirror(reflecting: prop)
-            guard
-                let name    = m.children.first(where: { $0.label == "name" })?.value as? String,
-                let typeVal = m.children.first(where: { $0.label == "type" })?.value
+            guard let name    = m.children.first(where: { $0.label == "name" })?.value as? String,
+                  let typeVal = m.children.first(where: { $0.label == "type" })?.value
             else { return nil }
             let description = (m.children.first(where: { $0.label == "description" })?.value)
                 .flatMap { $0 as? String } ?? ""
             let valueType: RTSValueType
-            switch "\(typeVal)" {
-            case "String":                  valueType = .string
-            case "Double", "Int", "Float":  valueType = .number
-            case "Bool":                    valueType = .bool
-            default:                        valueType = .string
+            let typeStr = "\(typeVal)"
+            switch typeStr {
+            case "String":
+                valueType = .string
+            case "Double", "Int", "Float":
+                valueType = .number
+            case "Bool":
+                valueType = .bool
+            case "[String]", "Array<String>":
+                valueType = .array(.string)
+            case "[Double]", "[Int]", "[Float]",
+                 "Array<Double>", "Array<Int>", "Array<Float>":
+                valueType = .array(.number)
+            case "[Bool]", "Array<Bool>":
+                valueType = .array(.bool)
+            default:
+                valueType = .string
             }
             return RTSToolSchema.Parameter(name: name, description: description, type: valueType)
         }
