@@ -82,8 +82,13 @@ struct RTSAppleAIAgentToolBridge: Tool {
                 }
             }
         }
+        let systemKey = agentTool.wrappedAgent.inputKeySystemMessage
+        let systemMessage = input[systemKey]
         if let transform = agentTool.inputTransform {
             input = try await transform(input)
+        }
+        if let systemMessage, input[systemKey] == nil {
+            input[systemKey] = systemMessage
         }
         let promptKey = agentTool.wrappedAgent.inputKeyPrompt
         if input[promptKey] == nil {

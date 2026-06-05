@@ -42,8 +42,13 @@ struct RTSConduitAgentToolBridge: Tool {
         let toolArgs = try JSONDecoder().decode(RTSInput.self, from: jsonData)
         var input = agentTool.wrappedAgent.inputs
         input.merge(toolArgs) { _, new in new }
+        let systemKey = agentTool.wrappedAgent.inputKeySystemMessage
+        let systemMessage = input[systemKey]
         if let transform = agentTool.inputTransform {
             input = try await transform(input)
+        }
+        if let systemMessage, input[systemKey] == nil {
+            input[systemKey] = systemMessage
         }
         let promptKey = agentTool.wrappedAgent.inputKeyPrompt
         if input[promptKey] == nil {
