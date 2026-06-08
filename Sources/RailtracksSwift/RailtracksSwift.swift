@@ -14,6 +14,13 @@ public enum RailtracksSwift {
     /// app's Documents directory after each LLM call. Only has effect in DEBUG builds.
     /// Configure once at app startup before any flow runs.
     public nonisolated(unsafe) static var debugMessageFileEnabled: Bool = true
+
+    /// Directory where flow graph JSON files are written after each flow run.
+    /// Defaults to the app's Documents directory. Configure once at app startup before any flow runs.
+    public nonisolated(unsafe) static var flowGraphOutputDirectory: URL = FileManager.default
+        .urls(for: .documentDirectory, in: .userDomainMask)
+        .first
+    ?? FileManager.default.temporaryDirectory
 }
 
 //
