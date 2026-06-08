@@ -27,9 +27,9 @@ actor RTSFlowGraphCollector {
     var edgeEvents: [RTSEdgeEvent] = []
 
     internal var rootNodeID: UUID?
+    internal var rootRunID: UUID?
     private var messageBuffer: [UUID: [RTSMessage]] = [:]
     private var collectionState: CollectionState = .collecting
-    private var edgeIDByNodeID: [UUID: UUID] = [:]
 
     private let completionStream: AsyncStream<Void>
     private let streamContinuation: AsyncStream<Void>.Continuation
@@ -174,6 +174,7 @@ actor RTSFlowGraphCollector {
         var isCollectionFinished = false
         switch edgeEvent.stamp.event {
         case .finishExecution:
+            emitEdgePointEvents(edgeEvent)
             guard edgeEvent.sourceNodeID == nil else { break }
             switch collectionState {
             case .collecting:
@@ -186,32 +187,20 @@ actor RTSFlowGraphCollector {
             }
 
         case .create, .startCreate:
-            // Use the edge ID (unique per invocation) as the graph node identifier
-            // so each tool call appears as its own execution-level node.
-            // Map the target's instance UUID → this edge ID so child nodes can
-            // correctly reference the right parent invocation as their parentId.
-            let nodeIdentifier = (edgeEvent.runID ?? edgeEvent.id).uuidString
-            let parentIdentifier: String
-            let parentType: RTSFlowNodeType?
-            if let sourceID = edgeEvent.sourceNodeID {
-                if let parentEdgeID = edgeIDByNodeID[sourceID] {
-                    parentIdentifier = parentEdgeID.uuidString
-                } else {
-                    log.warning("⚠️🎁 no edgeID found for sourceNodeID: \(sourceID) — graph edge for \(edgeEvent.targetName) will have incorrect parentID")
-                    parentIdentifier = ""
-                }
-                parentType = edgeEvents.first(where: { $0.targetNodeID == sourceID })?.nodeType
-            } else {
-                parentIdentifier = ""
-                parentType = nil
+            if edgeEvent.sourceNodeID == nil {
+                rootRunID = edgeEvent.runID ?? edgeEvent.id
             }
-            edgeIDByNodeID[edgeEvent.targetNodeID] = edgeEvent.runID ?? edgeEvent.id
-            log.debug("🎁 emitGraphNode: '\(edgeEvent.targetName)' nodeID=\(nodeIdentifier) parentID=\(parentIdentifier) nodeType=\(edgeEvent.nodeType.rawValue) parentType=\(parentType?.rawValue ?? "nil")")
+            let nodeIdentifier = edgeEvent.targetNodeID.uuidString
+            let parentIdentifier = edgeEvent.sourceNodeID?.uuidString ?? ""
+            let parentType: RTSFlowNodeType? = edgeEvent.sourceNodeID.flatMap { sourceID in
+                edgeEvents.first(where: { $0.targetNodeID == sourceID })?.nodeType
+            }
+            log.trace("🎁 emitGraphNode: '\(edgeEvent.targetName)' nodeID=\(nodeIdentifier) parentID=\(parentIdentifier) nodeType=\(edgeEvent.nodeType.rawValue) parentType=\(parentType?.rawValue ?? "nil")")
             signpostEmitter?.emitGraphNode(
                 nodeID: nodeIdentifier,
                 parentID: parentIdentifier,
                 sessionID: sessionID.uuidString,
-                runID: nodeIdentifier,
+                runID: edgeEvent.runID?.uuidString ?? edgeEvent.id.uuidString,
                 nodeType: edgeEvent.nodeType,
                 parentType: parentType,
                 error: false,
@@ -291,109 +280,5 @@ actor RTSFlowGraphCollector {
 
     func generateJSONFileName() -> String {
         return "\(flowName)_\(sessionID.uuidString)"
-    }
-}
-
-// MARK: - Point event emission
-
-extension RTSFlowGraphCollector {
-    /// Emits `FlowGraphNode`, `FlowTreeNode`, and `FlowIO` for a finishing node.
-    /// Called from `processNodeEvent` after the message buffer has been flushed,
-    /// so `nodeEvent.messages` is complete and all ancestor edge events are
-    /// already in `edgeEvents`.
-    private func emitNodePointEvents(_ nodeEvent: RTSNodeEvent) {
-        guard let signpostEmitter else { return }
-        guard let runID = nodeEvent.runID else { return }
-
-        let nodeIDStr = nodeEvent.id.uuidString
-        let sessionIDStr = sessionID.uuidString
-        let runIDStr = runID.uuidString
-        let hasError = nodeEvent.error != nil
-
-        // Latency: difference between the node's create and finish stamps
-        let createStamp = nodeEvents
-            .first(where: { $0.id == nodeEvent.id && $0.runID == nil })?.stamp.timestamp
-        let latency = createStamp.map { nodeEvent.stamp.timestamp.timeIntervalSince($0) } ?? 0
-        
-        // Aggregate LLM metadata from messages that carry it
-        let messagesWithMeta: [(RTSMessage, RTSMessageMetadata)] = nodeEvent.messages
-            .compactMap {
-                guard let meta = $0.metadata else { return nil }
-                return ($0, meta)
-            }
-        let totalInputTokens = messagesWithMeta.compactMap { $0.1.inputTokenCount }.reduce(0, +)
-        let totalOutputTokens = messagesWithMeta.compactMap { $0.1.tokenCount }.reduce(0, +)
-        let lastMeta = messagesWithMeta.last?.1
-        let model = lastMeta?.model ?? ""
-        let provider = lastMeta?.providerName ?? ""
-
-        // Ancestor chain: walk edgeEvents upward from this node to the root
-        let ancestorChain = buildAncestors(for: nodeEvent.id)
-
-        let nodeStartTime = createStamp?.timeIntervalSince1970 ?? 0
-        signpostEmitter.emitTreeNode(
-            nodeID: nodeIDStr,
-            sessionID: sessionIDStr,
-            runID: runIDStr,
-            nodeType: nodeEvent.nodeType,
-            model: model,
-            provider: provider,
-            cost: 0,
-            latency: latency,
-            inputTokens: totalInputTokens,
-            outputTokens: totalOutputTokens,
-            error: hasError,
-            ancestors: ancestorChain,
-            name: nodeEvent.name,
-            startTime: nodeStartTime
-        )
-
-        // FlowIO — one event per LLM message, numbered per direction bucket
-        var inputIdx = 0
-        var outputIdx = 0
-        for message in nodeEvent.messages {
-            let isInput = message.role == .system || message.role == .user
-            let direction = isInput ? "Input" : "Output"
-            if isInput { inputIdx += 1 } else { outputIdx += 1 }
-            let idx = isInput ? inputIdx : outputIdx
-            let displayRole = "\(String(format: "%02d", idx)) \(message.role.rawValue)"
-            let meta = message.metadata
-
-            log.debug("🎁 emitIO: '\(nodeEvent.name)' direction=\(direction) role=\(message.role.rawValue) nodeID=\(nodeIDStr)")
-            signpostEmitter.emitIO(
-                nodeID: nodeIDStr,
-                sessionID: sessionIDStr,
-                runID: runIDStr,
-                messageID: message.id.uuidString,
-                source: "llm",
-                direction: direction,
-                role: message.role.rawValue,
-                model: meta?.model ?? model,
-                provider: meta?.providerName ?? provider,
-                cost: 0,
-                latency: isInput ? 0 : (meta?.generationTime ?? 0),
-                inputTokens: isInput ? (meta?.inputTokenCount ?? 0) : 0,
-                outputTokens: isInput ? 0 : (meta?.tokenCount ?? 0),
-                displayRole: displayRole,
-                toolName: nodeEvent.name,
-                content: message.content.textValue,
-                startTime: nodeStartTime
-            )
-        }
-    }
-
-    /// Walk `edgeEvents` upward from `nodeID` to the root, collecting ancestor
-    /// names in root-first order. Stops when no incoming non-root edge is found.
-    private func buildAncestors(for nodeID: UUID) -> [String] {
-        var result: [String] = []
-        var currentID = nodeID
-        while let edge = edgeEvents
-            .first(where: { $0.targetNodeID == currentID && $0.sourceNodeID != nil }),
-              let sourceName = edge.sourceName,
-              let sourceID = edge.sourceNodeID {
-            result.insert(sourceName, at: 0)
-            currentID = sourceID
-        }
-        return result
     }
 }
