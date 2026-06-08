@@ -206,6 +206,7 @@ actor RTSFlowGraphCollector {
                 parentType = nil
             }
             edgeIDByNodeID[edgeEvent.targetNodeID] = edgeEvent.runID ?? edgeEvent.id
+            log.debug("🎁 emitGraphNode: '\(edgeEvent.targetName)' nodeID=\(nodeIdentifier) parentID=\(parentIdentifier) nodeType=\(edgeEvent.nodeType.rawValue) parentType=\(parentType?.rawValue ?? "nil")")
             signpostEmitter?.emitGraphNode(
                 nodeID: nodeIdentifier,
                 parentID: parentIdentifier,
@@ -358,6 +359,7 @@ extension RTSFlowGraphCollector {
             let displayRole = "\(String(format: "%02d", idx)) \(message.role.rawValue)"
             let meta = message.metadata
 
+            log.debug("🎁 emitIO: '\(nodeEvent.name)' direction=\(direction) role=\(message.role.rawValue) nodeID=\(nodeIDStr)")
             signpostEmitter.emitIO(
                 nodeID: nodeIDStr,
                 sessionID: sessionIDStr,
