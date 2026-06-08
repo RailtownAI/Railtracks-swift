@@ -192,7 +192,7 @@ actor RTSFlowGraphCollector {
             // correctly reference the right parent invocation as their parentId.
             let nodeIdentifier = (edgeEvent.runID ?? edgeEvent.id).uuidString
             let parentIdentifier: String
-            let parentTypeStr: String
+            let parentType: RTSFlowNodeType?
             if let sourceID = edgeEvent.sourceNodeID {
                 if let parentEdgeID = edgeIDByNodeID[sourceID] {
                     parentIdentifier = parentEdgeID.uuidString
@@ -200,10 +200,10 @@ actor RTSFlowGraphCollector {
                     log.warning("⚠️🎁 no edgeID found for sourceNodeID: \(sourceID) — graph edge for \(edgeEvent.targetName) will have incorrect parentID")
                     parentIdentifier = ""
                 }
-                parentTypeStr = edgeEvents.first(where: { $0.targetNodeID == sourceID })?.nodeType.rawValue ?? ""
+                parentType = edgeEvents.first(where: { $0.targetNodeID == sourceID })?.nodeType
             } else {
                 parentIdentifier = ""
-                parentTypeStr = ""
+                parentType = nil
             }
             edgeIDByNodeID[edgeEvent.targetNodeID] = edgeEvent.runID ?? edgeEvent.id
             signpostEmitter?.emitGraphNode(
@@ -211,22 +211,16 @@ actor RTSFlowGraphCollector {
                 parentID: parentIdentifier,
                 sessionID: sessionID.uuidString,
                 runID: nodeIdentifier,
-                nodeType: edgeEvent.nodeType.rawValue,
-                parentType: parentTypeStr,
+                nodeType: edgeEvent.nodeType,
+                parentType: parentType,
                 error: false,
                 parentError: false,
                 cost: 0,
                 model: "",
                 parentName: edgeEvent.sourceName ?? "",
-                name: edgeEvent.targetName
+                name: edgeEvent.targetName,
+                startTime: edgeEvent.stamp.timestamp.timeIntervalSince1970
             )
-            if edgeEvent.sourceNodeID != nil {
-                signpostEmitter?.emitEdge(
-                    source: parentIdentifier,
-                    target: nodeIdentifier,
-                    runID: edgeEvent.id.uuidString
-                )
-            }
         }
         edgeEvents.append(edgeEvent)
 
@@ -314,7 +308,7 @@ extension RTSFlowGraphCollector {
         let sessionIDStr = sessionID.uuidString
         let runIDStr = runID.uuidString
         let hasError = nodeEvent.error != nil
-        let nodeTypeStr = nodeEvent.nodeType.rawValue
+
 
         // Latency: difference between the node's create and finish stamps
         let createStamp = nodeEvents
@@ -336,11 +330,12 @@ extension RTSFlowGraphCollector {
         // Ancestor chain: walk edgeEvents upward from this node to the root
         let ancestorChain = buildAncestors(for: nodeEvent.id)
 
+        let nodeStartTime = createStamp?.timeIntervalSince1970 ?? 0
         signpostEmitter.emitTreeNode(
             nodeID: nodeIDStr,
             sessionID: sessionIDStr,
             runID: runIDStr,
-            nodeType: nodeTypeStr,
+            nodeType: nodeEvent.nodeType,
             model: model,
             provider: provider,
             cost: 0,
@@ -349,7 +344,8 @@ extension RTSFlowGraphCollector {
             outputTokens: totalOutputTokens,
             error: hasError,
             ancestors: ancestorChain,
-            name: nodeEvent.name
+            name: nodeEvent.name,
+            startTime: nodeStartTime
         )
 
         // FlowIO — one event per LLM message, numbered per direction bucket
@@ -379,7 +375,8 @@ extension RTSFlowGraphCollector {
                 outputTokens: isInput ? 0 : (meta?.tokenCount ?? 0),
                 displayRole: displayRole,
                 toolName: nodeEvent.name,
-                content: message.content.textValue
+                content: message.content.textValue,
+                startTime: nodeStartTime
             )
         }
     }
