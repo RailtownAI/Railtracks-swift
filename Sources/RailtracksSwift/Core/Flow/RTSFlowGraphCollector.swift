@@ -309,7 +309,6 @@ extension RTSFlowGraphCollector {
         let runIDStr = runID.uuidString
         let hasError = nodeEvent.error != nil
 
-
         // Latency: difference between the node's create and finish stamps
         let createStamp = nodeEvents
             .first(where: { $0.id == nodeEvent.id && $0.runID == nil })?.stamp.timestamp
