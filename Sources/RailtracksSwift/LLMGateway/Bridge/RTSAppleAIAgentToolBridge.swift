@@ -63,16 +63,54 @@ struct RTSAppleAIAgentToolBridge: Tool {
                 if let value = try? arguments.value(Bool.self, forProperty: param.name) {
                     input[param.name] = .bool(value)
                 }
+            case .array(let elementType):
+                switch elementType {
+                case .string:
+                    if let value = try? arguments.value([String].self, forProperty: param.name) {
+                        input[param.name] = .array(value.map { .string($0) })
+                    }
+                case .number:
+                    if let value = try? arguments.value([Double].self, forProperty: param.name) {
+                        input[param.name] = .array(value.map { .number($0) })
+                    }
+                case .bool:
+                    if let value = try? arguments.value([Bool].self, forProperty: param.name) {
+                        input[param.name] = .array(value.map { .bool($0) })
+                    }
+                case .array:
+                    log.warning("⚠️ 🍎 '\(agentTool.name())' parameter '\(param.name)' uses nested arrays which are not supported — value dropped")
+                }
             }
+        }
+        let systemKey = agentTool.wrappedAgent.inputKeySystemMessage
+        let systemMessage = input[systemKey]
+        if let transform = agentTool.inputTransform {
+            input = try await transform(input)
+        }
+        let promptKey = agentTool.wrappedAgent.inputKeyPrompt
+        if input[promptKey] == nil {
+            log.warning("⚠️ 🍎 '\(agentTool.name())' has no '\(promptKey)' in input — auto-wrapping all parameters as JSON string under '\(promptKey)'")
+            var autoWrapInput = input
+            autoWrapInput.removeValue(forKey: systemKey)
+            if let data = try? JSONEncoder().encode(autoWrapInput),
+               let json = String(data: data, encoding: .utf8) {
+                input[promptKey] = .string(json)
+            }
+        }
+        if let systemMessage, input[systemKey] == nil {
+            input[systemKey] = systemMessage
         }
         let session = try makeSession()
         onNewSession(session)
-        let output = try await nodeInvoker.invokeAgent(
+        var output = try await nodeInvoker.invokeAgent(
             agentTool.wrappedAgent,
             input: input,
             session: session,
             createdBy: createdBy
         )
+        if let transform = agentTool.outputTransform {
+            output = try await transform(output)
+        }
         guard let data = try? JSONEncoder().encode(output),
               let result = String(data: data, encoding: .utf8) else {
             throw RTSError.encodingFailed()

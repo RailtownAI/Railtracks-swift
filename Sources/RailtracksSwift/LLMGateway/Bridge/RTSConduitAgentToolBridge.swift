@@ -37,19 +37,41 @@ struct RTSConduitAgentToolBridge: Tool {
     var parameters: GenerationSchema { agentTool.parameterSchema.toGenerationSchema() }
 
     func call(arguments: GeneratedContent) async throws -> String {
-        log.debug("🌁 RTSConduitAgentToolBridge - \(agentTool.name()) is called with \(arguments.jsonString)")
+        log.debug("🌁 RTSConduitAgentToolBridge - \(agentTool.name()) is called")
+        log.trace("🌁 RTSConduitAgentToolBridge - \(agentTool.name()) is called with \(arguments.jsonString)")
         let jsonData = Data(arguments.jsonString.utf8)
         let toolArgs = try JSONDecoder().decode(RTSInput.self, from: jsonData)
         var input = agentTool.wrappedAgent.inputs
         input.merge(toolArgs) { _, new in new }
+        let systemKey = agentTool.wrappedAgent.inputKeySystemMessage
+        let systemMessage = input[systemKey]
+        if let transform = agentTool.inputTransform {
+            input = try await transform(input)
+        }
+        let promptKey = agentTool.wrappedAgent.inputKeyPrompt
+        if input[promptKey] == nil {
+            log.warning("⚠️ 🌁 '\(agentTool.name())' has no '\(promptKey)' in input — auto-wrapping all parameters as JSON string under '\(promptKey)'")
+            var autoWrapInput = input
+            autoWrapInput.removeValue(forKey: systemKey)
+            if let data = try? JSONEncoder().encode(autoWrapInput),
+               let json = String(data: data, encoding: .utf8) {
+                input[promptKey] = .string(json)
+            }
+        }
+        if let systemMessage, input[systemKey] == nil {
+            input[systemKey] = systemMessage
+        }
         let session = try makeSession()
         onNewSession(session)
-        let output = try await nodeInvoker.invokeAgent(
+        var output = try await nodeInvoker.invokeAgent(
             agentTool.wrappedAgent,
             input: input,
             session: session,
             createdBy: createdBy
         )
+        if let transform = agentTool.outputTransform {
+            output = try await transform(output)
+        }
         guard let data = try? JSONEncoder().encode(output),
               let result = String(data: data, encoding: .utf8) else {
             throw RTSError.encodingFailed()

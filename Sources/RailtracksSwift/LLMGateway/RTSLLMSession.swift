@@ -157,7 +157,7 @@ extension RTSLLMSession {
     ) throws -> RTSLLMSession {
         let agentName = agentNode.agentName
         let providerName = agentNode.llmProvider.providerName
-        log.debug("💎 RTSLLMSession: registering tools: [\(conduitTools.map({ $0.name }))]")
+        log.debug("💎 \(agentNode.agentName) - RTSLLMSession: registering tools: [\(conduitTools.map({ $0.name }))]")
         let chatSession = ChatSession(provider: provider, model: model)
         if !conduitTools.isEmpty {
             chatSession.config = chatSession.config.tools(conduitTools)
