@@ -57,6 +57,9 @@ public final class RTSLLMSession: Sendable {
     private func run(_ prompt: String, runID: UUID?) async throws -> String {
         let response = try await _run(prompt, runID)
         #if DEBUG
+        guard RailtracksSwift.debugMessageFileEnabled else {
+            return response
+        }
         do {
             let encoder = JSONEncoder()
             // petty format cost extra storage and will be an issue when JSON file size is of concern
