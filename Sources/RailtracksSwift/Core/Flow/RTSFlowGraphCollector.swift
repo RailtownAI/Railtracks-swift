@@ -200,7 +200,7 @@ actor RTSFlowGraphCollector {
                 nodeID: nodeIdentifier,
                 parentID: parentIdentifier,
                 sessionID: sessionID.uuidString,
-                runID: edgeEvent.runID?.uuidString ?? edgeEvent.id.uuidString,
+                runID: rootRunID?.uuidString ?? edgeEvent.runID?.uuidString ?? edgeEvent.id.uuidString,
                 nodeType: edgeEvent.nodeType,
                 parentType: parentType,
                 error: false,
