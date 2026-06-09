@@ -30,7 +30,8 @@ actor RTSFlowGraphCollector {
     internal var rootRunID: UUID?
     private var messageBuffer: [UUID: [RTSMessage]] = [:]
     private var collectionState: CollectionState = .collecting
-
+    
+    private let outputFileURLSubject: CurrentValueSubject<URL?, Never>
     private let completionStream: AsyncStream<Void>
     private let streamContinuation: AsyncStream<Void>.Continuation
 
@@ -41,11 +42,13 @@ actor RTSFlowGraphCollector {
         flowName: String,
         sessionID: UUID,
         nodeEventPublisher: NodeEventPublishers,
+        outputFileURLSubject: CurrentValueSubject<URL?, Never>,
         signpostEmitter: (any RTSSignpostEmitting)? = nil
     ) {
         self.stampFactory = stampFactory
         self.sessionID = sessionID
         self.flowName = flowName
+        self.outputFileURLSubject = outputFileURLSubject
         self.signpostEmitter = signpostEmitter
         (self.completionStream, self.streamContinuation) = AsyncStream<Void>.makeStream()
 
@@ -270,6 +273,7 @@ actor RTSFlowGraphCollector {
                 .appendingPathComponent(filename)
                 .appendingPathExtension("json")
             try json.write(to: url)
+            self.outputFileURLSubject.send(url)
         } catch {
             log.debug("☠️🎁 unable to encode flow graph to json and write to file: \(filename).json")
             // TODO: 5893 - throw error upward to app level instead of only capture in log here;

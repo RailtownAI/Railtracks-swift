@@ -6,12 +6,19 @@
 //
 
 import Foundation
+import Combine
 
 /// Representation of Agent node in Railtracks pipeline
-public class RTSFlow {
+public class RTSFlow: @unchecked Sendable {
     let id: UUID = UUID()
     let title: String
     let signpostEmitter: any RTSSignpostEmitting
+    private let outputFileURLSubject: CurrentValueSubject<URL?, Never> = .init(nil)
+    public var outputFileURLPublisher: AnyPublisher<URL, Never> {
+        outputFileURLSubject
+            .compactMap { $0 }
+            .eraseToAnyPublisher()
+    }
 
     public init(
         title: String,
@@ -38,6 +45,7 @@ public class RTSFlow {
             flowName: title,
             sessionID: id,
             nodeEventPublisher: nodeInvoker,
+            outputFileURLSubject: outputFileURLSubject,
             signpostEmitter: signpostEmitter
         )
         await flowGraphCollector.setup()
