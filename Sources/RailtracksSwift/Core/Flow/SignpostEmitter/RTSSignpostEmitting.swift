@@ -48,21 +48,22 @@ public protocol RTSSignpostEmitting: Sendable {
         parentID: String,
         sessionID: String,
         runID: String,
-        nodeType: String,
-        parentType: String,
+        nodeType: RTSFlowNodeType,
+        parentType: RTSFlowNodeType?,
         error: Bool,
         parentError: Bool,
         cost: Double,
         model: String,
         parentName: String,
-        name: String
+        name: String,
+        startTime: TimeInterval
     )
-    
+
     func emitTreeNode(
         nodeID: String,
         sessionID: String,
         runID: String,
-        nodeType: String,
+        nodeType: RTSFlowNodeType,
         model: String,
         provider: String,
         cost: Double,
@@ -71,15 +72,10 @@ public protocol RTSSignpostEmitting: Sendable {
         outputTokens: Int,
         error: Bool,
         ancestors: [String],
-        name: String
+        name: String,
+        startTime: TimeInterval
     )
-    
-    func emitEdge(
-        source: String,
-        target: String,
-        runID: String
-    )
-    
+
     func emitIO(
         nodeID: String,
         sessionID: String,
@@ -96,6 +92,7 @@ public protocol RTSSignpostEmitting: Sendable {
         outputTokens: Int,
         displayRole: String,
         toolName: String,
-        content: String
+        content: String,
+        startTime: TimeInterval
     )
 }

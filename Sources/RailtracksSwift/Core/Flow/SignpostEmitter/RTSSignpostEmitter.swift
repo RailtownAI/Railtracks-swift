@@ -66,28 +66,30 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         parentID: String,
         sessionID: String,
         runID: String,
-        nodeType: String,
-        parentType: String,
+        nodeType: RTSFlowNodeType,
+        parentType: RTSFlowNodeType?,
         error: Bool,
         parentError: Bool,
         cost: Double,
         model: String,
         parentName: String,
-        name: String
+        name: String,
+        startTime: TimeInterval
     ) {
         let graphNode = FlowGraphNode(
             nodeId: nodeID,
             parentId: parentID,
             sessionId: sessionID,
             runId: runID,
-            nodeType: nodeType,
-            parentType: parentType,
+            nodeType: nodeType.asNodeType,
+            parentType: parentType?.asNodeType,
             error: error,
             parentError: parentError,
             cost: cost,
             model: model,
             parentName: parentName,
-            name: name
+            name: name,
+            startTime: startTime
         )
         log.trace("🚧 emitting graphNode: \(graphNode)")
         RailtracksSignposts.emit(graphNode)
@@ -97,7 +99,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         nodeID: String,
         sessionID: String,
         runID: String,
-        nodeType: String,
+        nodeType: RTSFlowNodeType,
         model: String,
         provider: String,
         cost: Double,
@@ -106,13 +108,14 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         outputTokens: Int,
         error: Bool,
         ancestors: [String],
-        name: String
+        name: String,
+        startTime: TimeInterval
     ) {
         let treeNode = FlowTreeNode(
             nodeId: nodeID,
             sessionId: sessionID,
             runId: runID,
-            nodeType: nodeType,
+            nodeType: nodeType.asNodeType,
             model: model,
             provider: provider,
             cost: cost,
@@ -121,20 +124,11 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             outputTokens: outputTokens,
             error: error,
             ancestors: ancestors,
-            name: name
+            name: name,
+            startTime: startTime
         )
         log.trace("🚧 emitting treeNode: \(treeNode)")
         RailtracksSignposts.emit(treeNode)
-    }
-
-    func emitEdge(
-        source: String,
-        target: String,
-        runID: String
-    ) {
-        let edge = FlowEdge(source: source, target: target, runId: runID)
-        log.trace("🚧 emitting edge: \(edge)")
-        RailtracksSignposts.emit(edge)
     }
 
     func emitIO(
@@ -153,7 +147,8 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         outputTokens: Int,
         displayRole: String,
         toolName: String,
-        content: String
+        content: String,
+        startTime: TimeInterval
     ) {
         let io = FlowIO(
             nodeId: nodeID,
@@ -171,9 +166,19 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             outputTokens: outputTokens,
             displayRole: displayRole,
             toolName: toolName,
-            content: content
+            content: content,
+            startTime: startTime
         )
         log.trace("🚧 emitting io: \(io)")
         RailtracksSignposts.emit(io)
+    }
+}
+
+private extension RTSFlowNodeType {
+    var asNodeType: NodeType {
+        switch self {
+        case .agent: return .agent
+        case .tool:  return .tool
+        }
     }
 }
