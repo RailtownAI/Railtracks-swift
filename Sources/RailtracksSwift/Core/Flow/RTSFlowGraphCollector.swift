@@ -195,7 +195,7 @@ actor RTSFlowGraphCollector {
             let parentType: RTSFlowNodeType? = edgeEvent.sourceNodeID.flatMap { sourceID in
                 edgeEvents.first(where: { $0.targetNodeID == sourceID })?.nodeType
             }
-            log.trace("🎁 emitGraphNode: '\(edgeEvent.targetName)' nodeID=\(nodeIdentifier) parentID=\(parentIdentifier) nodeType=\(edgeEvent.nodeType.rawValue) parentType=\(parentType?.rawValue ?? "nil")")
+            log.debug("🎁 emitGraphNode: '\(edgeEvent.targetName)' nodeID=\(nodeIdentifier) parentID=\(parentIdentifier) nodeType=\(edgeEvent.nodeType.rawValue) parentType=\(parentType?.rawValue ?? "nil")")
             signpostEmitter?.emitGraphNode(
                 nodeID: nodeIdentifier,
                 parentID: parentIdentifier,
