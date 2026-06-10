@@ -39,7 +39,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/FabricioSffair/RailtracksInstrumentationKit",
-            from: "0.1.0"
+            exact: "0.1.0"
         ),
     ],
     targets: [

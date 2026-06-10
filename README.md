@@ -210,7 +210,13 @@ Wraps an `RTSAgentNode` as a tool so one agent can invoke another as part of its
 
 ```swift
 let subAgent = RTSAgent(llmProvider: .openAI(...), ...)
-let agentTool = RTSAgentTool(agent: subAgent, description: "...", parameters: [...])
+let agentTool = RTSAgentTool(
+    agent: subAgent,
+    description: "...",
+    parameters: RTSToolSchema(parameters: [
+        .init(name: "query", description: "The question to answer", type: .string)
+    ])
+)
 
 let orchestrator = RTSAgent(
     llmProvider: .openAI(...),
@@ -224,7 +230,9 @@ Use `inputTransform` and `outputTransform` to adapt the data flowing into and ou
 RTSAgentTool(
     agent: subAgent,
     description: "...",
-    parameters: [...],
+    parameters: RTSToolSchema(parameters: [
+        .init(name: "query", description: "The question to answer", type: .string)
+    ]),
     inputTransform: { inputs in
         // rename or inject keys before the sub-agent sees them
         var modified = inputs
