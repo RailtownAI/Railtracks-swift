@@ -109,7 +109,13 @@ let flow = RTSFlow(title: "My Flow")
 let result = try await flow.run(agent:prompt:gateway:systemMessage:)
 ```
 
-A JSON trace file is written to the app's Documents directory on completion.
+A JSON trace file is written on completion. Subscribe to `outputFileURLPublisher` to receive the file URL:
+
+```swift
+flow.outputFileURLPublisher
+    .sink { url in print("Trace written to \(url)") }
+    .store(in: &cancellables)
+```
 
 ### RTSAgent
 
@@ -212,6 +218,28 @@ let orchestrator = RTSAgent(
 )
 ```
 
+Use `inputTransform` and `outputTransform` to adapt the data flowing into and out of the wrapped agent without modifying either agent's implementation:
+
+```swift
+RTSAgentTool(
+    agent: subAgent,
+    description: "...",
+    parameters: [...],
+    inputTransform: { inputs in
+        // rename or inject keys before the sub-agent sees them
+        var modified = inputs
+        modified["prompt"] = inputs["query"]
+        return modified
+    },
+    outputTransform: { outputs in
+        // reshape the sub-agent's result before the parent LLM sees it
+        return ["summary": outputs["result"] ?? .null]
+    }
+)
+```
+
+If `inputKeyPrompt` is missing from the inputs at call time, the entire input is serialised to a string and placed under `inputKeyPrompt` automatically, preventing a silent prompt-missing failure.
+
 ## OpenAI Model IDs
 
 ```swift
@@ -244,11 +272,24 @@ public enum RTSError: Error {
 Every `RTSFlow.run` automatically:
 - Traces all node create/finish events via `RTSNodeInvoker`
 - Stamps each LLM message with the `runID` of the invocation that produced it
-- Writes a JSON file to the app's Documents directory on completion
+- Writes a JSON trace file on completion
 
 The JSON schema is consumed by the Railtracks Python visualizer.
 
+### Configuration
+
+Set these once at app startup before any flow runs:
+
+```swift
+// Directory where flow graph JSON files are written. Defaults to the app's Documents directory.
+RailtracksSwift.flowGraphOutputDirectory = URL(fileURLWithPath: "/custom/path")
+
+// Set to false to suppress per-run debug message files (DEBUG builds only).
+RailtracksSwift.debugMessageFileEnabled = false
+```
+
 ## Package Dependencies
 
-- [swift-conduit](https://github.com/m1guelpf/swift-conduit) — OpenAI LLM backend
+- [swift-conduit](https://github.com/RailtownAI/Conduit) — LLM backend (OpenAI and OpenRouter)
+- [RailtracksInstrumentationKit](https://github.com/FabricioSffair/RailtracksInstrumentationKit) — Instruments signpost emission for live tracing
 - [swift-log](https://github.com/apple/swift-log) — Logging
