@@ -124,10 +124,14 @@ extension RTSMessage {
 // MARK: - RTSMessage.ImageContent
 
 extension RTSMessage {
+    /// Base64-encoded image attached to a multi-modal message.
     public struct ImageContent: Sendable, Codable {
         public let base64Data: String
         public let mimeType: String
 
+        /// - Parameters:
+        ///   - base64Data: Base64-encoded image bytes.
+        ///   - mimeType: MIME type of the image. Defaults to `"image/jpeg"`.
         public init(base64Data: String, mimeType: String = "image/jpeg") {
             self.base64Data = base64Data
             self.mimeType = mimeType
@@ -138,6 +142,7 @@ extension RTSMessage {
 // MARK: - RTSMessage.AudioFormat
 
 extension RTSMessage {
+    /// Audio container formats supported for multi-modal audio messages.
     public enum AudioFormat: String, Sendable, Codable {
         case wav, mp3, aiff, aac, ogg, flac, m4a
     }
@@ -146,6 +151,7 @@ extension RTSMessage {
 // MARK: - RTSMessage.AudioContent
 
 extension RTSMessage {
+    /// Base64-encoded audio clip attached to a multi-modal message.
     public struct AudioContent: Sendable, Codable {
         public let base64Data: String
         public let format: AudioFormat

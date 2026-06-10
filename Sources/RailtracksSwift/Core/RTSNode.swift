@@ -17,6 +17,8 @@ public protocol RTSNode: Sendable {
     func invoke() async throws -> RTSOutput
 }
 
+/// A node whose execution is fulfilled entirely by a `callableRoutine` closure,
+/// with no LLM session required. Use for deterministic, pure-function pipeline steps.
 public protocol RTSFunctionNode: RTSNode {
     var callableRoutine: RTSClosure { get }
 }
