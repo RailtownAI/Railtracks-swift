@@ -122,6 +122,9 @@ final class AppleAISession: @unchecked Sendable {
                           ?? (appleTool as any Tool)
                 appleTools.append(bridge)
             } else {
+                if tool.isRequired {
+                    throw RTSError.invalidSchema("Required tool '\(tool.toolName)' is not supported by AppleAI")
+                }
                 unsupportedTools.append(tool)
             }
         }

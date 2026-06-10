@@ -12,6 +12,7 @@ public enum RTSError: Error {
     case missingOutput(String)
     case encodingFailed(String? = nil)
     case decodingFailed(String? = nil)
+    /// File write or encoding failed. The associated value is the attempted file path, if known.
     case writeFileFailed(String? = nil)
     case invalidInvocation(String)
     case invalidSchema(String)

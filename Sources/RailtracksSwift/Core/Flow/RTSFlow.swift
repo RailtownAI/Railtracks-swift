@@ -15,8 +15,9 @@ public class RTSFlow: @unchecked Sendable {
     let signpostEmitter: any RTSSignpostEmitting
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never> = .init(nil)
     /// Publishes the outcome of the JSON trace write after each completed run.
-    /// Emits `.success(url)` when the file is written, or `.failure(RTSError.writeFileFailed)`
-    /// when encoding or writing fails. Late subscribers receive the most recent result immediately.
+    /// Emits `.success(url)` when the file is written, or `.failure(RTSError.writeFileFailed(path))`
+    /// when encoding or writing fails, where the associated value is the attempted file path.
+    /// Late subscribers receive the most recent result immediately.
     /// The initial `nil` state (no run completed yet) is filtered out.
     public var outputFileURLPublisher: AnyPublisher<Result<URL, Error>, Never> {
         outputFileURLSubject
