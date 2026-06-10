@@ -36,7 +36,7 @@ public struct RTSLLMGateway: Sendable {
         let provider = agentNode.llmProvider
         switch provider {
         case .appleAI:
-            let (appleAISession, unsupported) = AppleAISession.build(
+            let (appleAISession, unsupported) = try AppleAISession.build(
                 fromAgentTools: agentNode.tools,
                 invoker: invoker,
                 createdBy: agentNode,

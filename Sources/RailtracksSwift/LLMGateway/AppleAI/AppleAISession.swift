@@ -94,7 +94,7 @@ final class AppleAISession: @unchecked Sendable {
         createdBy: any RTSAgentNode,
         makeSubSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
-    ) -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
+    ) throws -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
         var unsupportedTools: [any RTSToolNode] = []
         for tool in tools {
@@ -111,6 +111,9 @@ final class AppleAISession: @unchecked Sendable {
                     )
                     appleTools.append(bridge)
                 } catch {
+                    if tool.isRequired {
+                        throw RTSError.invalidSchema("Required tool '\(agentTool.toolName)' schema conversion failed: \(error)")
+                    }
                     log.warning("⚠️🍎 [\(createdBy.agentName)] RTSAgentTool '\(agentTool.toolName)' schema conversion failed, tool dropped: \(error)")
                     unsupportedTools.append(tool)
                 }
@@ -122,17 +125,7 @@ final class AppleAISession: @unchecked Sendable {
                 unsupportedTools.append(tool)
             }
         }
-        let schema: GenerationSchema?
-        if let rtsSchema = createdBy.outputSchema {
-            do {
-                schema = try rtsSchema.toFoundationModelsSchema()
-            } catch {
-                log.warning("⚠️🍎 [\(createdBy.agentName)] outputSchema conversion failed, running without structured output: \(error)")
-                schema = nil
-            }
-        } else {
-            schema = nil
-        }
+        let schema: GenerationSchema? = try createdBy.outputSchema.map { try $0.toFoundationModelsSchema() }
         return (AppleAISession(tools: appleTools, outputSchema: schema), unsupportedTools)
     }
 
