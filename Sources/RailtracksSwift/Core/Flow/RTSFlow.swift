@@ -13,11 +13,12 @@ public class RTSFlow: @unchecked Sendable {
     let id: UUID = UUID()
     let title: String
     let signpostEmitter: any RTSSignpostEmitting
-    private let outputFileURLSubject: CurrentValueSubject<URL?, Never> = .init(nil)
-    /// Publishes the file URL of the JSON trace written after each completed run.
-    /// Emits once per `run(...)` call after the flow graph file has been written to
-    /// `RailtracksSwift.flowGraphOutputDirectory`. The initial `nil` state is filtered out.
-    public var outputFileURLPublisher: AnyPublisher<URL, Never> {
+    private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never> = .init(nil)
+    /// Publishes the outcome of the JSON trace write after each completed run.
+    /// Emits `.success(url)` when the file is written, or `.failure(RTSError.writeFileFailed)`
+    /// when encoding or writing fails. Late subscribers receive the most recent result immediately.
+    /// The initial `nil` state (no run completed yet) is filtered out.
+    public var outputFileURLPublisher: AnyPublisher<Result<URL, Error>, Never> {
         outputFileURLSubject
             .compactMap { $0 }
             .eraseToAnyPublisher()

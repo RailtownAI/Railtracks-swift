@@ -40,11 +40,12 @@ extension RTSFlowGraph {
 
         let edges = makeEdges(from: edgeEvents)
 
+        let hasFailed = edgeEvents.contains { $0.error != nil }
         let run = RTSFlowRun(
             name: rootFinish?.name ?? flowName,
             runID: rootFinish?.runID?.uuidString ?? "N/A",
             nodes: nodes,
-            status: .completed, // TODO: 5893 - reflect actual status once error propagation is implemented
+            status: hasFailed ? .failed : .completed,
             edges: edges,
             steps: steps,
             startTime: startTime,
@@ -133,9 +134,13 @@ extension RTSFlowGraph {
         let inputKwargs: [String: RTSGeneratedContent] = (event.input ?? [:]).mapValues { $0.toGeneratedContent() }
         let output: RTSEdgeOutput = switch event.nodeType {
         case .tool:
-            .structured(event.output.map { RTSGeneratedContent(kind: .structure($0.mapValues { $0.toGeneratedContent() })) })
+            if let error = event.error {
+                .structured(RTSGeneratedContent(kind: .string("ERROR: \(error)")))
+            } else {
+                .structured(event.output.map { RTSGeneratedContent(kind: .structure($0.mapValues { $0.toGeneratedContent() })) })
+            }
         case .agent:
-            .agentStatus(event.error == nil ? "Success" : "Failed")
+            .agentStatus(event.error.map { "ERROR: \($0)" } ?? "Success")
         }
         return RTSFlowGraphEdgeDetails(
             inputArgs: [],

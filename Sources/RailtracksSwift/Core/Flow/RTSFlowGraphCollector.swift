@@ -31,7 +31,7 @@ actor RTSFlowGraphCollector {
     private var messageBuffer: [UUID: [RTSMessage]] = [:]
     private var collectionState: CollectionState = .collecting
     
-    private let outputFileURLSubject: CurrentValueSubject<URL?, Never>
+    private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never>
     private let completionStream: AsyncStream<Void>
     private let streamContinuation: AsyncStream<Void>.Continuation
 
@@ -42,7 +42,7 @@ actor RTSFlowGraphCollector {
         flowName: String,
         sessionID: UUID,
         nodeEventPublisher: NodeEventPublishers,
-        outputFileURLSubject: CurrentValueSubject<URL?, Never>,
+        outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never>,
         signpostEmitter: (any RTSSignpostEmitting)? = nil
     ) {
         self.stampFactory = stampFactory
@@ -266,19 +266,17 @@ actor RTSFlowGraphCollector {
         encoder.outputFormatting = .prettyPrinted
         #endif
         let filename = generateJSONFileName()
+        let url = RailtracksSwift.flowGraphOutputDirectory
+            .appendingPathComponent(filename)
+            .appendingPathExtension("json")
         do {
             let json = try encoder.encode(graph)
             log.trace("🎁 Messages: \(String(data: json, encoding: .utf8) ?? "<invalid JSON data>")")
-            let url = RailtracksSwift.flowGraphOutputDirectory
-                .appendingPathComponent(filename)
-                .appendingPathExtension("json")
             try json.write(to: url)
-            self.outputFileURLSubject.send(url)
+            self.outputFileURLSubject.send(.success(url))
         } catch {
-            log.debug("☠️🎁 unable to encode flow graph to json and write to file: \(filename).json")
-            // TODO: 5893 - throw error upward to app level instead of only capture in log here;
-            // TODO: 5893 - log generation is side task from main execution, so would need to build independent error pipe
-//            throw RTSError.writeFileFailed("Write to file \(filename) failed")
+            log.debug("☠️🎁 unable to encode flow graph to json and write to file: \(url.path)")
+            self.outputFileURLSubject.send(.failure(RTSError.writeFileFailed(url.path)))
         }
     }
 
