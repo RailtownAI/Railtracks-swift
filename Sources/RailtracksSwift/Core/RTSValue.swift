@@ -7,7 +7,9 @@
 
 import Foundation
 
+/// Named dictionary of keyed inputs passed into a node before invocation.
 public typealias RTSInput  = [String: RTSValue]
+/// Named dictionary of keyed outputs returned by a node after invocation.
 public typealias RTSOutput = [String: RTSValue]
 
 public enum RTSValue: Codable, Sendable {

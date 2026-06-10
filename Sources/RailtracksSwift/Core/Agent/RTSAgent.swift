@@ -14,6 +14,8 @@ public protocol RTSAgentNode: RTSNode {
     var tools: [any RTSToolNode] { get }
     var llmProvider: RTSLLMProvider { get }
     var outputSchema: RTSOutputSchema? { get }
+    /// Maximum tokens the LLM may use when generating structured output against `outputSchema`.
+    /// Defaults to `4096`. Ignored when `outputSchema` is `nil`.
     var outputSchemaMaxToken: Int { get }
 }
 

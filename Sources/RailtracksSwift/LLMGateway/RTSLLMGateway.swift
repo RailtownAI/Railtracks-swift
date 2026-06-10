@@ -13,6 +13,8 @@ import Conduit
 public struct RTSLLMGateway: Sendable {
     private let apiKeys: [RTSLLMProviderKind: String]
 
+    /// - Parameter apiKeys: API keys keyed by provider. Only keys for providers used by
+    ///   the agents in a given flow are required (e.g. `[.openAI: "sk-..."]`).
     public init(apiKeys: [RTSLLMProviderKind: String]) {
         self.apiKeys = apiKeys
     }

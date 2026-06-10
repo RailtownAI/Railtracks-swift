@@ -18,6 +18,10 @@ public struct RTSSimpleFunction: RTSFunctionNode {
     public var inputs: RTSInput
     public let callableRoutine: RTSClosure
     
+    /// - Parameters:
+    ///   - name: Identifier for this node, used in tracing output.
+    ///   - prompt: Initial input string stored under the `"prompt"` key in `inputs` at creation time.
+    ///   - routine: Closure that receives the prompt string and returns a result string.
     public init(name: String, prompt: String, routine: @escaping @Sendable (String) async throws -> String) {
         self._name = name
         self.inputs = ["prompt": .string(prompt)]

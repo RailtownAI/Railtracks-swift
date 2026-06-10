@@ -6,13 +6,26 @@
 //
 
 import Foundation
+import Combine
 
 /// Representation of Agent node in Railtracks pipeline
-public class RTSFlow {
+public class RTSFlow: @unchecked Sendable {
     let id: UUID = UUID()
     let title: String
     let signpostEmitter: any RTSSignpostEmitting
+    private let outputFileURLSubject: CurrentValueSubject<URL?, Never> = .init(nil)
+    /// Publishes the file URL of the JSON trace written after each completed run.
+    /// Emits once per `run(...)` call after the flow graph file has been written to
+    /// `RailtracksSwift.flowGraphOutputDirectory`. The initial `nil` state is filtered out.
+    public var outputFileURLPublisher: AnyPublisher<URL, Never> {
+        outputFileURLSubject
+            .compactMap { $0 }
+            .eraseToAnyPublisher()
+    }
 
+    /// - Parameters:
+    ///   - title: Display name for the flow, included in the trace file name.
+    ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
     public init(
         title: String,
         signpostEmitter: (any RTSSignpostEmitting)? = nil
@@ -21,6 +34,17 @@ public class RTSFlow {
         self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
     }
 
+    /// Runs the pipeline from the given root agent and returns its text result.
+    ///
+    /// Creates a fresh node invoker and graph collector, wires up event subscriptions,
+    /// invokes the agent, then waits for the JSON trace file to finish writing before returning.
+    ///
+    /// - Parameters:
+    ///   - agent: Root agent node to invoke.
+    ///   - prompt: User prompt passed to the agent.
+    ///   - gateway: Gateway used to build LLM sessions for the agent and any sub-agents.
+    ///   - systemMessage: Optional system message applied to the agent's session before the prompt is sent.
+    /// - Returns: The agent's text output.
     public func run(
         agent: some RTSAgentNode,
         prompt: String,
@@ -38,6 +62,7 @@ public class RTSFlow {
             flowName: title,
             sessionID: id,
             nodeEventPublisher: nodeInvoker,
+            outputFileURLSubject: outputFileURLSubject,
             signpostEmitter: signpostEmitter
         )
         await flowGraphCollector.setup()
