@@ -38,6 +38,12 @@ struct ContentView: View {
                 .background(viewModel.mode == .mathVerify ? Color.accentColor.opacity(0.2) : Color.clear)
                 .cornerRadius(8)
                 
+                Button("Math Error") {
+                    viewModel.mode = .mathError
+                }
+                .background(viewModel.mode == .mathError ? Color.accentColor.opacity(0.2) : Color.clear)
+                .cornerRadius(8)
+
                 Button("Output Schema") {
                     viewModel.mode = .outputSchema
                 }
@@ -58,6 +64,8 @@ struct ContentView: View {
                 MathAppleView()
             case .mathVerify:
                 MathVerifyView()
+            case .mathError:
+                MathErrorView()
             case .outputSchema:
                 OutputSchemaView()
             }
