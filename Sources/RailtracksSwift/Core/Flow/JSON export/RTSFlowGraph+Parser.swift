@@ -160,7 +160,7 @@ extension RTSFlowGraph {
             guard message.role == .assistant else { continue }
             let inputTokens = message.metadata?.inputTokenCount ?? 0
             let outputTokens = message.metadata?.tokenCount ?? 0
-            let modelName = message.metadata?.model ?? "unknown" // TODO: model not always populated on assistant messages
+            let modelName = message.metadata?.model ?? "unknown"
             let providerName = message.metadata?.providerName ?? ""
             let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
             let cost = RTSLLMProvider.isLocal(providerName: providerName)
