@@ -188,7 +188,7 @@ extension RTSLLMSession {
                 // and there's no intention to have same agent instance used in parallel pipeline
                 // this design is safe for now.
                 let beforeIds = Set(chatSession.messages.map { $0.id })
-                let publishNewMessages: () -> () = {
+                let publishNewMessages: () -> Void = {
                     guard let runID else { return }
                     let newMessages = chatSession.messages.filter { !beforeIds.contains($0.id) }
                     for message in newMessages {
