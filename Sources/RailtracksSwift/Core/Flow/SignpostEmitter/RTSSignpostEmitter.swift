@@ -36,7 +36,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             name: nodeName,
             nodeId: nodeID.uuidString,
             sessionId: sessionID.uuidString,
-            runId: runID.uuidString,
+            runId: sessionID.uuidString,
             parentName: parentName
         )
         let handle = RailtracksSignposts.begin(event)
