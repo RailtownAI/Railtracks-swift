@@ -25,6 +25,7 @@ class MathViewModel {
         let prompt = self.prompt
         isRunning = true
         Task { [weak self] in
+            defer { self?.isRunning = false }
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
             let tools: [any RTSToolNode] = [
                 AdditionTool(),
@@ -46,7 +47,6 @@ class MathViewModel {
             Log.debug("starting prompt, waiting for response...")
             self?.promptResult = (try? await flow.run(agent: agent, prompt: prompt, gateway: gateway)) ?? "n/a"
             Log.debug("obtained prompt result")
-            self?.isRunning = false
         }
     }
 }

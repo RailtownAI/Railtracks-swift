@@ -26,6 +26,7 @@ class MathVerifyViewModel {
         let prompt = self.prompt
         isRunning = true
         Task { [weak self] in
+            defer { self?.isRunning = false }
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
 
             // Tier 3: independently re-computes the answer using math tools
@@ -77,7 +78,6 @@ class MathVerifyViewModel {
             let flow = RTSFlow(title: "Math Verify flow")
             self?.promptResult = try? await flow.run(agent: solverAgent, prompt: prompt, gateway: gateway)
             Log.debug("obtained math verify result")
-            self?.isRunning = false
         }
     }
 }

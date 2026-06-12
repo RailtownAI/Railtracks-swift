@@ -24,6 +24,7 @@ class MathErrorViewModel {
         let prompt = self.prompt
         isRunning = true
         Task { [weak self] in
+            defer { self?.isRunning = false }
             self?.promptResult = "waiting..."
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
 
@@ -53,7 +54,6 @@ class MathErrorViewModel {
                 Log.debug("math error flow failed: \(error)")
             }
             Log.debug("math error prompt done")
-            self?.isRunning = false
         }
     }
 }

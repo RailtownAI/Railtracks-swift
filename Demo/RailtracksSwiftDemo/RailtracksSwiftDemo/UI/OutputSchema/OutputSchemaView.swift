@@ -27,13 +27,7 @@ struct OutputSchemaView: View {
                 viewModel.startPrompt()
             }
             .disabled(viewModel.jobURLString.isEmpty || viewModel.isRunning)
-            .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
-                APIKeySetupView(isUpdate: false) {
-                    viewModel.isShowingKeyPrompt = false
-                    viewModel.startPrompt()
-                }
-            }
-            
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("Result:")
                 TextField(
@@ -47,6 +41,12 @@ struct OutputSchemaView: View {
             }
         }
         .padding()
+        .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
+            APIKeySetupView(isUpdate: false) {
+                viewModel.isShowingKeyPrompt = false
+                viewModel.startPrompt()
+            }
+        }
     }
 }
 

@@ -25,6 +25,7 @@ class SimplePromptViewModel {
         let prompt = self.prompt
         isRunning = true
         Task { [weak self] in
+            defer { self?.isRunning = false }
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
             let flow = RTSFlow(title: "Simple prompt flow")
             let agent = RTSAgent(
@@ -34,7 +35,6 @@ class SimplePromptViewModel {
             Log.debug("starting prompt, waiting for response...")
             self?.promptResult = try? await flow.run(agent: agent, prompt: prompt, gateway: gateway)
             Log.debug("obtained prompt result")
-            self?.isRunning = false
         }
     }
 }
