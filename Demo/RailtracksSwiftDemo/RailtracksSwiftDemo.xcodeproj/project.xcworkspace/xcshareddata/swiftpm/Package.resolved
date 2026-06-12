@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/Conduit",
       "state" : {
-        "revision" : "af22159f5600626cbd9ceb986c31950c0667449c",
-        "version" : "0.3.19"
+        "revision" : "76bd469bf45bff17e09b49095d5d18ca3e9880b0",
+        "version" : "0.3.20"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FabricioSffair/RailtracksInstrumentationKit",
       "state" : {
-        "revision" : "0d0d9c275f1b438e42b2b3a1204fb3ccd476d1c5",
-        "version" : "0.1.0"
+        "revision" : "d8c9ccbf88f38b9c2db606dfa20cc511c5e98705",
+        "version" : "0.1.1"
       }
     },
     {

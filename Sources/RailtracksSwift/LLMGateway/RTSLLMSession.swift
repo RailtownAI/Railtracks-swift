@@ -110,15 +110,15 @@ extension RTSLLMSession {
         return RTSLLMSession(
             run: { prompt, runID in
                 let beforeCount = appleAI.messages().count
-                let response = try await appleAI.send(prompt)
-                if let runID {
+                let publishNewMessages: (AppleAIResponse?) -> Void = { response in
+                    guard let runID else { return }
                     let newMessages = Array(appleAI.messages().dropFirst(beforeCount))
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
                     let stamped = newMessages.map { message -> RTSMessage in
                         var m = message.stamped(runID: runID)
-                        if m.role == .assistant {
+                        if m.role == .assistant, let response {
                             m = m.stampingTokenCounts(
                                 input: response.inputTokens,
                                 output: response.outputTokens,
@@ -130,7 +130,14 @@ extension RTSLLMSession {
                     }
                     relay.send(stamped)
                 }
-                return response.text
+                do {
+                    let response = try await appleAI.send(prompt)
+                    publishNewMessages(response)
+                    return response.text
+                } catch {
+                    publishNewMessages(nil)
+                    throw error
+                }
             },
             setSystemPrompt: { message, runID in
                 // setInstruction recreates the session so transcript resets —
@@ -181,8 +188,8 @@ extension RTSLLMSession {
                 // and there's no intention to have same agent instance used in parallel pipeline
                 // this design is safe for now.
                 let beforeIds = Set(chatSession.messages.map { $0.id })
-                let response = try await chatSession.send(prompt)
-                if let runID {
+                let publishNewMessages: () -> Void = {
+                    guard let runID else { return }
                     let newMessages = chatSession.messages.filter { !beforeIds.contains($0.id) }
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
@@ -191,7 +198,16 @@ extension RTSLLMSession {
                     relay.send(rtsMessages)
                     log.trace("💎 [\(agentName)] run(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }
-                return response
+                do {
+                    let response = try await chatSession.send(prompt)
+                    publishNewMessages()
+                    return response
+                } catch {
+                    // Publish messages accumulated before the error (user prompt, assistant tool
+                    // call, etc.) so the JSON trace and token counts are still recorded.
+                    publishNewMessages()
+                    throw error
+                }
             },
             setSystemPrompt: { message, runID in
                 let beforeIds = Set(chatSession.messages.map { $0.id })

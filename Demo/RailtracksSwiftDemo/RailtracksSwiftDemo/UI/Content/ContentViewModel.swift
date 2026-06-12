@@ -16,11 +16,12 @@ class ContentViewModel {
         case math
         case mathApple
         case mathVerify
+        case mathError
         case outputSchema
     }
     
     var libVersion: String = RailtracksSwift.version
-    var mode: ViewMode = .outputSchema
+    var mode: ViewMode = .mathError
     
     var openAIAPIKey: String? {
         RailtracksSwift.getOpenAIAPIKey()

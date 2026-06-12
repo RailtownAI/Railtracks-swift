@@ -18,11 +18,6 @@ extension RTSFlowGraphCollector {
         guard let signpostEmitter else { return }
         guard let runID = nodeEvent.runID else { return }
 
-        // Mirror replay path: skip root (avoids "root under root" sub-row) and
-        // non-leaf tools (no llm_details to contribute; name surfaces via ancestor paths).
-        let isLeaf = !edgeEvents.contains(where: { $0.sourceNodeID == nodeEvent.id })
-        guard nodeEvent.id != rootNodeID && !(nodeEvent.nodeType == .tool && !isLeaf) else { return }
-
         let nodeIDStr = nodeEvent.id.uuidString
         let sessionIDStr = sessionID.uuidString
         let runIDStr = rootRunID?.uuidString ?? runID.uuidString

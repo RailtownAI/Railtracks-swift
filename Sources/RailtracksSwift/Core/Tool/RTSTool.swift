@@ -19,6 +19,9 @@ public protocol RTSToolNode: RTSFunctionNode {
 
     var toolDescription: String { get }
     var parameterSchema: RTSToolSchema { get }
+    /// When `true`, a failure to register this tool with the LLM provider
+    /// (e.g. schema conversion failure) throws an error instead of silently dropping the tool.
+    var isRequired: Bool { get }
 
     func invoke(runID: UUID) async throws -> RTSOutput
 }
@@ -27,6 +30,8 @@ public extension RTSToolNode {
     var toolName: String {
         String(describing: type(of: self))
     }
+    var isRequired: Bool { false }
+    
     func name() -> String { toolName }
     func invoke() async throws -> RTSOutput { try await callableRoutine.closure(inputs) }
     func invoke(runID: UUID) async throws -> RTSOutput { try await invoke() }
