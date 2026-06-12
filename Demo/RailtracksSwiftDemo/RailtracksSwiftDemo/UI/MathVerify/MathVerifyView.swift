@@ -14,12 +14,18 @@ struct MathVerifyView: View {
     var body: some View {
         VStack(spacing: 8) {
             Text("Prompt: " + viewModel.prompt)
-            Text("Result: " + (viewModel.promptResult ?? "waiting..."))
+            Button("Run") {
+                viewModel.startPrompt()
+            }
+            .disabled(viewModel.isRunning)
+            Text("Result: " + (viewModel.promptResult ?? ""))
         }
         .padding()
-        .task {
-            Log.debug("start math verify task...")
-            viewModel.startPrompt()
+        .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
+            APIKeySetupView(isUpdate: false) {
+                viewModel.isShowingKeyPrompt = false
+                viewModel.startPrompt()
+            }
         }
     }
 }

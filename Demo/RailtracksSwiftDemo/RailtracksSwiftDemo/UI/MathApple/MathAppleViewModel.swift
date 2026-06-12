@@ -15,9 +15,11 @@ import Logging
 class MathAppleViewModel {
     let prompt: String = "What is 50 + 20 x 8 - 4? Give me the final answer in a single number without any description."
     var promptResult: String = ""
+    var isRunning = false
 
     func startPrompt() {
         let prompt = self.prompt
+        isRunning = true
         Task { [weak self] in
             switch SystemLanguageModel.default.availability {
             case .available:
@@ -67,6 +69,7 @@ class MathAppleViewModel {
             Log.debug("starting prompt, waiting for response...")
             self?.promptResult = (try? await flow.run(agent: agent, prompt: prompt, gateway: gateway)) ?? "n/a"
             Log.debug("obtained prompt result")
+            self?.isRunning = false
         }
     }
 }
