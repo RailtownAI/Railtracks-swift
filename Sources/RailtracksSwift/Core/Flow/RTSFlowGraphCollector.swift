@@ -272,7 +272,7 @@ actor RTSFlowGraphCollector {
         do {
             let json = try encoder.encode(graph)
             log.trace("🎁 Messages: \(String(data: json, encoding: .utf8) ?? "<invalid JSON data>")")
-            try json.write(to: url)
+            try json.write(to: url, options: .atomic)
             self.outputFileURLSubject.send(.success(url))
         } catch {
             log.debug("☠️🎁 unable to encode flow graph to json and write to file: \(url.path)")
