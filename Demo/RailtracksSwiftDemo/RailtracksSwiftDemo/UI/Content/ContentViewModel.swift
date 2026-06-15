@@ -20,7 +20,7 @@ class ContentViewModel {
     }
 
     var libVersion: String = RailtracksSwift.version
-    var mode: ViewMode = .mathError
+    var mode: ViewMode = .mathVerify
     var isShowingKeyPrompt = false
     var isShowingKeyUpdate = false
     var hasOpenAIKey: Bool = false

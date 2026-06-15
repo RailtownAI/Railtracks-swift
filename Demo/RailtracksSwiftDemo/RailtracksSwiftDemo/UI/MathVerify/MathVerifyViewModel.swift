@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 import RailtracksSwift
 import Logging
 
@@ -15,6 +16,7 @@ import Logging
 class MathVerifyViewModel {
     let prompt: String = "What is 50 + 20 x 8 - 4 x 5? Give me the final answer in a single number without any description."
     var promptResult: String?
+    var nodeStatusLog: String = ""
     var isRunning = false
     var isShowingKeyPrompt = false
 
@@ -24,6 +26,7 @@ class MathVerifyViewModel {
             return
         }
         let prompt = self.prompt
+        nodeStatusLog = ""
         isRunning = true
         Task { [weak self] in
             defer { self?.isRunning = false }
@@ -76,6 +79,27 @@ class MathVerifyViewModel {
             )
 
             let flow = RTSFlow(title: "Math Verify flow")
+            var cancellables = Set<AnyCancellable>()
+            flow.nodeStatusPublisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] status in
+                    let label: String
+                    switch status.state {
+                    case .executing:
+                        label = "⏳ \(status.nodeName)"
+                    case .completed:
+                        label = "✅ \(status.nodeName)"
+                    case .failed(let error):
+                        label = "❌ \(status.nodeName): \(error)"
+                    }
+                    if self?.nodeStatusLog.isEmpty == true {
+                        self?.nodeStatusLog = label
+                    } else {
+                        self?.nodeStatusLog += "\n" + label
+                    }
+                }
+                .store(in: &cancellables)
+
             self?.promptResult = try? await flow.run(agent: solverAgent, prompt: prompt, gateway: gateway)
             Log.debug("obtained math verify result")
         }
