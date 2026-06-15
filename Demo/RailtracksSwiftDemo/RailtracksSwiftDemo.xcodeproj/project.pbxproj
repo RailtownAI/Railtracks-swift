@@ -11,7 +11,6 @@
 		44106E4E2FA27C5E003BAF6C /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 44106E4D2FA27C5E003BAF6C /* RailtracksSwift */; };
 		443F84F12FA27E2700B3DEEF /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 443F84F02FA27E2700B3DEEF /* RailtracksSwift */; };
 		444B11DA2F9FDE4D009CAC9A /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 444B11D92F9FDE4D009CAC9A /* RailtracksSwift */; };
-		44EAA84F2F9FDB150069A845 /* Secrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = 44EAA84E2F9FDB150069A845 /* Secrets.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -35,7 +34,6 @@
 		44EAA7FA2F9FC9CE0069A845 /* RailtracksSwiftDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RailtracksSwiftDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		44EAA8072F9FC9CE0069A845 /* RailtracksSwiftDemoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RailtracksSwiftDemoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		44EAA8112F9FC9CE0069A845 /* RailtracksSwiftDemoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RailtracksSwiftDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		44EAA84E2F9FDB150069A845 /* Secrets.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Secrets.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -88,7 +86,6 @@
 		44EAA7F12F9FC9CE0069A845 = {
 			isa = PBXGroup;
 			children = (
-				44EAA84E2F9FDB150069A845 /* Secrets.plist */,
 				44EAA7FC2F9FC9CE0069A845 /* RailtracksSwiftDemo */,
 				44EAA80A2F9FC9CE0069A845 /* RailtracksSwiftDemoTests */,
 				44EAA8142F9FC9CE0069A845 /* RailtracksSwiftDemoUITests */,
@@ -233,7 +230,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				44EAA84F2F9FDB150069A845 /* Secrets.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

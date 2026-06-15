@@ -40,23 +40,3 @@ public extension RailtracksSwift {
     // call function's main responsibility is to inject context prior to node invoke/execution
 }
 
-//
-// MARK: - API key access
-//
-public extension RailtracksSwift {
-    enum SecretKeys {
-        static let openAI = "OpenAI_API_KEY"
-    }
-    
-    static func getOpenAIAPIKey(
-        filename: String = "Secrets",
-    ) -> String? {
-        guard let filePath = Bundle.main.path(forResource: filename, ofType: "plist") else {
-            return nil
-        }
-        
-        let plist = NSDictionary(contentsOfFile: filePath)
-        let value = plist?.object(forKey: SecretKeys.openAI) as? String
-        return value
-    }
-}

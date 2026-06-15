@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import Logging
 import RailtracksSwift
 
 @Observable
@@ -19,11 +18,21 @@ class ContentViewModel {
         case mathError
         case outputSchema
     }
-    
+
     var libVersion: String = RailtracksSwift.version
     var mode: ViewMode = .mathError
-    
-    var openAIAPIKey: String? {
-        RailtracksSwift.getOpenAIAPIKey()
+    var isShowingKeyPrompt = false
+    var isShowingKeyUpdate = false
+    var hasOpenAIKey: Bool = false
+
+    func checkKeychain() {
+        hasOpenAIKey = KeychainHelper.readOpenAIKey().isNotNilNorEmpty
+        if !hasOpenAIKey {
+            isShowingKeyPrompt = true
+        }
+    }
+
+    func refreshKeyStatus() {
+        hasOpenAIKey = KeychainHelper.readOpenAIKey().isNotNilNorEmpty
     }
 }

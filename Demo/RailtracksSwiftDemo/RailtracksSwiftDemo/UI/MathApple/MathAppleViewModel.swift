@@ -15,10 +15,13 @@ import Logging
 class MathAppleViewModel {
     let prompt: String = "What is 50 + 20 x 8 - 4? Give me the final answer in a single number without any description."
     var promptResult: String = ""
+    var isRunning = false
 
     func startPrompt() {
         let prompt = self.prompt
+        isRunning = true
         Task { [weak self] in
+            defer { self?.isRunning = false }
             switch SystemLanguageModel.default.availability {
             case .available:
                 break

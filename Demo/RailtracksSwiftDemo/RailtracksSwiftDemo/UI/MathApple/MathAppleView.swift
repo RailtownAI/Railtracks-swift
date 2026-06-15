@@ -14,6 +14,10 @@ struct MathAppleView: View {
     var body: some View {
         VStack(spacing: 8) {
             Text("Prompt: " + viewModel.prompt)
+            Button("Run") {
+                viewModel.startPrompt()
+            }
+            .disabled(viewModel.isRunning)
             VStack {
                 Text("Result:")
                 TextField(
@@ -26,10 +30,6 @@ struct MathAppleView: View {
             }
         }
         .padding()
-        .task {
-            Log.debug("start math apple task...")
-            viewModel.startPrompt()
-        }
     }
 }
 

@@ -10,16 +10,22 @@ import Logging
 
 struct SimplePromptView: View {
     @State private var viewModel = SimplePromptViewModel()
-    
+
     var body: some View {
         VStack(spacing: 8) {
             Text("Prompt: " + viewModel.prompt)
-            Text("Result: " + (viewModel.promptResult ?? "waiting..."))
+            Text("Result: " + (viewModel.promptResult ?? ""))
+            Button("Run") {
+                viewModel.startPrompt()
+            }
+            .disabled(viewModel.isRunning)
         }
         .padding()
-        .task {
-            Log.debug("start simple task...")
-            viewModel.startPrompt()
+        .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
+            APIKeySetupView(isUpdate: false) {
+                viewModel.isShowingKeyPrompt = false
+                viewModel.startPrompt()
+            }
         }
     }
 }

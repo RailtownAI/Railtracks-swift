@@ -10,10 +10,14 @@ import Logging
 
 struct MathView: View {
     @State private var viewModel = MathViewModel()
-    
+
     var body: some View {
         VStack(spacing: 8) {
             Text("Prompt: " + viewModel.prompt)
+            Button("Run") {
+                viewModel.startPrompt()
+            }
+            .disabled(viewModel.isRunning)
             VStack {
                 Text("Result:")
                 TextField(
@@ -26,9 +30,11 @@ struct MathView: View {
             }
         }
         .padding()
-        .task {
-            Log.debug("start math task...")
-            viewModel.startPrompt()
+        .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
+            APIKeySetupView(isUpdate: false) {
+                viewModel.isShowingKeyPrompt = false
+                viewModel.startPrompt()
+            }
         }
     }
 }

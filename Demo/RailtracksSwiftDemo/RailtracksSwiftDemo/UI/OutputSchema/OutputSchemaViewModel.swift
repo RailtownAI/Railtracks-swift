@@ -16,15 +16,16 @@ class OutputSchemaViewModel {
     var jobURLString: String = ""
     var promptResult: String = ""
     var isRunning: Bool = false
+    var isShowingKeyPrompt = false
 
     func startPrompt() {
+        guard let apiKey = KeychainHelper.readOpenAIKey() else {
+            isShowingKeyPrompt = true
+            return
+        }
         Task { [weak self] in
             self?.isRunning = true
             defer { self?.isRunning = false }
-            guard let apiKey = RailtracksSwift.getOpenAIAPIKey() else {
-                Log.debug("No API key found")
-                return
-            }
             guard let jobURL = URL(string: self?.jobURLString ?? "") else {
                 Log.debug("Invalid job URL")
                 return

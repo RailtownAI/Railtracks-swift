@@ -13,14 +13,18 @@ import Logging
 class MathErrorViewModel {
     let prompt = "What is (10 + 5) x 2 / 0? Use the provided tools for every operation."
     var promptResult: String = ""
+    var isRunning = false
+    var isShowingKeyPrompt = false
 
     func startPrompt() {
+        guard let apiKey = KeychainHelper.readOpenAIKey() else {
+            isShowingKeyPrompt = true
+            return
+        }
         let prompt = self.prompt
+        isRunning = true
         Task { [weak self] in
-            guard let apiKey = RailtracksSwift.getOpenAIAPIKey() else {
-                Log.debug("No API key found")
-                return
-            }
+            defer { self?.isRunning = false }
             self?.promptResult = "waiting..."
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
 

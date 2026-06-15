@@ -12,6 +12,10 @@ struct MathErrorView: View {
     var body: some View {
         VStack(spacing: 8) {
             Text("Prompt: " + viewModel.prompt)
+            Button("Run") {
+                viewModel.startPrompt()
+            }
+            .disabled(viewModel.isRunning)
             VStack {
                 Text("Result:")
                 TextField(
@@ -24,9 +28,11 @@ struct MathErrorView: View {
             }
         }
         .padding()
-        .task {
-            Log.debug("start math error task...")
-            viewModel.startPrompt()
+        .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
+            APIKeySetupView(isUpdate: false) {
+                viewModel.isShowingKeyPrompt = false
+                viewModel.startPrompt()
+            }
         }
     }
 }
