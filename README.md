@@ -113,9 +113,38 @@ A JSON trace file is written on completion. Subscribe to `outputFileURLPublisher
 
 ```swift
 flow.outputFileURLPublisher
-    .sink { url in print("Trace written to \(url)") }
+    .sink { result in
+        switch result {
+        case .success(let url): 
+            print("Trace written to \(url)")
+        case .failure(let error): 
+            print("Trace write failed: \(error)")
+        }
+    }
     .store(in: &cancellables)
 ```
+
+Subscribe to `nodeStatusPublisher` to observe each node's execution state in real time, including nested sub-agents:
+
+```swift
+flow.nodeStatusPublisher
+    .receive(on: DispatchQueue.main)
+    .sink { status in
+        switch status.state {
+        case .executing: 
+            print("⏳ \(status.nodeName)")
+        case .completed: 
+            print("✅ \(status.nodeName)")
+        case .failed(let error): 
+            print("❌ \(status.nodeName): \(error)")
+        }
+    }
+    .store(in: &cancellables)
+
+let result = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+```
+
+`nodeStatusPublisher` emits for every node — agents, tools, and sub-agents — using the same `runID`-stamped event infrastructure as the JSON trace. Subscribe before calling `run` to capture all events.
 
 ### RTSAgent
 
