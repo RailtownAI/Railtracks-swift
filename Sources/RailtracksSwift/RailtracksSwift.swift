@@ -8,7 +8,7 @@ internal let log = RTSLoggers.rtsLog
 
 /// General namespace for the library
 public enum RailtracksSwift {
-    public static let version = "0.1.2"
+    public static let version = "0.1.3"
 
     /// Set to `true` to enable the per-session `debug_{agent}_{runID}_messages.json` file written to the
     /// app's Documents directory after each LLM call. Only has effect in DEBUG builds.

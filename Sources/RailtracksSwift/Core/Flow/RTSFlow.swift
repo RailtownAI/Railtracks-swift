@@ -25,6 +25,13 @@ public class RTSFlow: @unchecked Sendable {
             .eraseToAnyPublisher()
     }
 
+    private let nodeStatusSubject = PassthroughSubject<RTSNodeStatus, Never>()
+    /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions state.
+    /// Emits `.executing` when a node starts, `.completed` or `.failed` when it finishes.
+    public var nodeStatusPublisher: AnyPublisher<RTSNodeStatus, Never> {
+        nodeStatusSubject.eraseToAnyPublisher()
+    }
+
     /// - Parameters:
     ///   - title: Display name for the flow, included in the trace file name.
     ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
@@ -59,6 +66,37 @@ public class RTSFlow: @unchecked Sendable {
             sessionID: id,
             signpostEmitter: signpostEmitter
         )
+
+        // Storing subscription locally is sufficient.  It'll be kept alive,
+        // because we wait for everything to complete before returning result in run
+        var nodeStatusSubscriptions = Set<AnyCancellable>()
+        nodeInvoker.nodeCreateEventPublisher
+            .map {
+                RTSNodeStatus(
+                    nodeID: $0.id,
+                    nodeName: $0.name,
+                    nodeType: $0.nodeType,
+                    state: .executing,
+                    runID: $0.runID
+                )
+            }
+            .sink { [weak self] in self?.nodeStatusSubject.send($0) }
+            .store(in: &nodeStatusSubscriptions)
+        nodeInvoker.nodeInvokeEventPublisher
+            .map { event -> RTSNodeStatus in
+                let state: RTSNodeStatus.State = event.error == nil
+                    ? .completed
+                    : .failed(event.error ?? "unknown")
+                return RTSNodeStatus(
+                    nodeID: event.id,
+                    nodeName: event.name,
+                    nodeType: event.nodeType,
+                    state: state,
+                    runID: event.runID
+                )
+            }
+            .sink { [weak self] in self?.nodeStatusSubject.send($0) }
+            .store(in: &nodeStatusSubscriptions)
         let flowGraphCollector = RTSFlowGraphCollector(
             stampFactory: stampFactory,
             flowName: title,
