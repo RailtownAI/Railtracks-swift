@@ -18,18 +18,15 @@ struct MathVerifyView: View {
                 viewModel.startPrompt()
             }
             .disabled(viewModel.isRunning)
-            if !viewModel.nodeStatusLog.isEmpty {
+            if !viewModel.nodeStatusLines.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Node Activity:").font(.caption).foregroundStyle(.secondary)
-                    TextField(
-                        "",
-                        text: $viewModel.nodeStatusLog,
-                        axis: .vertical
-                    )
-                    .font(.caption.monospaced())
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...8)
-                    .disabled(true)
+                    let log = viewModel.nodeStatusLines.joined(separator: "\n")
+                    TextField("", text: .constant(log), axis: .vertical)
+                        .font(.caption.monospaced())
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...8)
+                        .disabled(true)
                 }
             }
             Text("Result: " + (viewModel.promptResult ?? ""))

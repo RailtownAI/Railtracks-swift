@@ -16,7 +16,7 @@ import Logging
 class MathVerifyViewModel {
     let prompt: String = "What is 50 + 20 x 8 - 4 x 5? Give me the final answer in a single number without any description."
     var promptResult: String?
-    var nodeStatusLog: String = ""
+    var nodeStatusLines: [String] = []
     var isRunning = false
     var isShowingKeyPrompt = false
 
@@ -26,7 +26,7 @@ class MathVerifyViewModel {
             return
         }
         let prompt = self.prompt
-        nodeStatusLog = ""
+        nodeStatusLines = []
         isRunning = true
         Task { [weak self] in
             defer { self?.isRunning = false }
@@ -92,11 +92,7 @@ class MathVerifyViewModel {
                     case .failed(let error):
                         label = "❌ \(status.nodeName): \(error)"
                     }
-                    if self?.nodeStatusLog.isEmpty == true {
-                        self?.nodeStatusLog = label
-                    } else {
-                        self?.nodeStatusLog += "\n" + label
-                    }
+                    self?.nodeStatusLines.append(label)
                 }
                 .store(in: &cancellables)
 
