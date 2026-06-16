@@ -67,6 +67,8 @@ public class RTSFlow: @unchecked Sendable {
             signpostEmitter: signpostEmitter
         )
 
+        // Storing subscription locally is sufficient.  It'll be kept alive,
+        // because we wait for everything to complete before returning result in run
         var nodeStatusSubscriptions = Set<AnyCancellable>()
         nodeInvoker.nodeCreateEventPublisher
             .map {
