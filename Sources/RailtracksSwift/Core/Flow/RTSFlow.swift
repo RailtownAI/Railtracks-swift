@@ -26,7 +26,6 @@ public class RTSFlow: @unchecked Sendable {
     }
 
     private let nodeStatusSubject = PassthroughSubject<RTSNodeStatus, Never>()
-    private var nodeStatusSubscriptions: Set<AnyCancellable> = []
     /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions state.
     /// Emits `.executing` when a node starts, `.completed` or `.failed` when it finishes.
     public var nodeStatusPublisher: AnyPublisher<RTSNodeStatus, Never> {
@@ -68,9 +67,17 @@ public class RTSFlow: @unchecked Sendable {
             signpostEmitter: signpostEmitter
         )
 
-        nodeStatusSubscriptions = []
+        var nodeStatusSubscriptions = Set<AnyCancellable>()
         nodeInvoker.nodeCreateEventPublisher
-            .map { RTSNodeStatus(nodeID: $0.id, nodeName: $0.name, nodeType: $0.nodeType, state: .executing, runID: $0.runID) }
+            .map {
+                RTSNodeStatus(
+                    nodeID: $0.id,
+                    nodeName: $0.name,
+                    nodeType: $0.nodeType,
+                    state: .executing,
+                    runID: $0.runID
+                )
+            }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
             .store(in: &nodeStatusSubscriptions)
         nodeInvoker.nodeInvokeEventPublisher
@@ -78,7 +85,13 @@ public class RTSFlow: @unchecked Sendable {
                 let state: RTSNodeStatus.State = event.error == nil
                     ? .completed
                     : .failed(event.error ?? "unknown")
-                return RTSNodeStatus(nodeID: event.id, nodeName: event.name, nodeType: event.nodeType, state: state, runID: event.runID)
+                return RTSNodeStatus(
+                    nodeID: event.id,
+                    nodeName: event.name,
+                    nodeType: event.nodeType,
+                    state: state,
+                    runID: event.runID
+                )
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
             .store(in: &nodeStatusSubscriptions)
