@@ -28,7 +28,7 @@ actor RTSFlowGraphCollector {
 
     internal var rootNodeID: UUID?
     internal var rootRunID: UUID?
-    private var messageBuffer: [UUID: [RTSMessage]] = [:]
+    internal var messageBuffer: [UUID: [RTSMessage]] = [:]
     private var collectionState: CollectionState = .collecting
     
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never>

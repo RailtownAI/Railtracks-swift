@@ -48,6 +48,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         return try await invokeCore(
             node,
             nodeType: .agent,
+            provider: node.llmProvider.providerName,
+            model: node.llmProvider.modelID,
             input: input,
             createdBy: createdBy
         ) { runID in
@@ -65,6 +67,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         return try await invokeCore(
             node,
             nodeType: .tool,
+            provider: "",
+            model: "",
             input: input,
             createdBy: createdBy
         ) { runID in
@@ -75,6 +79,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
     private func invokeCore(
         _ node: some RTSNode,
         nodeType: RTSFlowNodeType,
+        provider: String,
+        model: String,
         input: RTSInput,
         createdBy: (any RTSNode)? = nil,
         execute: (UUID) async throws -> RTSOutput
@@ -89,6 +95,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         await publishNodeCreated(
             node,
             nodeType: nodeType,
+            provider: provider,
+            model: model,
             stamp: creationStamp,
             createdBy: createdBy
         )
@@ -163,6 +171,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
     private func publishNodeCreated(
         _ node: some RTSNode,
         nodeType: RTSFlowNodeType,
+        provider: String,
+        model: String,
         stamp: RTSStamp,
         createdBy: (any RTSNode)?
     ) async {
@@ -171,7 +181,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 nodeID: node.id,
                 name: node.name(),
                 nodeType: nodeType,
-                stamp: stamp
+                stamp: stamp,
+                provider: provider,
+                model: model
             )
         )
     }
