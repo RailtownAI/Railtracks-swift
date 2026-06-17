@@ -40,6 +40,8 @@ extension RTSFlowGraphCollector {
         let model = lastMeta?.model ?? ""
         let provider = lastMeta?.providerName ?? ""
 
+        log.debug("🌲 emitTreeNode '\(nodeEvent.name)': messages=\(nodeEvent.messages.count) messagesWithMeta=\(messagesWithMeta.count) model='\(model)' provider='\(provider)' inputTokens=\(totalInputTokens) outputTokens=\(totalOutputTokens)")
+
         // Ancestor chain: walk edgeEvents upward from this node to the root
         let ancestorChain = buildAncestors(for: nodeEvent.id)
 
@@ -111,6 +113,12 @@ extension RTSFlowGraphCollector {
             .first(where: { $0.id == edgeEvent.targetNodeID && $0.runID == nil })?.stamp.timestamp
         let startTime = targetCreateStamp?.timeIntervalSince1970 ?? 0
 
+        let targetFinishMessages = nodeEvents
+            .first(where: { $0.id == edgeEvent.targetNodeID && $0.runID != nil })?.messages ?? []
+        let lastMeta = targetFinishMessages.compactMap(\.metadata).last
+        let model = lastMeta?.model ?? ""
+        let provider = lastMeta?.providerName ?? ""
+
         var inputIdx = 0
         let input = edgeEvent.input ?? [:]
         for key in input.keys.sorted() {
@@ -123,8 +131,8 @@ extension RTSFlowGraphCollector {
                 source: "edge",
                 direction: "Input",
                 role: "kwarg:\(key)",
-                model: "",
-                provider: "",
+                model: model,
+                provider: provider,
                 cost: 0,
                 latency: 0,
                 inputTokens: 0,
@@ -154,8 +162,8 @@ extension RTSFlowGraphCollector {
                 source: "edge",
                 direction: "Output",
                 role: row.role,
-                model: "",
-                provider: "",
+                model: model,
+                provider: provider,
                 cost: 0,
                 latency: 0,
                 inputTokens: 0,
