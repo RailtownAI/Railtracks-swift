@@ -40,7 +40,7 @@ extension RTSFlowGraphCollector {
         let model = lastMeta?.model ?? ""
         let provider = lastMeta?.providerName ?? ""
 
-        log.debug("🌲 emitTreeNode '\(nodeEvent.name)': messages=\(nodeEvent.messages.count) messagesWithMeta=\(messagesWithMeta.count) model='\(model)' provider='\(provider)' inputTokens=\(totalInputTokens) outputTokens=\(totalOutputTokens)")
+        log.debug("🌲 emitNodePointEvents emitTreeNode '\(nodeEvent.name)': messages=\(nodeEvent.messages.count) messagesWithMeta=\(messagesWithMeta.count) model='\(model)' provider='\(provider)' inputTokens=\(totalInputTokens) outputTokens=\(totalOutputTokens)")
 
         // Ancestor chain: walk edgeEvents upward from this node to the root
         let ancestorChain = buildAncestors(for: nodeEvent.id)
@@ -118,6 +118,8 @@ extension RTSFlowGraphCollector {
         let lastMeta = targetFinishMessages.compactMap(\.metadata).last
         let model = lastMeta?.model ?? ""
         let provider = lastMeta?.providerName ?? ""
+        
+        log.debug("🌲 emitEdgePointEvents '\(edgeEvent.targetName)': model='\(model)' provider='\(provider)'")
 
         var inputIdx = 0
         let input = edgeEvent.input ?? [:]
