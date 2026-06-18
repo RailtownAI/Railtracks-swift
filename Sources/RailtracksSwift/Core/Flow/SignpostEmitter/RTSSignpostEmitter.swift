@@ -150,6 +150,10 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         content: String,
         startTime: TimeInterval
     ) {
+        let limit = 512
+        let truncatedContent = content.count > limit
+            ? String(content.prefix(limit)) + "…"
+            : content
         let io = FlowIO(
             nodeId: nodeID,
             sessionId: sessionID,
@@ -166,7 +170,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             outputTokens: outputTokens,
             displayRole: displayRole,
             toolName: toolName,
-            content: content,
+            content: truncatedContent,
             startTime: startTime
         )
         log.trace("🚧 emitting io: \(io)")
