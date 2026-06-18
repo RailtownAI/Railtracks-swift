@@ -150,7 +150,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         content: String,
         startTime: TimeInterval
     ) {
-        let limit = 512
+        let limit = RailtracksSwift.signpostIOContentLimit
         let truncatedContent = content.count > limit
             ? String(content.prefix(limit)) + "…"
             : content
