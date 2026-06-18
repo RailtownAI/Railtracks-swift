@@ -40,6 +40,8 @@ extension RTSFlowGraphCollector {
         let model = lastMeta?.model ?? ""
         let provider = lastMeta?.providerName ?? ""
 
+        log.debug("🌊 emitNodePointEvents emitTreeNode '\(nodeEvent.name)': messages=\(nodeEvent.messages.count) messagesWithMeta=\(messagesWithMeta.count) model='\(model)' provider='\(provider)' inputTokens=\(totalInputTokens) outputTokens=\(totalOutputTokens)")
+
         // Ancestor chain: walk edgeEvents upward from this node to the root
         let ancestorChain = buildAncestors(for: nodeEvent.id)
 
@@ -111,6 +113,15 @@ extension RTSFlowGraphCollector {
             .first(where: { $0.id == edgeEvent.targetNodeID && $0.runID == nil })?.stamp.timestamp
         let startTime = targetCreateStamp?.timeIntervalSince1970 ?? 0
 
+        // provider/model are stored on the node create event, which is always in nodeEvents
+        // by the time edge finish fires (node create precedes edge create in invokeCore).
+        let nodeCreateEvent = nodeEvents
+            .first(where: { $0.id == edgeEvent.targetNodeID && $0.runID == nil })
+        let model = nodeCreateEvent?.model ?? ""
+        let provider = nodeCreateEvent?.provider ?? ""
+
+        log.debug("🌊 emitEdgePointEvents '\(edgeEvent.targetName)': model='\(model)' provider='\(provider)'")
+
         var inputIdx = 0
         let input = edgeEvent.input ?? [:]
         for key in input.keys.sorted() {
@@ -123,8 +134,8 @@ extension RTSFlowGraphCollector {
                 source: "edge",
                 direction: "Input",
                 role: "kwarg:\(key)",
-                model: "",
-                provider: "",
+                model: model,
+                provider: provider,
                 cost: 0,
                 latency: 0,
                 inputTokens: 0,
@@ -154,8 +165,8 @@ extension RTSFlowGraphCollector {
                 source: "edge",
                 direction: "Output",
                 role: row.role,
-                model: "",
-                provider: "",
+                model: model,
+                provider: provider,
                 cost: 0,
                 latency: 0,
                 inputTokens: 0,

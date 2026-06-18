@@ -101,6 +101,15 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         }
     }
 
+    public var modelID: String {
+        switch self {
+        case .openAI(let modelIDString):
+            return modelIDString
+        case .appleAI: 
+            return "on-device"
+        }
+    }
+
     public var isLocal: Bool {
         switch self {
         case .appleAI:
