@@ -63,13 +63,13 @@ extension RTSFlowGraphCollector {
             startTime: nodeStartTime
         )
 
-        // FlowIO — one event per LLM message, continuing the counter from edge IO
+        // FlowIO — one event per LLM message, continuing the global IO counter
         let sortedMessages = nodeEvent.messages.sorted { $0.timestamp < $1.timestamp }
-        let edgeCount = edgeIOCount.removeValue(forKey: nodeEvent.id) ?? 0
-        for (idx, message) in sortedMessages.enumerated() {
+        for message in sortedMessages {
+            ioIndex += 1
             let isInput = message.role == .system || message.role == .user
             let direction = isInput ? "Input" : "Output"
-            let displayRole = "\(String(format: "%03d", edgeCount + idx + 1)) \(message.role.rawValue)"
+            let displayRole = "\(String(format: "%03d", ioIndex)) \(message.role.rawValue)"
             let meta = message.metadata
 
             log.debug("🌊 emitIO[llm] '\(nodeEvent.name)' dir=\(direction) role=\(message.role.rawValue) contentLen=\(message.content.textValue.count) startTime=\(nodeStartTime)")
@@ -120,7 +120,6 @@ extension RTSFlowGraphCollector {
 
         log.debug("🌊 emitEdgePointEvents '\(edgeEvent.targetName)': model='\(model)' provider='\(provider)'")
 
-        var ioIndex = 0
         let input = edgeEvent.input ?? [:]
         for key in input.keys.sorted() {
             ioIndex += 1
@@ -179,7 +178,6 @@ extension RTSFlowGraphCollector {
                 startTime: startTime
             )
         }
-        edgeIOCount[edgeEvent.targetNodeID] = ioIndex
     }
 
     private func stringify(_ value: RTSValue) -> String {
