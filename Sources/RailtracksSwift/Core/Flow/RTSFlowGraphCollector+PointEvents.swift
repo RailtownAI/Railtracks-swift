@@ -63,18 +63,16 @@ extension RTSFlowGraphCollector {
             startTime: nodeStartTime
         )
 
-        // FlowIO — one event per LLM message, numbered per direction bucket
-        var inputIdx = 0
-        var outputIdx = 0
-        for message in nodeEvent.messages {
+        // FlowIO — one event per LLM message, continuing the global IO counter
+        let sortedMessages = nodeEvent.messages.sorted { $0.timestamp < $1.timestamp }
+        for message in sortedMessages {
+            ioIndex += 1
             let isInput = message.role == .system || message.role == .user
             let direction = isInput ? "Input" : "Output"
-            if isInput { inputIdx += 1 } else { outputIdx += 1 }
-            let idx = isInput ? inputIdx : outputIdx
-            let displayRole = "\(String(format: "%02d", idx)) \(message.role.rawValue)"
+            let displayRole = "\(String(format: "%03d", ioIndex)) \(message.role.rawValue)"
             let meta = message.metadata
 
-            log.trace("🎁 emitIO: '\(nodeEvent.name)' direction=\(direction) role=\(message.role.rawValue) nodeID=\(nodeIDStr)")
+            log.debug("🌊 emitIO[llm] '\(nodeEvent.name)' dir=\(direction) role=\(message.role.rawValue) contentLen=\(message.content.textValue.count) startTime=\(nodeStartTime)")
             signpostEmitter.emitIO(
                 nodeID: nodeIDStr,
                 sessionID: sessionIDStr,
@@ -122,10 +120,11 @@ extension RTSFlowGraphCollector {
 
         log.debug("🌊 emitEdgePointEvents '\(edgeEvent.targetName)': model='\(model)' provider='\(provider)'")
 
-        var inputIdx = 0
         let input = edgeEvent.input ?? [:]
         for key in input.keys.sorted() {
-            inputIdx += 1
+            ioIndex += 1
+            let kwargContent = stringify(input[key] ?? .null)
+            log.debug("🌊 emitIO[edge-in] '\(edgeEvent.targetName)' kwarg=\(key) contentLen=\(kwargContent.count) startTime=\(startTime)")
             signpostEmitter.emitIO(
                 nodeID: targetIDStr,
                 sessionID: sessionIDStr,
@@ -140,9 +139,9 @@ extension RTSFlowGraphCollector {
                 latency: 0,
                 inputTokens: 0,
                 outputTokens: 0,
-                displayRole: "\(String(format: "%02d", inputIdx)) kwarg:\(key)",
+                displayRole: "\(String(format: "%03d", ioIndex)) kwarg:\(key)",
                 toolName: toolName,
-                content: stringify(input[key] ?? .null),
+                content: kwargContent,
                 startTime: startTime
             )
         }
@@ -156,12 +155,14 @@ extension RTSFlowGraphCollector {
             outputRows = [("result", edgeEvent.error == nil ? "Success" : "Failed")]
         }
 
-        for (i, row) in outputRows.enumerated() {
+        for (_, row) in outputRows.enumerated() {
+            ioIndex += 1
+            log.debug("🌊 emitIO[edge-out] '\(edgeEvent.targetName)' role=\(row.role) contentLen=\(row.content.count) startTime=\(startTime)")
             signpostEmitter.emitIO(
                 nodeID: targetIDStr,
                 sessionID: sessionIDStr,
                 runID: runIDStr,
-                messageID: "\(edgeIDStr)-out\(i)",
+                messageID: "\(edgeIDStr)-out\(ioIndex)",
                 source: "edge",
                 direction: "Output",
                 role: row.role,
@@ -171,7 +172,7 @@ extension RTSFlowGraphCollector {
                 latency: 0,
                 inputTokens: 0,
                 outputTokens: 0,
-                displayRole: "\(String(format: "%02d", i + 1)) \(row.role)",
+                displayRole: "\(String(format: "%03d", ioIndex)) \(row.role)",
                 toolName: toolName,
                 content: row.content,
                 startTime: startTime
