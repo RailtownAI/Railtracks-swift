@@ -11,6 +11,7 @@ import RailtracksSwift
 import Logging
 
 /// Math agent demo using Apple on-device LLM via RTSAgent(llmProvider: .appleAI).
+@available(macOS 26, iOS 26, *)
 @Observable
 class MathAppleViewModel {
     let prompt: String = "What is 50 + 20 x 8 - 4? Give me the final answer in a single number without any description."

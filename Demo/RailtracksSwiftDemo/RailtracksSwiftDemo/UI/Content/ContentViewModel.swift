@@ -13,6 +13,7 @@ class ContentViewModel {
     enum ViewMode {
         case simple
         case math
+        @available(macOS 26, iOS 26, *)
         case mathApple
         case mathVerify
         case mathError

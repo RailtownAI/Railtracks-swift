@@ -14,6 +14,7 @@ import FoundationModels
 /// Uses `GeneratedContent` as `Arguments` — valid because `GeneratedContent: Generable`,
 /// satisfying the `Arguments: ConvertibleFromGeneratedContent` constraint. The parameter
 /// schema is built dynamically from `RTSToolSchema` via `DynamicGenerationSchema`.
+@available(macOS 26, iOS 26, *)
 struct RTSAppleAIAgentToolBridge: Tool {
     typealias Arguments = GeneratedContent
     typealias Output = String

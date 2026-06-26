@@ -8,6 +8,7 @@
 import Foundation
 import FoundationModels
 
+@available(macOS 26, iOS 26, *)
 extension RTSToolSchema {
     func toFoundationModelsSchema() throws -> GenerationSchema {
         let root = DynamicGenerationSchema(
@@ -24,6 +25,7 @@ extension RTSToolSchema {
     }
 }
 
+@available(macOS 26, iOS 26, *)
 private extension RTSValueType {
     func toFoundationModelsDynamicSchema() -> DynamicGenerationSchema {
         switch self {

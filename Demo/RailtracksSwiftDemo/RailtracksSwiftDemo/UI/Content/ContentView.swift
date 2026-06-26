@@ -26,11 +26,13 @@ struct ContentView: View {
                 .background(viewModel.mode == .math ? Color.accentColor.opacity(0.2) : Color.clear)
                 .cornerRadius(8)
 
-                Button("Math(AppleAI)") {
-                    viewModel.mode = .mathApple
+                if #available(macOS 26, iOS 26, *) {
+                    Button("Math(AppleAI)") {
+                        viewModel.mode = .mathApple
+                    }
+                    .background(viewModel.mode == .mathApple ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .cornerRadius(8)
                 }
-                .background(viewModel.mode == .mathApple ? Color.accentColor.opacity(0.2) : Color.clear)
-                .cornerRadius(8)
 
                 Button("Verified Math") {
                     viewModel.mode = .mathVerify
@@ -67,7 +69,9 @@ struct ContentView: View {
             case .math:
                 MathView()
             case .mathApple:
-                MathAppleView()
+                if #available(macOS 26, iOS 26, *) {
+                    MathAppleView()
+                }
             case .mathVerify:
                 MathVerifyView()
             case .mathError:

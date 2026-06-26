@@ -7,9 +7,10 @@ import CompilerPluginSupport
 let package = Package(
     name: "RailtracksSwift",
     platforms: [
-        .macOS(.v26),
-        .iOS(.v26),
-        .tvOS(.v26),
+        // currently limited by RailtracksInstrumentationKit,
+        // can go lower or add tvOS, visionOS if update RailtracksInstrumentationKit's low limit
+        .macOS(.v15),
+        .iOS(.v18),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.

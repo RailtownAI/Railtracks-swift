@@ -11,6 +11,7 @@ import FoundationModels
 // These conversions are internal to the LLMGateway layer.
 // Nothing outside of LLMGateway/ should call these directly.
 
+@available(macOS 26, iOS 26, *)
 extension RTSOutputSchema {
     func toFoundationModelsSchema() throws -> GenerationSchema {
         guard case .object(let objectName, let properties) = type else {
@@ -34,6 +35,7 @@ extension RTSOutputSchema {
     }
 }
 
+@available(macOS 26, iOS 26, *)
 extension RTSOutputSchema.SchemaType {
     func toFMDynamic(collectingDependencies deps: inout [DynamicGenerationSchema]) -> DynamicGenerationSchema {
         switch self {

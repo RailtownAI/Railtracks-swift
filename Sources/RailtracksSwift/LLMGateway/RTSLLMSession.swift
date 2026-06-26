@@ -100,6 +100,7 @@ extension RTSLLMSession: MessagePublisher {
 // MARK: - static Builder
 
 extension RTSLLMSession {
+    @available(macOS 26, iOS 26, *)
     static func build(
         appleAI: AppleAISession,
         agentNode: any RTSAgentNode
