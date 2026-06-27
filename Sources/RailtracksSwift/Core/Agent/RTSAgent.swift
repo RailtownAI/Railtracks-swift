@@ -17,6 +17,10 @@ public protocol RTSAgentNode: RTSNode {
     /// Maximum tokens the LLM may use when generating structured output against `outputSchema`.
     /// Defaults to `4096`. Ignored when `outputSchema` is `nil`.
     var outputSchemaMaxToken: Int { get }
+    /// Guardrails run, in order, on this agent's input before it reaches the LLM. Defaults to none.
+    var inputGuardrails: [any RTSAgentInputGuardrail] { get }
+    /// Guardrails run, in order, on this agent's output before it is returned. Defaults to none.
+    var outputGuardrails: [any RTSAgentOutputGuardrail] { get }
 }
 
 public extension RTSAgentNode {
@@ -28,6 +32,8 @@ public extension RTSAgentNode {
         String(describing: type(of: self))
     }
     var outputSchemaMaxToken: Int { 4096 }
+    var inputGuardrails: [any RTSAgentInputGuardrail] { [] }
+    var outputGuardrails: [any RTSAgentOutputGuardrail] { [] }
 
     func name() -> String { agentName }
 
@@ -57,6 +63,8 @@ public struct RTSAgent: RTSAgentNode {
     public let llmProvider: RTSLLMProvider
     public let outputSchema: RTSOutputSchema?
     public let outputSchemaMaxToken: Int
+    public let inputGuardrails: [any RTSAgentInputGuardrail]
+    public let outputGuardrails: [any RTSAgentOutputGuardrail]
     public var inputs: RTSInput = [:]
 
     public init(
@@ -65,13 +73,17 @@ public struct RTSAgent: RTSAgentNode {
         tools: [any RTSToolNode] = [],
         systemMessage: String? = nil,
         outputSchema: RTSOutputSchema? = nil,
-        outputSchemaMaxToken: Int = 4096
+        outputSchemaMaxToken: Int = 4096,
+        inputGuardrails: [any RTSAgentInputGuardrail] = [],
+        outputGuardrails: [any RTSAgentOutputGuardrail] = []
     ) {
         self.agentName = name ?? "Agent"
         self.tools = tools
         self.llmProvider = llmProvider
         self.outputSchema = outputSchema
         self.outputSchemaMaxToken = outputSchemaMaxToken
+        self.inputGuardrails = inputGuardrails
+        self.outputGuardrails = outputGuardrails
         if let systemMessage {
             inputs[inputKeySystemMessage] = .string(systemMessage)
         }

@@ -20,6 +20,8 @@ struct RTSNodeEvent {
     var messages: [RTSMessage] = []
     var provider: String = ""
     var model: String = ""
+    /// Guardrail steps recorded for this node's invocation (agents only).
+    var guardTraces: [RTSGuardrailTrace] = []
 
     init(
         nodeID: UUID,
@@ -32,7 +34,8 @@ struct RTSNodeEvent {
         runID: UUID? = nil,
         messages: [RTSMessage] = [],
         provider: String = "",
-        model: String = ""
+        model: String = "",
+        guardTraces: [RTSGuardrailTrace] = []
     ) {
         self.id = nodeID
         self.name = name
@@ -45,5 +48,6 @@ struct RTSNodeEvent {
         self.messages = messages
         self.provider = provider
         self.model = model
+        self.guardTraces = guardTraces
     }
 }

@@ -19,4 +19,11 @@ public enum RTSError: Error {
     case missingAPIKey(String)
     /// Selected provider is not available on the current OS version (e.g. AppleAI below macOS/iOS 26).
     case providerUnavailable(String)
+    /// A guardrail blocked the run. Carries the guardrail's name, the stage it ran
+    /// at (`.input` / `.output`), and the block reason.
+    case guardrailBlocked(
+        guardrailName: String,
+        stage: RTSGuardrailStage,
+        reason: String
+    )
 }
