@@ -8,6 +8,7 @@
 import SwiftUI
 import Logging
 
+@available(macOS 26, iOS 26, *)
 struct MathAppleView: View {
     @State private var viewModel = MathAppleViewModel()
 
@@ -33,6 +34,7 @@ struct MathAppleView: View {
     }
 }
 
+@available(macOS 26, iOS 26, *)
 #Preview {
     MathAppleView()
 }

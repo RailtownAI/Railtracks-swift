@@ -23,6 +23,7 @@ struct AppleAIResponse {
     let latency: Double?
 }
 
+@available(macOS 26, iOS 26, *)
 final class AppleAISession: @unchecked Sendable {
     private var session: LanguageModelSession
     private let sessionTools: [any Tool]
@@ -148,6 +149,7 @@ final class AppleAISession: @unchecked Sendable {
 
 // MARK: - GeneratedContent → JSON String
 
+@available(macOS 26, iOS 26, *)
 private extension AppleAISession {
     /// Serializes a `GeneratedContent` structured response to a JSON string.
     /// Uses Mirror reflection on Apple's internal `GeneratedJSON.Storage` enum — the same
@@ -208,6 +210,7 @@ private extension AppleAISession {
 
 // MARK: - Transcript.Entry → RTSMessage
 
+@available(macOS 26, iOS 26, *)
 private extension Transcript.Entry {
     func toRTSMessage() -> RTSMessage? {
         let timestamp = Date()

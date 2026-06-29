@@ -36,6 +36,11 @@ public struct RTSLLMGateway: Sendable {
         let provider = agentNode.llmProvider
         switch provider {
         case .appleAI:
+            guard #available(macOS 26, iOS 26, *) else {
+                throw RTSError.providerUnavailable(
+                    "AppleAI (FoundationModels) requires macOS 26 / iOS 26 or later"
+                )
+            }
             let (appleAISession, unsupported) = try AppleAISession.build(
                 fromAgentTools: agentNode.tools,
                 invoker: invoker,

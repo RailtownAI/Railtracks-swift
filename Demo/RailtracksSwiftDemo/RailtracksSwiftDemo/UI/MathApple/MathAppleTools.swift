@@ -10,6 +10,7 @@ import RailtracksSwift
 import FoundationModels
 import Logging
 
+@available(macOS 26, iOS 26, *)
 struct AdditionToolApple: RTSAppleAIToolNode {
     typealias Output = String
 
@@ -39,6 +40,7 @@ struct AdditionToolApple: RTSAppleAIToolNode {
     // call(arguments:) bridged to callableRoutine automatically
 }
 
+@available(macOS 26, iOS 26, *)
 struct SubtractionToolApple: RTSAppleAIToolNode {
     typealias Output = String
 
@@ -65,6 +67,7 @@ struct SubtractionToolApple: RTSAppleAIToolNode {
     }
 }
 
+@available(macOS 26, iOS 26, *)
 struct MultiplicationToolApple: RTSAppleAIToolNode {
     typealias Output = String
 
@@ -91,6 +94,7 @@ struct MultiplicationToolApple: RTSAppleAIToolNode {
     }
 }
 
+@available(macOS 26, iOS 26, *)
 struct DivisionToolApple: RTSAppleAIToolNode {
     typealias Output = String
 

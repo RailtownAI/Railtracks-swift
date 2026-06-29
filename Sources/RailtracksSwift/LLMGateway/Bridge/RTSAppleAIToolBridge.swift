@@ -13,6 +13,7 @@ import FoundationModels
 ///
 /// Must be generic (unlike `RTSConduitToolBridge`) because FoundationModels derives the
 /// argument schema from the concrete `Arguments` type at compile time.
+@available(macOS 26, iOS 26, *)
 struct RTSAppleAIToolBridge<WrappedTool: RTSAppleAIToolNode>: Tool
     where WrappedTool.Arguments: Encodable & Generable, WrappedTool.Output == String {
 
@@ -36,6 +37,7 @@ struct RTSAppleAIToolBridge<WrappedTool: RTSAppleAIToolNode>: Tool
     }
 }
 
+@available(macOS 26, iOS 26, *)
 public extension RTSAppleAIToolNode where Arguments: Encodable & Generable, Output == String {
     func makeAppleAIBridge(invoker: RTSNodeInvoker, createdBy: any RTSAgentNode) -> (any Tool)? {
         RTSAppleAIToolBridge(wrappedTool: self, nodeInvoker: invoker, createdBy: createdBy)

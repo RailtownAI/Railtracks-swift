@@ -17,4 +17,6 @@ public enum RTSError: Error {
     case invalidInvocation(String)
     case invalidSchema(String)
     case missingAPIKey(String)
+    /// Selected provider is not available on the current OS version (e.g. AppleAI below macOS/iOS 26).
+    case providerUnavailable(String)
 }
