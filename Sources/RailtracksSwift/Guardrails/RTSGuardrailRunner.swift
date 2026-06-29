@@ -28,6 +28,7 @@ enum RTSGuardrailRunner {
             do {
                 result = try await rail.check(current)
             } catch {
+                log.debug("🛡️ [\(rail.name)] llm_input → error: \(error)")
                 traces.append(
                     .error(railName: rail.name, stage: .input, error: error)
                 )
@@ -35,6 +36,7 @@ enum RTSGuardrailRunner {
             }
             switch result {
             case .allowed(let reason, let metadata):
+                log.debug("🛡️ [\(rail.name)] llm_input → allow: \(reason)")
                 traces.append(
                     RTSGuardrailTrace(
                         railName: rail.name,
@@ -45,6 +47,7 @@ enum RTSGuardrailRunner {
                     )
                 )
             case .transformed(let newInput, let reason, let metadata):
+                log.debug("🛡️ [\(rail.name)] llm_input → transform: \(reason)")
                 current = newInput
                 traces.append(
                     RTSGuardrailTrace(
@@ -56,6 +59,7 @@ enum RTSGuardrailRunner {
                     )
                 )
             case .blocked(let reason, let metadata):
+                log.debug("🛡️ [\(rail.name)] llm_input → block: \(reason)")
                 traces.append(
                     RTSGuardrailTrace(
                         railName: rail.name,
@@ -90,6 +94,7 @@ enum RTSGuardrailRunner {
             do {
                 result = try await rail.check(current)
             } catch {
+                log.debug("🛡️ [\(rail.name)] llm_output → error: \(error)")
                 traces.append(
                     .error(railName: rail.name, stage: .output, error: error)
                 )
@@ -97,6 +102,7 @@ enum RTSGuardrailRunner {
             }
             switch result {
             case .allowed(let reason, let metadata):
+                log.debug("🛡️ [\(rail.name)] llm_output → allow: \(reason)")
                 traces.append(
                     RTSGuardrailTrace(
                         railName: rail.name,
@@ -107,6 +113,7 @@ enum RTSGuardrailRunner {
                     )
                 )
             case .transformed(let newOutput, let reason, let metadata):
+                log.debug("🛡️ [\(rail.name)] llm_output → transform: \(reason)")
                 current = newOutput
                 traces.append(
                     RTSGuardrailTrace(
@@ -118,6 +125,7 @@ enum RTSGuardrailRunner {
                     )
                 )
             case .blocked(let reason, let metadata):
+                log.debug("🛡️ [\(rail.name)] llm_output → block: \(reason)")
                 traces.append(
                     RTSGuardrailTrace(
                         railName: rail.name,

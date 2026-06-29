@@ -51,6 +51,12 @@ struct ContentView: View {
                 }
                 .background(viewModel.mode == .outputSchema ? Color.accentColor.opacity(0.2) : Color.clear)
                 .cornerRadius(8)
+
+                Button("Guardrails") {
+                    viewModel.mode = .guardrails
+                }
+                .background(viewModel.mode == .guardrails ? Color.accentColor.opacity(0.2) : Color.clear)
+                .cornerRadius(8)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -78,6 +84,8 @@ struct ContentView: View {
                 MathErrorView()
             case .outputSchema:
                 OutputSchemaView()
+            case .guardrails:
+                GuardrailsView()
             }
             Spacer()
         }
