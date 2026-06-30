@@ -38,7 +38,6 @@ struct GuardrailsView: View {
             
             Divider()
             
-            
             VStack {
                 Text("Result:").font(.headline)
                 TextField(
