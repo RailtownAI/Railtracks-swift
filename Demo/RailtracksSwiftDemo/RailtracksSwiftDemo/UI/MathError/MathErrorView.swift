@@ -16,6 +16,8 @@ struct MathErrorView: View {
                 viewModel.startPrompt()
             }
             .disabled(viewModel.isRunning)
+            .buttonStyle(.bordered)
+            
             VStack {
                 Text("Result:")
                 TextField(

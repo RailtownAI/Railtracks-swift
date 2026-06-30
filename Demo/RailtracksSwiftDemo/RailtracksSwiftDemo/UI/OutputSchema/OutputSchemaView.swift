@@ -27,6 +27,7 @@ struct OutputSchemaView: View {
                 viewModel.startPrompt()
             }
             .disabled(viewModel.jobURLString.isEmpty || viewModel.isRunning)
+            .buttonStyle(.bordered)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Result:")

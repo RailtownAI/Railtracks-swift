@@ -45,12 +45,19 @@ class GuardrailsViewModel {
         ),
     ]
 
+    var presetIndex: Int? = 1
     var prompt: String = "My email is alice@example.com and my phone is 555-123-4567. Can you help me reset my account?"
     var promptResult: String = ""
     var isRunning = false
     var isShowingKeyPrompt = false
+    
+    func isSelected(_ preset: Preset) -> Bool {
+        guard let index = presetIndex else { return false }
+        return presets[index].label == preset.label
+    }
 
     func usePreset(_ preset: Preset) {
+        presetIndex = presets.firstIndex(where: { $0.label == preset.label }) ?? nil
         prompt = preset.text
     }
 

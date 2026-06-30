@@ -18,9 +18,15 @@ struct GuardrailsView: View {
                     Button(preset.label) {
                         viewModel.usePreset(preset)
                     }
+                    .background(
+                        viewModel.isSelected(preset)
+                        ? Color.accentColor.opacity(0.2)
+                        : Color.clear
+                    )
                     .buttonStyle(.bordered)
                 }
             }
+            Text("Prompt: ").font(.headline)
             TextField("Prompt", text: $viewModel.prompt, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal)
@@ -28,16 +34,22 @@ struct GuardrailsView: View {
                 viewModel.startPrompt()
             }
             .disabled(viewModel.isRunning)
+            .buttonStyle(.bordered)
+            
+            Divider()
+            
+            
             VStack {
-                Text("Result:")
+                Text("Result:").font(.headline)
                 TextField(
                     "Result",
                     text: $viewModel.promptResult,
                     axis: .vertical
                 )
                 .textFieldStyle(.roundedBorder)
-                .padding()
+                .padding(.horizontal)
             }
+            .padding([.top, .bottom], 16)
         }
         .padding()
     }
