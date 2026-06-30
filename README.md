@@ -155,8 +155,10 @@ RTSAgent(
     llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
     tools: [...],
     systemMessage: "...",
-    outputSchema: nil,       // optional structured output
-    outputSchemaMaxToken: 4096
+    outputSchema: nil,        // optional structured output
+    outputSchemaMaxToken: 4096,
+    inputGuardrails: [...],   // optional, see Guardrails
+    outputGuardrails: [...]
 )
 ```
 
@@ -277,6 +279,59 @@ RTSAgentTool(
 
 If `inputKeyPrompt` is missing from the inputs at call time, the entire input is serialised to a string and placed under `inputKeyPrompt` automatically, preventing a silent prompt-missing failure.
 
+### Guardrails
+
+Attach guardrails to an agent to inspect, rewrite, or block its **input** (before the LLM) and **output** (before the result is returned). Each guardrail returns `.allow`, `.block(reason)`, or `.transform(value)`. Guardrails run in array order; a `.transform` feeds the next, and the first `.block` short-circuits the rest and makes `flow.run` throw `RTSError.guardrailBlocked`. Every step is recorded in the JSON trace under the node's `guard_details`. Guardrails are per-agent, so they also apply to sub-agents on their own invocations.
+
+```swift
+let agent = RTSAgent(
+    llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4oMini.modelIDString),
+    systemMessage: "You are a helpful assistant.",
+    inputGuardrails: [
+        try RTSBlockTextInputGuardrail(pattern: #"(?i)ignore (all )?previous instructions"#),
+        try RTSPIIRedactInputGuardrail(),
+    ],
+    outputGuardrails: [
+        try RTSPIIRedactOutputGuardrail(),
+    ]
+)
+```
+
+Conform to `RTSAgentInputGuardrail` / `RTSAgentOutputGuardrail` to write your own — or use `RTSClosureInputGuardrail` / `RTSClosureOutputGuardrail` for inline checks:
+
+```swift
+struct MinLengthGuard: RTSAgentInputGuardrail {
+    let name = "min-length"
+    func check(_ input: RTSInput) async throws -> RTSInputGuardrailResult {
+        guard case let .string(p)? = input["prompt"], p.count >= 3 else {
+            return .block("Prompt too short")
+        }
+        return .allow()
+    }
+}
+```
+
+A blocked run is surfaced to the caller via the thrown error:
+
+```swift
+do {
+    let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+} catch let RTSError.guardrailBlocked(name, stage, reason) {
+    print("Blocked by \(name) at \(stage): \(reason)")
+}
+```
+
+#### Built-in guardrails
+
+| Guardrail (input / output) | Action | Notes |
+|---|---|---|
+| `RTSLengthInputGuardrail` / `RTSLengthOutputGuardrail` | block | Caps total character count (defaults: 4096 in / 2048 out) |
+| `RTSBlockTextInputGuardrail` / `RTSBlockTextOutputGuardrail` | block | Blocks on an ICU regex match; throwing init validates the pattern |
+| `RTSPIIRedactInputGuardrail` / `RTSPIIRedactOutputGuardrail` | transform | Regex + Luhn redaction of email, phone, credit card, US SSN, CA SIN, IP, URL, IBAN; supports custom patterns |
+| `RTSAppleAIPIIRedactInputGuardrail` / `RTSAppleAIPIIRedactOutputGuardrail` | transform | On-device, model-based PII redaction (names, addresses, etc.) for what regex can't catch. Requires macOS/iOS 26 + Apple Intelligence; **fails closed** (throws) when unavailable |
+
+The on-device PII guard calls FoundationModels **directly** (not through the flow), so the raw pre-redaction text is never written to the trace — only the redacted result and the verdict counts.
+
 ## OpenAI Model IDs
 
 ```swift
@@ -296,11 +351,14 @@ Use `.modelIDString` to get the raw string for `RTSLLMProvider`.
 public enum RTSError: Error {
     case missingInput(String)
     case missingOutput(String)
-    case missingAPIKey(String)
     case encodingFailed(String?)
     case decodingFailed(String?)
     case writeFileFailed(String?)
     case invalidInvocation(String)
+    case invalidSchema(String)
+    case missingAPIKey(String)
+    case providerUnavailable(String)                                   // e.g. AppleAI below macOS/iOS 26
+    case guardrailBlocked(guardrailName: String, stage: RTSGuardrailStage, reason: String)
 }
 ```
 

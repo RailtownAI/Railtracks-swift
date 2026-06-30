@@ -44,16 +44,24 @@ public class RTSNodeInvoker: @unchecked Sendable {
         createdBy: (any RTSNode)? = nil
     ) async throws -> RTSOutput {
         var mutableNode = node
-        mutableNode.inputs = input
+        let inputGuardrails = node.inputGuardrails
+        let outputGuardrails = node.outputGuardrails
         return try await invokeCore(
             node,
             nodeType: .agent,
             provider: node.llmProvider.providerName,
             model: node.llmProvider.modelID,
             input: input,
-            createdBy: createdBy
-        ) { runID in
-            try await mutableNode.invoke(runID: runID, session: session)
+            createdBy: createdBy,
+            runInputGuardrails: inputGuardrails.isEmpty ? nil : { input in
+                await RTSGuardrailRunner.runInput(inputGuardrails, input: input)
+            },
+            runOutputGuardrails: outputGuardrails.isEmpty ? nil : { output in
+                await RTSGuardrailRunner.runOutput(outputGuardrails, output: output)
+            }
+        ) { runID, guardedInput in
+            mutableNode.inputs = guardedInput
+            return try await mutableNode.invoke(runID: runID, session: session)
         }
     }
 
@@ -71,7 +79,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             model: "",
             input: input,
             createdBy: createdBy
-        ) { runID in
+        ) { runID, _ in
             try await mutableNode.invoke(runID: runID)
         }
     }
@@ -83,7 +91,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
         model: String,
         input: RTSInput,
         createdBy: (any RTSNode)? = nil,
-        execute: (UUID) async throws -> RTSOutput
+        runInputGuardrails: ((RTSInput) async -> (value: RTSInput, traces: [RTSGuardrailTrace], error: Error?))? = nil,
+        runOutputGuardrails: ((RTSOutput) async -> (value: RTSOutput, traces: [RTSGuardrailTrace], error: Error?))? = nil,
+        execute: (UUID, RTSInput) async throws -> RTSOutput
     ) async throws -> RTSOutput {
         let event: RTSStamp.Event
         if let sourceName = createdBy?.name() {
@@ -101,6 +111,18 @@ public class RTSNodeInvoker: @unchecked Sendable {
             createdBy: createdBy
         )
 
+        // Input guardrails run before the edge is recorded so the edge's input
+        // reflects what the agent actually received (post-transform).
+        var guardTraces: [RTSGuardrailTrace] = []
+        var workingInput = input
+        var guardError: Error?
+        if let runInputGuardrails {
+            let result = await runInputGuardrails(input)
+            workingInput = result.value
+            guardTraces.append(contentsOf: result.traces)
+            guardError = result.error
+        }
+
         let runID = UUID()
         let edgeID = createdBy == nil ? runID : UUID()
         await publishEdgeCreated(
@@ -110,7 +132,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             stamp: creationStamp,
             from: createdBy,
             to: node,
-            input: input
+            input: workingInput
         )
 
         signpostEmitter?.emitNodeStart(
@@ -120,16 +142,26 @@ public class RTSNodeInvoker: @unchecked Sendable {
             sessionID: sessionID,
             parentName: createdBy?.name() ?? "",
             runID: runID,
-            input: input
+            input: workingInput
         )
 
-        let output: RTSOutput
-        var invokeError: Error?
-        do {
-            output = try await execute(runID)
-        } catch {
-            invokeError = error
-            output = [:]
+        var output: RTSOutput = [:]
+        // A blocked/errored input guardrail short-circuits: the LLM never runs.
+        var invokeError: Error? = guardError
+        if invokeError == nil {
+            do {
+                output = try await execute(runID, workingInput)
+            } catch {
+                invokeError = error
+                output = [:]
+            }
+            // Output guardrails only run when the agent itself produced a result.
+            if invokeError == nil, let runOutputGuardrails {
+                let result = await runOutputGuardrails(output)
+                output = result.value
+                guardTraces.append(contentsOf: result.traces)
+                invokeError = result.error
+            }
         }
 
         signpostEmitter?.emitNodeEnd(
@@ -150,7 +182,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             stamp: completionStamp,
             from: createdBy,
             to: node,
-            input: input,
+            input: workingInput,
             output: output,
             error: invokeError
         )
@@ -159,9 +191,10 @@ public class RTSNodeInvoker: @unchecked Sendable {
             nodeType: nodeType,
             stamp: completionStamp,
             runID: runID,
-            input: input,
+            input: workingInput,
             output: output,
-            error: invokeError
+            error: invokeError,
+            guardTraces: guardTraces
         )
 
         if let invokeError { throw invokeError }
@@ -195,7 +228,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         runID: UUID,
         input: RTSInput,
         output: RTSOutput,
-        error: Error?
+        error: Error?,
+        guardTraces: [RTSGuardrailTrace] = []
     ) async {
         nodeInvokeEventSubject.send(
             RTSNodeEvent(
@@ -206,7 +240,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 input: input,
                 output: error == nil ? output : nil,
                 error: error.map { "\($0)" },
-                runID: runID
+                runID: runID,
+                guardTraces: guardTraces
             )
         )
     }

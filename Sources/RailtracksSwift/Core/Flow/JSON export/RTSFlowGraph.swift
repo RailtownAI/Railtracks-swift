@@ -139,10 +139,12 @@ public struct RTSFlowGraphNodeDetails: Codable {
 public struct RTSFlowGraphNodeInternals: Codable {
     public let llmDetails: [RTSFlowGraphLLMDetail]?
     public let latency: RTSFlowGraphLatency?
+    public let guardDetails: [RTSGuardrailTrace]?
 
     enum CodingKeys: String, CodingKey {
         case llmDetails = "llm_details"
         case latency
+        case guardDetails = "guard_details"
     }
 }
 

@@ -19,6 +19,7 @@ struct SimplePromptView: View {
                 viewModel.startPrompt()
             }
             .disabled(viewModel.isRunning)
+            .buttonStyle(.bordered)
         }
         .padding()
         .sheet(isPresented: $viewModel.isShowingKeyPrompt) {

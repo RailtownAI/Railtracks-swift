@@ -76,7 +76,7 @@ extension RTSFlowGraph {
                 nodeType: nodeType,
                 name: $0.name,
                 stamp: $0.stamp.toFlowGraphStamp(),
-                details: RTSFlowGraphNodeDetails(internals: RTSFlowGraphNodeInternals(llmDetails: nil, latency: nil))
+                details: RTSFlowGraphNodeDetails(internals: RTSFlowGraphNodeInternals(llmDetails: nil, latency: nil, guardDetails: nil))
             )
         }
         return RTSFlowGraphNode(
@@ -87,7 +87,8 @@ extension RTSFlowGraph {
             details: RTSFlowGraphNodeDetails(
                 internals: RTSFlowGraphNodeInternals(
                     llmDetails: finish.messages.isEmpty ? nil : await makeLLMDetails(from: finish.messages),
-                    latency: latency
+                    latency: latency,
+                    guardDetails: nodeType == .agent ? finish.guardTraces : nil
                 )
             ),
             parent: parent

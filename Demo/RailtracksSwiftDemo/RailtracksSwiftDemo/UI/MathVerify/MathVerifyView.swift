@@ -18,6 +18,8 @@ struct MathVerifyView: View {
                 viewModel.startPrompt()
             }
             .disabled(viewModel.isRunning)
+            .buttonStyle(.bordered)
+            
             if !viewModel.nodeStatusLines.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Node Activity:").font(.caption).foregroundStyle(.secondary)

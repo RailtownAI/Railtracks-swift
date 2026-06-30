@@ -18,39 +18,45 @@ struct ContentView: View {
                     viewModel.mode = .simple
                 }
                 .background(viewModel.mode == .simple ? Color.accentColor.opacity(0.2) : Color.clear)
-                .cornerRadius(8)
+                .buttonStyle(.bordered)
 
                 Button("Math") {
                     viewModel.mode = .math
                 }
                 .background(viewModel.mode == .math ? Color.accentColor.opacity(0.2) : Color.clear)
-                .cornerRadius(8)
+                .buttonStyle(.bordered)
 
                 if #available(macOS 26, iOS 26, *) {
                     Button("Math(AppleAI)") {
                         viewModel.mode = .mathApple
                     }
                     .background(viewModel.mode == .mathApple ? Color.accentColor.opacity(0.2) : Color.clear)
-                    .cornerRadius(8)
+                    .buttonStyle(.bordered)
                 }
 
                 Button("Verified Math") {
                     viewModel.mode = .mathVerify
                 }
                 .background(viewModel.mode == .mathVerify ? Color.accentColor.opacity(0.2) : Color.clear)
-                .cornerRadius(8)
+                .buttonStyle(.bordered)
 
                 Button("Math Error") {
                     viewModel.mode = .mathError
                 }
                 .background(viewModel.mode == .mathError ? Color.accentColor.opacity(0.2) : Color.clear)
-                .cornerRadius(8)
+                .buttonStyle(.bordered)
 
                 Button("Output Schema") {
                     viewModel.mode = .outputSchema
                 }
                 .background(viewModel.mode == .outputSchema ? Color.accentColor.opacity(0.2) : Color.clear)
-                .cornerRadius(8)
+                .buttonStyle(.bordered)
+
+                Button("Guardrails") {
+                    viewModel.mode = .guardrails
+                }
+                .background(viewModel.mode == .guardrails ? Color.accentColor.opacity(0.2) : Color.clear)
+                .buttonStyle(.bordered)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -78,6 +84,8 @@ struct ContentView: View {
                 MathErrorView()
             case .outputSchema:
                 OutputSchemaView()
+            case .guardrails:
+                GuardrailsView()
             }
             Spacer()
         }
