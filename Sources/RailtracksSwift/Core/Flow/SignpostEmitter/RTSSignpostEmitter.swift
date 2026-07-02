@@ -181,8 +181,12 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
 private extension RTSFlowNodeType {
     var asNodeType: NodeType {
         switch self {
-        case .agent: return .agent
-        case .tool:  return .tool
+        case .agent:
+            return .agent
+        case .tool:
+            return .tool
+        case .function:
+            return .custom("function")
         }
     }
 }

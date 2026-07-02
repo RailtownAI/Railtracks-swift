@@ -126,6 +126,8 @@ public struct RTSFlowGraphNodeCreation: Codable {
 public enum RTSFlowNodeType: String, Codable, Sendable {
     case agent = "Agent"
     case tool = "Tool"
+    /// A function/orchestrator node — deterministic code that may invoke agents.
+    case function = "function"
 }
 
 // MARK: - RTSFlowGraphNodeDetails
