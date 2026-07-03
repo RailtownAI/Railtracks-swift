@@ -64,4 +64,28 @@ struct FunctionNodeTests {
 
         #expect(str(out["result"]) == "outer+inner")
     }
+
+    /// `RTSOrchestratorTool` exposes the wrapped orchestrator's metadata as a tool and
+    /// rejects the plain `RTSToolNode` invocation path (it must go through a bridge).
+    @Test("orchestrator tool exposes metadata and rejects direct invocation")
+    func orchestratorToolWrapper() async {
+        let orchestrator = StubOrchestrator(nodeName: "SubWorkflow") { _, _ in
+            ["result": .string("x")]
+        }
+        let tool = RTSOrchestratorTool(
+            orchestrator: orchestrator,
+            description: "runs a sub-workflow",
+            parameters: RTSToolSchema(parameters: [
+                .init(name: "query", description: "the query", type: .string)
+            ])
+        )
+
+        #expect(tool.toolName == "SubWorkflow")
+        #expect(tool.toolDescription == "runs a sub-workflow")
+        #expect(tool.parameterSchema.parameters.count == 1)
+
+        await #expect(throws: RTSError.self) {
+            _ = try await tool.invoke(runID: UUID())
+        }
+    }
 }

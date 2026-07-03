@@ -118,6 +118,25 @@ final class AppleAISession: @unchecked Sendable {
                     log.warning("⚠️🍎 [\(createdBy.agentName)] RTSAgentTool '\(agentTool.toolName)' schema conversion failed, tool dropped: \(error)")
                     unsupportedTools.append(tool)
                 }
+            } else if let orchestratorTool = tool as? RTSOrchestratorTool {
+                do {
+                    let schema = try orchestratorTool.parameters.toFoundationModelsSchema()
+                    let bridge = RTSAppleAIOrchestratorToolBridge(
+                        orchestratorTool: orchestratorTool,
+                        parameters: schema,
+                        makeSession: makeSubSession,
+                        onNewSession: onNewSession,
+                        nodeInvoker: invoker,
+                        createdBy: createdBy
+                    )
+                    appleTools.append(bridge)
+                } catch {
+                    if tool.isRequired {
+                        throw RTSError.invalidSchema("Required tool '\(orchestratorTool.toolName)' schema conversion failed: \(error)")
+                    }
+                    log.warning("⚠️🍎 [\(createdBy.agentName)] RTSOrchestratorTool '\(orchestratorTool.toolName)' schema conversion failed, tool dropped: \(error)")
+                    unsupportedTools.append(tool)
+                }
             } else if let appleTool = tool as? any RTSAppleAIToolNode {
                 let bridge = appleTool.makeAppleAIBridge(invoker: invoker, createdBy: createdBy)
                           ?? (appleTool as any Tool)

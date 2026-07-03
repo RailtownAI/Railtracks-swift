@@ -78,6 +78,22 @@ public struct RTSLLMGateway: Sendable {
                         nodeInvoker: invoker,
                         createdBy: agentNode
                     )
+                } else if let orchestratorTool = tool as? RTSOrchestratorTool {
+                    let makeSession: @Sendable (any RTSAgentNode) throws -> RTSLLMSession = { subAgent in
+                        try RTSLLMGateway.buildSession(
+                            apiKeys: apiKeys,
+                            invoker: invoker,
+                            agentNode: subAgent,
+                            onNewSession: onNewSession
+                        )
+                    }
+                    return RTSConduitOrchestratorToolBridge(
+                        orchestratorTool: orchestratorTool,
+                        makeSession: makeSession,
+                        onNewSession: onNewSession,
+                        nodeInvoker: invoker,
+                        createdBy: agentNode
+                    )
                 } else {
                     return tool.asConduitTool(invoker: invoker, createdBy: agentNode)
                 }
