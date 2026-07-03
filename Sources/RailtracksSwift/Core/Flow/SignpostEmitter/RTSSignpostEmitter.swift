@@ -186,7 +186,7 @@ private extension RTSFlowNodeType {
         case .tool:
             return .tool
         case .function:
-            return .custom("function")
+            return .custom(rawValue)
         }
     }
 }

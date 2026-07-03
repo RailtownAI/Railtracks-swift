@@ -88,4 +88,16 @@ struct FunctionNodeTests {
             _ = try await tool.invoke(runID: UUID())
         }
     }
+
+    /// `.function` serializes as "Tool" (the visualizer only renders Agent/Tool nodes);
+    /// Agent/Tool encode unchanged.
+    @Test("function node type serializes as Tool")
+    func functionNodeTypeEncodesAsTool() throws {
+        func encoded(_ t: RTSFlowNodeType) throws -> String? {
+            String(data: try JSONEncoder().encode(t), encoding: .utf8)
+        }
+        #expect(try encoded(.function) == "\"Tool\"")
+        #expect(try encoded(.agent) == "\"Agent\"")
+        #expect(try encoded(.tool) == "\"Tool\"")
+    }
 }
