@@ -19,7 +19,19 @@ struct MathView: View {
             }
             .disabled(viewModel.isRunning)
             .buttonStyle(.bordered)
-            
+
+            HStack(alignment: .top, spacing: 40) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Sequential").font(.caption).foregroundStyle(.secondary)
+                    RTSStepsView(steps: viewModel.sequentialSteps)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Parallel").font(.caption).foregroundStyle(.secondary)
+                    RTSStepsView(steps: viewModel.parallelSteps)
+                }
+            }
+            .padding(.vertical)
+
             VStack {
                 Text("Result:")
                 TextField(
