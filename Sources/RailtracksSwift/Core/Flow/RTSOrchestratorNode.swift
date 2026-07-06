@@ -9,11 +9,7 @@ import Foundation
 
 /// A node that runs deterministic Swift code which orchestrates agents (and other
 /// orchestrators) — as a flow entry point, or (later) as an agent tool.
-///
-/// Unlike `RTSFunctionNode` (a pure step whose body only sees `RTSInput`), an
-/// orchestrator's `run` receives an `RTSRunContext` it uses to invoke agents and
-/// other orchestrators, which are then parented to it and recorded in the trace.
-public protocol RTSOrchestratorNode: RTSNode {
+public protocol RTSOrchestratorNode: RTSFunctionNode {
     func run(_ input: RTSInput, context: RTSRunContext) async throws -> RTSOutput
 }
 

@@ -17,13 +17,10 @@ struct MathWorkflow: RTSOrchestratorNode {
     let agentA: RTSAgent
     let agentB: RTSAgent
     let agentC: RTSAgent
-
-    func name() -> String { "Math Workflow" }
+    let nodeName = "Math Workflow"
 
     func run(_ input: RTSInput, context: RTSRunContext) async throws -> RTSOutput {
         // --- Agent C: runs in PARALLEL with the A → B chain. ---
-        // If concurrent execution causes issues, comment out this `async let` and the
-        // `let c = try await cResult` below (and drop `c` from the return) to run A → B only.
         async let cResult = context.call(
             agentC,
             prompt: "What is 50 - 17? Give the final answer as a single number."

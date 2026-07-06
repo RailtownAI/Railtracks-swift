@@ -81,9 +81,12 @@ class MathViewModel {
     private func updateStep(name: String, state: RTSNodeStatus.State) {
         let status: StepStatus
         switch state {
-        case .executing: status = .inProgress
-        case .completed: status = .complete
-        case .failed:    status = .failed
+        case .executing:
+            status = .inProgress
+        case .completed:
+            status = .complete
+        case .failed:
+            status = .failed
         }
         if let index = sequentialSteps.firstIndex(where: { $0.title == name }) {
             sequentialSteps[index].status = status
@@ -95,15 +98,24 @@ class MathViewModel {
 
     private func resetSteps() {
         promptResult = ""
-        for index in sequentialSteps.indices { sequentialSteps[index].status = .pending }
-        for index in parallelSteps.indices { parallelSteps[index].status = .pending }
+        for index in sequentialSteps.indices {
+            sequentialSteps[index].status = .pending
+        }
+        for index in parallelSteps.indices {
+            parallelSteps[index].status = .pending
+        }
     }
 
     private static func mathAgent(named name: String) -> RTSAgent {
         RTSAgent(
             llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4oMini.modelIDString),
             name: name,
-            tools: [AdditionTool(), SubtractionTool(), MultiplicationTool(), DivisionTool()],
+            tools: [
+                AdditionTool(),
+                SubtractionTool(),
+                MultiplicationTool(),
+                DivisionTool()
+            ],
             systemMessage: "You are a Math assistant. "
                 + "If there is addition in the math, you must use the provided addition tool to perform the calculation. "
                 + "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. "

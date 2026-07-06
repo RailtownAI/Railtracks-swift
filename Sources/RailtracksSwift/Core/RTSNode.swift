@@ -17,15 +17,20 @@ public protocol RTSNode: Sendable {
     func invoke() async throws -> RTSOutput
 }
 
-/// A node whose execution is fulfilled entirely by a `callableRoutine` closure,
-/// with no LLM session required. Use for deterministic, pure-function pipeline steps.
+/// Base for deterministic, non-LLM nodes — both tools and orchestrators.
+/// Provides a default `nodeName` (and `name()` derived from it). Refined by
+/// `RTSToolNode` (closure-driven) and `RTSOrchestratorNode` (context-driven).
 public protocol RTSFunctionNode: RTSNode {
-    var callableRoutine: RTSClosure { get }
+    var nodeName: String { get }
 }
 
 public extension RTSFunctionNode {
-    func invoke() async throws -> RTSOutput {
-        return try await callableRoutine.closure(inputs)
+    var nodeName: String {
+        String(describing: type(of: self))
+    }
+
+    func name() -> String {
+        nodeName
     }
 }
 
