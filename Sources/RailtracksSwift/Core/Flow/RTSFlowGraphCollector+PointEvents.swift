@@ -148,7 +148,7 @@ extension RTSFlowGraphCollector {
 
         let outputRows: [(role: String, content: String)]
         switch edgeEvent.nodeType {
-        case .tool:
+        case .tool, .function:
             let output = edgeEvent.output ?? [:]
             outputRows = output.keys.sorted().map { ($0, stringify(output[$0] ?? .null)) }
         case .agent:

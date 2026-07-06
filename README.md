@@ -279,6 +279,63 @@ RTSAgentTool(
 
 If `inputKeyPrompt` is missing from the inputs at call time, the entire input is serialised to a string and placed under `inputKeyPrompt` automatically, preventing a silent prompt-missing failure.
 
+### RTSOrchestratorNode
+
+A *function node* — deterministic Swift code that orchestrates agents (and other orchestrators) rather than letting an LLM decide the control flow. Conform to `RTSOrchestratorNode`, implement `run(_:context:)`, and invoke agents through the supplied `RTSRunContext` so they are traced as its children. Use it as a flow entry point when the sequencing (sequential, parallel, conditional) should live in code.
+
+```swift
+struct MathWorkflow: RTSOrchestratorNode {
+    let id = UUID()
+    var inputs: RTSInput = [:]
+    let nodeName = "Math Workflow"   // trace label; defaults to the type name
+    let agentA: RTSAgent
+    let agentB: RTSAgent
+    let agentC: RTSAgent
+
+    func run(_ input: RTSInput, context: RTSRunContext) async throws -> RTSOutput {
+        // C runs in parallel with the A → B chain.
+        async let c = context.call(agentC, prompt: "What is 50 - 17?")
+
+        // A → B run sequentially; A's answer feeds B.
+        let a = try await context.call(agentA, prompt: "What is 12 x 8?")
+        let b = try await context.call(agentB, prompt: "What is \(a) + 100?")
+
+        return ["result": .string("A→B: \(b)\nC: \(try await c)")]
+    }
+}
+```
+
+Run it as the root of a flow with the orchestrator overload of `run`, which returns the node's full `RTSOutput`:
+
+```swift
+let flow = RTSFlow(title: "Math Workflow")
+let output = try await flow.run(workflow, input: [:], gateway: gateway)
+```
+
+`RTSRunContext` offers three `call` overloads, each drawing a `thisNode → target` edge in the trace:
+
+- `call(agent, prompt:systemMessage:)` — invoke an agent with a prompt; returns its text result.
+- `call(agent, input:)` — invoke an agent with a full input dict; returns its full output.
+- `call(orchestrator, input:)` — invoke another orchestrator (function → function composition).
+
+Sessions for invoked agents are built on demand and subscribed to the flow's collector, so nested agents and sub-orchestrators show up as children in both the JSON trace and `nodeStatusPublisher`.
+
+### RTSOrchestratorTool
+
+Wraps an `RTSOrchestratorNode` as a tool so a parent agent's LLM can invoke an entire orchestrated workflow as a single tool call — the orchestrator counterpart to `RTSAgentTool`. It supports the same `inputTransform` / `outputTransform` hooks.
+
+```swift
+let workflowTool = RTSOrchestratorTool(
+    orchestrator: MathWorkflow(agentA: ..., agentB: ..., agentC: ...),
+    description: "Run the multi-step math workflow",
+    parameters: RTSToolSchema(parameters: [
+        .init(name: "problem", description: "The math problem to solve", type: .string)
+    ])
+)
+
+let agent = RTSAgent(llmProvider: .openAI(...), tools: [workflowTool])
+```
+
 ### Guardrails
 
 Attach guardrails to an agent to inspect, rewrite, or block its **input** (before the LLM) and **output** (before the result is returned). Each guardrail returns `.allow`, `.block(reason)`, or `.transform(value)`. Guardrails run in array order; a `.transform` feeds the next, and the first `.block` short-circuits the rest and makes `flow.run` throw `RTSError.guardrailBlocked`. Every step is recorded in the JSON trace under the node's `guard_details`. Guardrails are per-agent, so they also apply to sub-agents on their own invocations.

@@ -33,8 +33,12 @@ public extension RTSToolNode {
     var isRequired: Bool { false }
     
     func name() -> String { toolName }
-    func invoke() async throws -> RTSOutput { try await callableRoutine.closure(inputs) }
-    func invoke(runID: UUID) async throws -> RTSOutput { try await invoke() }
+    func invoke() async throws -> RTSOutput {
+        try await callableRoutine.closure(inputs)
+    }
+    func invoke(runID: UUID) async throws -> RTSOutput {
+        try await invoke()
+    }
     func run(with inputs: RTSInput) async throws -> RTSOutput {
         var copy = self
         copy.inputs = inputs

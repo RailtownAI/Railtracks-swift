@@ -84,6 +84,29 @@ public class RTSNodeInvoker: @unchecked Sendable {
         }
     }
 
+    /// Invokes an orchestrator (function) node. `createdBy: nil` makes it the flow
+    /// root; passing a parent draws an edge from that parent. The node runs with an
+    /// `RTSRunContext` so it can invoke agents / other orchestrators as its children.
+    func invokeFunction(
+        _ node: any RTSOrchestratorNode,
+        input: RTSInput,
+        context: RTSRunContext,
+        createdBy: (any RTSNode)? = nil
+    ) async throws -> RTSOutput {
+        var mutableNode = node
+        return try await invokeCore(
+            node,
+            nodeType: .function,
+            provider: "",
+            model: "",
+            input: input,
+            createdBy: createdBy
+        ) { _, guardedInput in
+            mutableNode.inputs = guardedInput
+            return try await mutableNode.run(guardedInput, context: context)
+        }
+    }
+
     private func invokeCore(
         _ node: some RTSNode,
         nodeType: RTSFlowNodeType,

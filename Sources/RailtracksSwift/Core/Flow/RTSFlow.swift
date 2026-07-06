@@ -60,6 +60,71 @@ public class RTSFlow: @unchecked Sendable {
         gateway: RTSLLMGateway,
         systemMessage: String? = nil
     ) async throws -> String {
+        let (nodeInvoker, collector, subscriptions) = await startCollecting()
+        let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
+            Task { await collector.subscribeMessage(session) }
+        }
+
+        let session = try gateway.session(
+            invoker: nodeInvoker,
+            agentNode: agent,
+            onNewSession: onNewSession
+        )
+        onNewSession(session)   // subscribe the root agent's own session
+
+        var input = agent.inputs
+        input[agent.inputKeyPrompt] = .string(prompt)
+        if let systemMessage {
+            input[agent.inputKeySystemMessage] = .string(systemMessage)
+        }
+
+        let output = try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+        guard case let .string(result) = output[agent.outputKeyResult] else {
+            throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
+        }
+        await collector.awaitCompletion()
+        _ = subscriptions       // keep alive until the run completes
+        return result
+    }
+
+    /// Runs the pipeline from an orchestrating function node as the root. The node
+    /// may invoke agents and other orchestrators through the provided `RTSRunContext`,
+    /// all of which are traced as its children.
+    ///
+    /// - Returns: the function node's raw output.
+    public func run(
+        _ node: some RTSOrchestratorNode,
+        input: RTSInput,
+        gateway: RTSLLMGateway
+    ) async throws -> RTSOutput {
+        let (nodeInvoker, collector, subscriptions) = await startCollecting()
+        let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
+            Task { await collector.subscribeMessage(session) }
+        }
+
+        let context = RTSRunContext(
+            invoker: nodeInvoker,
+            makeSession: { agent in
+                try gateway.session(
+                    invoker: nodeInvoker,
+                    agentNode: agent,
+                    onNewSession: onNewSession
+                )
+            },
+            onNewSession: onNewSession,
+            createdBy: node
+        )
+
+        let output = try await nodeInvoker.invokeFunction(node, input: input, context: context)
+        await collector.awaitCompletion()
+        _ = subscriptions       // keep alive until the run completes
+        return output
+    }
+
+    /// Builds the per-run node invoker + graph collector and wires the
+    /// `nodeStatusPublisher` subscriptions. The returned cancellables must be held
+    /// for the duration of the run (they are kept alive by `run` awaiting completion).
+    private func startCollecting() async -> (RTSNodeInvoker, RTSFlowGraphCollector, Set<AnyCancellable>) {
         let stampFactory = RTSStampFactory()
         let nodeInvoker = RTSNodeInvoker(
             stampFactory: stampFactory,
@@ -67,9 +132,7 @@ public class RTSFlow: @unchecked Sendable {
             signpostEmitter: signpostEmitter
         )
 
-        // Storing subscription locally is sufficient.  It'll be kept alive,
-        // because we wait for everything to complete before returning result in run
-        var nodeStatusSubscriptions = Set<AnyCancellable>()
+        var subscriptions = Set<AnyCancellable>()
         nodeInvoker.nodeCreateEventPublisher
             .map {
                 RTSNodeStatus(
@@ -81,7 +144,7 @@ public class RTSFlow: @unchecked Sendable {
                 )
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
-            .store(in: &nodeStatusSubscriptions)
+            .store(in: &subscriptions)
         nodeInvoker.nodeInvokeEventPublisher
             .map { event -> RTSNodeStatus in
                 let state: RTSNodeStatus.State = event.error == nil
@@ -96,8 +159,9 @@ public class RTSFlow: @unchecked Sendable {
                 )
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
-            .store(in: &nodeStatusSubscriptions)
-        let flowGraphCollector = RTSFlowGraphCollector(
+            .store(in: &subscriptions)
+
+        let collector = RTSFlowGraphCollector(
             stampFactory: stampFactory,
             flowName: title,
             sessionID: id,
@@ -105,30 +169,8 @@ public class RTSFlow: @unchecked Sendable {
             outputFileURLSubject: outputFileURLSubject,
             signpostEmitter: signpostEmitter
         )
-        await flowGraphCollector.setup()
-        
-        let session = try gateway.session(
-            invoker: nodeInvoker,
-            agentNode: agent
-        ) { [flowGraphCollector] newSession in
-            // subscription for descendant agents
-            Task { await flowGraphCollector.subscribeMessage(newSession) }
-        }
-        // subscription for root agent
-        Task { await flowGraphCollector.subscribeMessage(session) }
-
-        var input = agent.inputs
-        input[agent.inputKeyPrompt] = .string(prompt)
-        if let systemMessage {
-            input[agent.inputKeySystemMessage] = .string(systemMessage)
-        }
-
-        let output = try await nodeInvoker.invokeAgent(agent, input: input, session: session)
-        guard case let .string(result) = output[agent.outputKeyResult] else {
-            throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
-        }
-        await flowGraphCollector.awaitCompletion()
-        return result
+        await collector.setup()
+        return (nodeInvoker, collector, subscriptions)
     }
-    
+
 }

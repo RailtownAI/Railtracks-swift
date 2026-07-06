@@ -123,9 +123,32 @@ public struct RTSFlowGraphNodeCreation: Codable {
 
 // MARK: - RTSFlowNodeType
 
-public enum RTSFlowNodeType: String, Codable, Sendable {
+public enum RTSFlowNodeType: String, Sendable {
     case agent = "Agent"
     case tool = "Tool"
+    /// A function/orchestrator node — deterministic code that may invoke agents.
+    case function = "Function"
+}
+
+extension RTSFlowNodeType: Codable {
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RTSFlowNodeType(rawValue: raw) ?? .tool
+    }
+
+    /// `.function` is serialized as `"Tool"`: the visualizer only renders `Agent`/`Tool`
+    /// graph nodes (it filters everything else out), and Python's function nodes serialize
+    /// as `"Tool"` as well. `.function` stays the internal type — it still drives edge-output
+    /// and signpost handling; only the on-the-wire value maps to `"Tool"`.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .function:
+            try container.encode(RTSFlowNodeType.tool.rawValue)
+        case .agent, .tool:
+            try container.encode(rawValue)
+        }
+    }
 }
 
 // MARK: - RTSFlowGraphNodeDetails

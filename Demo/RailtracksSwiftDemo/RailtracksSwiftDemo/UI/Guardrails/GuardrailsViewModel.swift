@@ -87,7 +87,6 @@ class GuardrailsViewModel {
                 if #available(macOS 26, iOS 26, *),
                    case .available = SystemLanguageModel.default.availability {
                     inputGuards.append(RTSAppleAIPIIRedactInputGuardrail())
-                    outputGuards.append(RTSAppleAIPIIRedactOutputGuardrail())
                 }
 
                 let agent = RTSAgent(

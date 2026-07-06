@@ -35,7 +35,9 @@ public extension RTSAgentNode {
     var inputGuardrails: [any RTSAgentInputGuardrail] { [] }
     var outputGuardrails: [any RTSAgentOutputGuardrail] { [] }
 
-    func name() -> String { agentName }
+    func name() -> String {
+        agentName
+    }
 
     func invoke() async throws -> RTSOutput { [:] }
 
