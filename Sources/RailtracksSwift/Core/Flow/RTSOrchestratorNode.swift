@@ -62,14 +62,25 @@ public struct RTSRunContext: Sendable {
     }
 
     /// Invoke an agent with a full input dict; returns its full output.
-    public func call(_ agent: some RTSAgentNode, input: RTSInput) async throws -> RTSOutput {
+    public func call(
+        _ agent: some RTSAgentNode,
+        input: RTSInput
+    ) async throws -> RTSOutput {
         let session = try makeSession(agent)
         onNewSession(session)
-        return try await invoker.invokeAgent(agent, input: input, session: session, createdBy: createdBy)
+        return try await invoker.invokeAgent(
+            agent,
+            input: input,
+            session: session,
+            createdBy: createdBy
+        )
     }
 
     /// Invoke another orchestrating function node; returns its full output.
-    public func call(_ node: some RTSOrchestratorNode, input: RTSInput) async throws -> RTSOutput {
+    public func call(
+        _ node: some RTSOrchestratorNode,
+        input: RTSInput
+    ) async throws -> RTSOutput {
         let childContext = RTSRunContext(
             invoker: invoker,
             makeSession: makeSession,

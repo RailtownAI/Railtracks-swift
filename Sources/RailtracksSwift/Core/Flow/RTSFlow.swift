@@ -65,7 +65,11 @@ public class RTSFlow: @unchecked Sendable {
             Task { await collector.subscribeMessage(session) }
         }
 
-        let session = try gateway.session(invoker: nodeInvoker, agentNode: agent, onNewSession: onNewSession)
+        let session = try gateway.session(
+            invoker: nodeInvoker,
+            agentNode: agent,
+            onNewSession: onNewSession
+        )
         onNewSession(session)   // subscribe the root agent's own session
 
         var input = agent.inputs
@@ -101,7 +105,11 @@ public class RTSFlow: @unchecked Sendable {
         let context = RTSRunContext(
             invoker: nodeInvoker,
             makeSession: { agent in
-                try gateway.session(invoker: nodeInvoker, agentNode: agent, onNewSession: onNewSession)
+                try gateway.session(
+                    invoker: nodeInvoker,
+                    agentNode: agent,
+                    onNewSession: onNewSession
+                )
             },
             onNewSession: onNewSession,
             createdBy: node
