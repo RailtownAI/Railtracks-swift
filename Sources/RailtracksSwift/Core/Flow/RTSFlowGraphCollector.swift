@@ -148,7 +148,7 @@ actor RTSFlowGraphCollector {
         case .finishExecution:
             // Messages are attached (buffer flushed above); emit point events now
             // while all ancestor edge events are already in edgeEvents.
-            emitNodePointEvents(nodeEvent)
+            await emitNodePointEvents(nodeEvent)
 
             if nodeEvent.id == rootNodeID {
                 switch collectionState {

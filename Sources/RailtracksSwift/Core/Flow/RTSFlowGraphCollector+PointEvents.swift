@@ -14,7 +14,7 @@ extension RTSFlowGraphCollector {
     /// Called from `processNodeEvent` after the message buffer has been flushed,
     /// so `nodeEvent.messages` is complete and all ancestor edge events are
     /// already in `edgeEvents`.
-    func emitNodePointEvents(_ nodeEvent: RTSNodeEvent) {
+    func emitNodePointEvents(_ nodeEvent: RTSNodeEvent) async {
         guard let signpostEmitter else { return }
         guard let runID = nodeEvent.runID else { return }
 
@@ -45,6 +45,13 @@ extension RTSFlowGraphCollector {
         // Ancestor chain: walk edgeEvents upward from this node to the root
         let ancestorChain = buildAncestors(for: nodeEvent.id)
 
+        let nodeCost = await computeCost(
+            model: model,
+            provider: provider,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens
+        )
+
         let nodeStartTime = createStamp?.timeIntervalSince1970 ?? 0
         signpostEmitter.emitTreeNode(
             nodeID: nodeIDStr,
@@ -53,7 +60,7 @@ extension RTSFlowGraphCollector {
             nodeType: nodeEvent.nodeType,
             model: model,
             provider: provider,
-            cost: 0,
+            cost: nodeCost,
             latency: latency,
             inputTokens: totalInputTokens,
             outputTokens: totalOutputTokens,
@@ -71,6 +78,14 @@ extension RTSFlowGraphCollector {
             let direction = isInput ? "Input" : "Output"
             let displayRole = "\(String(format: "%03d", ioIndex)) \(message.role.rawValue)"
             let meta = message.metadata
+            let messageInputTokens = isInput ? 0 : (meta?.inputTokenCount ?? 0)
+            let messageOutputTokens = isInput ? 0 : (meta?.tokenCount ?? 0)
+            let messageCost = await computeCost(
+                model: meta?.model ?? model,
+                provider: meta?.providerName ?? provider,
+                inputTokens: messageInputTokens,
+                outputTokens: messageOutputTokens
+            )
 
             log.debug("🌊 emitIO[llm] '\(nodeEvent.name)' dir=\(direction) role=\(message.role.rawValue) contentLen=\(message.content.textValue.count) startTime=\(nodeStartTime)")
             signpostEmitter.emitIO(
@@ -83,10 +98,10 @@ extension RTSFlowGraphCollector {
                 role: message.role.rawValue,
                 model: meta?.model ?? model,
                 provider: meta?.providerName ?? provider,
-                cost: 0,
+                cost: messageCost,
                 latency: isInput ? 0 : (meta?.generationTime ?? 0),
-                inputTokens: isInput ? 0 : (meta?.inputTokenCount ?? 0),
-                outputTokens: isInput ? 0 : (meta?.tokenCount ?? 0),
+                inputTokens: messageInputTokens,
+                outputTokens: messageOutputTokens,
                 displayRole: displayRole,
                 toolName: nodeEvent.name,
                 content: message.content.textValue,
@@ -178,6 +193,23 @@ extension RTSFlowGraphCollector {
                 startTime: startTime
             )
         }
+    }
+
+    /// Computes USD cost from token usage via `RTSCostCalculator`, mirroring the
+    /// JSON-export path (`RTSFlowGraph+Parser.makeLLMDetails`). Returns 0 for local
+    /// providers (e.g. AppleAI, which have no cost), when no tokens were used, or when
+    /// the model has no pricing entry / the pricing map is unavailable.
+    private func computeCost(
+        model: String,
+        provider: String,
+        inputTokens: Int,
+        outputTokens: Int
+    ) async -> Double {
+        guard !RTSLLMProvider.isLocal(providerName: provider),
+              inputTokens > 0 || outputTokens > 0 else { return 0 }
+        let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
+        let cost = try? await RTSCostCalculator.shared.calculateCost(model: model, usage: usage)
+        return cost?.totalCost ?? 0
     }
 
     private func stringify(_ value: RTSValue) -> String {
