@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FabricioSffair/RailtracksInstrumentationKit",
       "state" : {
-        "branch" : "6084-fixed-wrong-error-display-during-live",
-        "revision" : "8e447a63613fa6aa2934e59efa7a3ca6164d07bb"
+        "revision" : "824cf48de03a08ea4b066a3a5b8626e3fe0293d6",
+        "version" : "0.1.4"
       }
     },
     {
