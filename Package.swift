@@ -40,7 +40,8 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/FabricioSffair/RailtracksInstrumentationKit",
-            exact: "0.1.4"
+            branch: "6084-fixed-wrong-error-display-during-live"
+//            exact: "0.1.4"
         ),
     ],
     targets: [
