@@ -14,7 +14,14 @@ extension RTSFlowGraphCollector {
     /// Called from `processNodeEvent` after the message buffer has been flushed,
     /// so `nodeEvent.messages` is complete and all ancestor edge events are
     /// already in `edgeEvents`.
-    func emitNodePointEvents(_ nodeEvent: RTSNodeEvent) async {
+    /// Synchronous on the actor: it snapshots the state it needs (create stamp, ancestor
+    /// chain, token totals) and reserves the shared `ioIndex` range, then hands the async
+    /// cost calculation and signpost emission to a detached task. This keeps the JSON-
+    /// collection actor path suspension-free — an `await` here would let a reentrant
+    /// `finishCollection()` serialize the graph mid-flight and drop nodes. Signposts are
+    /// an independent real-time side-channel, so fire-and-forget emission is correct; the
+    /// JSON trace's cost is computed separately in the parser and is unaffected.
+    func emitNodePointEvents(_ nodeEvent: RTSNodeEvent) {
         guard let signpostEmitter else { return }
         guard let runID = nodeEvent.runID else { return }
 
@@ -44,73 +51,92 @@ extension RTSFlowGraphCollector {
 
         // Ancestor chain: walk edgeEvents upward from this node to the root
         let ancestorChain = buildAncestors(for: nodeEvent.id)
-
-        let nodeCost = await computeCost(
-            model: model,
-            provider: provider,
-            inputTokens: totalInputTokens,
-            outputTokens: totalOutputTokens
-        )
-
         let nodeStartTime = createStamp?.timeIntervalSince1970 ?? 0
-        signpostEmitter.emitTreeNode(
-            nodeID: nodeIDStr,
-            sessionID: sessionIDStr,
-            runID: runIDStr,
-            nodeType: nodeEvent.nodeType,
-            model: model,
-            provider: provider,
-            cost: nodeCost,
-            latency: latency,
-            inputTokens: totalInputTokens,
-            outputTokens: totalOutputTokens,
-            error: hasError,
-            ancestors: ancestorChain,
-            name: nodeEvent.name,
-            startTime: nodeStartTime,
-            hasInputGuardrail: nodeEvent.hasInputGuardrail,
-            hasOutputGuardrail: nodeEvent.hasOutputGuardrail
-        )
 
-        // FlowIO — one event per LLM message, continuing the global IO counter
+        // Build per-message IO payloads and reserve the shared `ioIndex` range up front
+        // (synchronously) so ordering stays stable relative to edge IO even though the
+        // emit runs off the actor.
         let sortedMessages = nodeEvent.messages.sorted { $0.timestamp < $1.timestamp }
+        var ioPayloads: [PendingNodeIO] = []
+        ioPayloads.reserveCapacity(sortedMessages.count)
         for message in sortedMessages {
             ioIndex += 1
             let isInput = message.role == .system || message.role == .user
-            let direction = isInput ? "Input" : "Output"
-            let displayRole = "\(String(format: "%03d", ioIndex)) \(message.role.rawValue)"
             let meta = message.metadata
-            let messageInputTokens = isInput ? 0 : (meta?.inputTokenCount ?? 0)
-            let messageOutputTokens = isInput ? 0 : (meta?.tokenCount ?? 0)
-            let messageCost = await computeCost(
-                model: meta?.model ?? model,
-                provider: meta?.providerName ?? provider,
-                inputTokens: messageInputTokens,
-                outputTokens: messageOutputTokens
-            )
-
-            log.debug("🌊 emitIO[llm] '\(nodeEvent.name)' dir=\(direction) role=\(message.role.rawValue) contentLen=\(message.content.textValue.count) startTime=\(nodeStartTime)")
-            signpostEmitter.emitIO(
-                nodeID: nodeIDStr,
-                sessionID: sessionIDStr,
-                runID: runIDStr,
+            ioPayloads.append(PendingNodeIO(
                 messageID: message.id.uuidString,
-                source: "llm",
-                direction: direction,
+                direction: isInput ? "Input" : "Output",
                 role: message.role.rawValue,
                 model: meta?.model ?? model,
                 provider: meta?.providerName ?? provider,
-                cost: messageCost,
                 latency: isInput ? 0 : (meta?.generationTime ?? 0),
-                inputTokens: messageInputTokens,
-                outputTokens: messageOutputTokens,
-                displayRole: displayRole,
-                toolName: nodeEvent.name,
-                content: message.content.textValue,
-                startTime: nodeStartTime,
-                hasInputGuardrail: nodeEvent.hasInputGuardrail,
-                hasOutputGuardrail: nodeEvent.hasOutputGuardrail
+                inputTokens: isInput ? 0 : (meta?.inputTokenCount ?? 0),
+                outputTokens: isInput ? 0 : (meta?.tokenCount ?? 0),
+                displayRole: "\(String(format: "%03d", ioIndex)) \(message.role.rawValue)",
+                content: message.content.textValue
+            ))
+        }
+
+        let name = nodeEvent.name
+        let nodeType = nodeEvent.nodeType
+        let hasInputGuardrail = nodeEvent.hasInputGuardrail
+        let hasOutputGuardrail = nodeEvent.hasOutputGuardrail
+
+        Task.detached { [signpostEmitter] in
+            let nodeCost = await Self.computeCost(
+                model: model,
+                provider: provider,
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens
             )
+            signpostEmitter.emitTreeNode(
+                nodeID: nodeIDStr,
+                sessionID: sessionIDStr,
+                runID: runIDStr,
+                nodeType: nodeType,
+                model: model,
+                provider: provider,
+                cost: nodeCost,
+                latency: latency,
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+                error: hasError,
+                ancestors: ancestorChain,
+                name: name,
+                startTime: nodeStartTime,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
+            )
+
+            for io in ioPayloads {
+                let messageCost = await Self.computeCost(
+                    model: io.model,
+                    provider: io.provider,
+                    inputTokens: io.inputTokens,
+                    outputTokens: io.outputTokens
+                )
+                signpostEmitter.emitIO(
+                    nodeID: nodeIDStr,
+                    sessionID: sessionIDStr,
+                    runID: runIDStr,
+                    messageID: io.messageID,
+                    source: "llm",
+                    direction: io.direction,
+                    role: io.role,
+                    model: io.model,
+                    provider: io.provider,
+                    cost: messageCost,
+                    latency: io.latency,
+                    inputTokens: io.inputTokens,
+                    outputTokens: io.outputTokens,
+                    displayRole: io.displayRole,
+                    toolName: name,
+                    content: io.content,
+                    startTime: nodeStartTime,
+                    hasInputGuardrail: hasInputGuardrail,
+                    hasOutputGuardrail: hasOutputGuardrail
+                )
+            }
         }
     }
 
@@ -209,7 +235,10 @@ extension RTSFlowGraphCollector {
     /// JSON-export path (`RTSFlowGraph+Parser.makeLLMDetails`). Returns 0 for local
     /// providers (e.g. AppleAI, which have no cost), when no tokens were used, or when
     /// the model has no pricing entry / the pricing map is unavailable.
-    private func computeCost(
+    ///
+    /// `static` (actor-nonisolated) so the detached signpost-emit task can call it
+    /// without re-entering the collector actor — it touches no actor state.
+    static func computeCost(
         model: String,
         provider: String,
         inputTokens: Int,
@@ -249,4 +278,20 @@ extension RTSFlowGraphCollector {
         }
         return result
     }
+}
+
+/// Sendable snapshot of a single LLM message's FlowIO fields, built synchronously on the
+/// actor (with its `ioIndex` slot reserved) so the detached emit task carries no reference
+/// to actor state or non-Sendable message types.
+private struct PendingNodeIO: Sendable {
+    let messageID: String
+    let direction: String
+    let role: String
+    let model: String
+    let provider: String
+    let latency: TimeInterval
+    let inputTokens: Int
+    let outputTokens: Int
+    let displayRole: String
+    let content: String
 }
