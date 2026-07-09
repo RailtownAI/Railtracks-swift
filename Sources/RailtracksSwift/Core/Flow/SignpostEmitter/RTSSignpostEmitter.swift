@@ -50,19 +50,6 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         lock.withLock { handles[runID] = handle }
     }
 
-    /// Instruments-only decoration: a shield (⛨, BLACK CROSS ON SHIELD) is prefixed
-    /// when the agent has input guardrails and suffixed when it has output guardrails,
-    /// giving a quick visual cue on the Agent Runs lane. Applied here (not to the node's
-    /// real name) so the JSON trace keeps the undecorated name.
-    private static func decorateWithGuardrails(
-        _ name: String,
-        hasInputGuardrail: Bool,
-        hasOutputGuardrail: Bool
-    ) -> String {
-        let shield = "⛨"
-        return (hasInputGuardrail ? "\(shield) " : "") + name + (hasOutputGuardrail ? " \(shield)" : "")
-    }
-
     func emitNodeEnd(
         nodeID: UUID,
         nodeName: String,
@@ -206,6 +193,19 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         )
         log.trace("🚧 emitting io: \(io)")
         RailtracksSignposts.emit(io)
+    }
+    
+    /// Instruments-only decoration: a shield (⛨, BLACK CROSS ON SHIELD) is prefixed
+    /// when the agent has input guardrails and suffixed when it has output guardrails,
+    /// giving a quick visual cue on the Agent Runs lane. Applied here (not to the node's
+    /// real name) so the JSON trace keeps the undecorated name.
+    private static func decorateWithGuardrails(
+        _ name: String,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
+    ) -> String {
+        let shield = "⛨"
+        return name + ((hasInputGuardrail && hasOutputGuardrail) ? " \(shield)" : "")
     }
 }
 
