@@ -131,7 +131,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
             provider: provider,
             model: model,
             stamp: creationStamp,
-            createdBy: createdBy
+            createdBy: createdBy,
+            hasInputGuardrail: runInputGuardrails != nil,
+            hasOutputGuardrail: runOutputGuardrails != nil
         )
 
         // Input guardrails run before the edge is recorded so the edge's input
@@ -219,7 +221,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
             input: workingInput,
             output: output,
             error: invokeError,
-            guardTraces: guardTraces
+            guardTraces: guardTraces,
+            hasInputGuardrail: runInputGuardrails != nil,
+            hasOutputGuardrail: runOutputGuardrails != nil
         )
 
         if let invokeError { throw invokeError }
@@ -232,7 +236,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
         provider: String,
         model: String,
         stamp: RTSStamp,
-        createdBy: (any RTSNode)?
+        createdBy: (any RTSNode)?,
+        hasInputGuardrail: Bool = false,
+        hasOutputGuardrail: Bool = false
     ) async {
         nodeCreateEventSubject.send(
             RTSNodeEvent(
@@ -241,7 +247,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 nodeType: nodeType,
                 stamp: stamp,
                 provider: provider,
-                model: model
+                model: model,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
             )
         )
     }
@@ -254,7 +262,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
         input: RTSInput,
         output: RTSOutput,
         error: Error?,
-        guardTraces: [RTSGuardrailTrace] = []
+        guardTraces: [RTSGuardrailTrace] = [],
+        hasInputGuardrail: Bool = false,
+        hasOutputGuardrail: Bool = false
     ) async {
         nodeInvokeEventSubject.send(
             RTSNodeEvent(
@@ -266,7 +276,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 output: error == nil ? output : nil,
                 error: error.map { "\($0)" },
                 runID: runID,
-                guardTraces: guardTraces
+                guardTraces: guardTraces,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
             )
         )
     }

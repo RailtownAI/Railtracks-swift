@@ -67,7 +67,9 @@ extension RTSFlowGraphCollector {
             error: hasError,
             ancestors: ancestorChain,
             name: nodeEvent.name,
-            startTime: nodeStartTime
+            startTime: nodeStartTime,
+            hasInputGuardrail: nodeEvent.hasInputGuardrail,
+            hasOutputGuardrail: nodeEvent.hasOutputGuardrail
         )
 
         // FlowIO — one event per LLM message, continuing the global IO counter
@@ -105,7 +107,9 @@ extension RTSFlowGraphCollector {
                 displayRole: displayRole,
                 toolName: nodeEvent.name,
                 content: message.content.textValue,
-                startTime: nodeStartTime
+                startTime: nodeStartTime,
+                hasInputGuardrail: nodeEvent.hasInputGuardrail,
+                hasOutputGuardrail: nodeEvent.hasOutputGuardrail
             )
         }
     }
@@ -132,6 +136,8 @@ extension RTSFlowGraphCollector {
             .first(where: { $0.id == edgeEvent.targetNodeID && $0.runID == nil })
         let model = nodeCreateEvent?.model ?? ""
         let provider = nodeCreateEvent?.provider ?? ""
+        let hasInputGuardrail = nodeCreateEvent?.hasInputGuardrail ?? false
+        let hasOutputGuardrail = nodeCreateEvent?.hasOutputGuardrail ?? false
 
         log.debug("🌊 emitEdgePointEvents '\(edgeEvent.targetName)': model='\(model)' provider='\(provider)'")
 
@@ -157,7 +163,9 @@ extension RTSFlowGraphCollector {
                 displayRole: "\(String(format: "%03d", ioIndex)) kwarg:\(key)",
                 toolName: toolName,
                 content: kwargContent,
-                startTime: startTime
+                startTime: startTime,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
             )
         }
 
@@ -190,7 +198,9 @@ extension RTSFlowGraphCollector {
                 displayRole: "\(String(format: "%03d", ioIndex)) \(row.role)",
                 toolName: toolName,
                 content: row.content,
-                startTime: startTime
+                startTime: startTime,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
             )
         }
     }

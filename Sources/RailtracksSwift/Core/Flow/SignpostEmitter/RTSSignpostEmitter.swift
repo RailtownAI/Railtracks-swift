@@ -128,7 +128,9 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         error: Bool,
         ancestors: [String],
         name: String,
-        startTime: TimeInterval
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool = false,
+        hasOutputGuardrail: Bool = false
     ) {
         let treeNode = FlowTreeNode(
             nodeId: nodeID,
@@ -143,7 +145,11 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             outputTokens: outputTokens,
             error: error,
             ancestors: ancestors,
-            name: name,
+            name: Self.decorateWithGuardrails(
+                name,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
+            ),
             startTime: startTime
         )
         log.trace("🚧 emitting treeNode: \(treeNode)")
@@ -167,7 +173,9 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         displayRole: String,
         toolName: String,
         content: String,
-        startTime: TimeInterval
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool = false,
+        hasOutputGuardrail: Bool = false
     ) {
         let limit = RailtracksSwift.signpostIOContentLimit
         let truncatedContent = content.count > limit
@@ -188,7 +196,11 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             inputTokens: inputTokens,
             outputTokens: outputTokens,
             displayRole: displayRole,
-            toolName: toolName,
+            toolName: Self.decorateWithGuardrails(
+                toolName,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
+            ),
             content: truncatedContent,
             startTime: startTime
         )
