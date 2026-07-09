@@ -205,7 +205,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         hasOutputGuardrail: Bool
     ) -> String {
         let shield = "⛨"
-        return name + ((hasInputGuardrail && hasOutputGuardrail) ? " \(shield)" : "")
+        return name + ((hasInputGuardrail || hasOutputGuardrail) ? " \(shield)" : "")
     }
 }
 
