@@ -140,6 +140,15 @@ actor RTSFlowGraphCollector {
             nodeEvent.messages = bufferedMessages
         }
 
+        // Record the node synchronously BEFORE any suspension point. `emitNodePointEvents`
+        // awaits async cost calculation, and because this collector is a reentrant actor,
+        // that suspension can let a root-completion `finishCollection()` interleave and
+        // serialize `nodeEvents` while this node is still parked in the cost await —
+        // dropping it from the JSON. Appending first guarantees the node is present before
+        // the graph is built. (The cost await only feeds the signpost emit; JSON cost is
+        // computed separately in the parser, so this ordering has no effect on cost data.)
+        nodeEvents.append(nodeEvent)
+
         var isCollectionFinished = false
         switch nodeEvent.stamp.event {
         case .startCreate:
@@ -165,7 +174,6 @@ actor RTSFlowGraphCollector {
         default:
             break
         }
-        nodeEvents.append(nodeEvent)
 
         if isCollectionFinished {
             await finishCollection()
