@@ -165,7 +165,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
             sessionID: sessionID,
             parentName: createdBy?.name() ?? "",
             runID: runID,
-            input: workingInput
+            input: workingInput,
+            hasInputGuardrail: runInputGuardrails != nil,
+            hasOutputGuardrail: runOutputGuardrails != nil
         )
 
         var output: RTSOutput = [:]
