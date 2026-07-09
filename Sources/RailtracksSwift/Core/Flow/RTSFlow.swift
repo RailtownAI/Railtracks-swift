@@ -125,6 +125,12 @@ public class RTSFlow: @unchecked Sendable {
     /// `nodeStatusPublisher` subscriptions. The returned cancellables must be held
     /// for the duration of the run (they are kept alive by `run` awaiting completion).
     private func startCollecting() async -> (RTSNodeInvoker, RTSFlowGraphCollector, Set<AnyCancellable>) {
+        // Warm the pricing map now (fire-and-forget) so the first per-node signpost cost
+        // calculation doesn't pay the remote/disk fetch. It runs concurrently with the
+        // flow and finishes long before the first node completes an LLM round-trip;
+        // respects the TTL cache, so it's a cheap no-op on subsequent runs.
+        Task { await RTSCostCalculator.shared.preloadPricing() }
+
         let stampFactory = RTSStampFactory()
         let nodeInvoker = RTSNodeInvoker(
             stampFactory: stampFactory,
