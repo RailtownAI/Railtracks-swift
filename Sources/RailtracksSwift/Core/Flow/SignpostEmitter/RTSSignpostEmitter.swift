@@ -29,11 +29,17 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         sessionID: UUID,
         parentName: String,
         runID: UUID,
-        input: RTSInput
+        input: RTSInput,
+        hasInputGuardrail: Bool = false,
+        hasOutputGuardrail: Bool = false
     ) {
         guard nodeType == .agent else { return }
         let event = AgentRun(
-            name: nodeName,
+            name: Self.decorateWithGuardrails(
+                nodeName,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
+            ),
             nodeId: nodeID.uuidString,
             sessionId: sessionID.uuidString,
             runId: sessionID.uuidString,
@@ -109,7 +115,9 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         error: Bool,
         ancestors: [String],
         name: String,
-        startTime: TimeInterval
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool = false,
+        hasOutputGuardrail: Bool = false
     ) {
         let treeNode = FlowTreeNode(
             nodeId: nodeID,
@@ -124,7 +132,11 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             outputTokens: outputTokens,
             error: error,
             ancestors: ancestors,
-            name: name,
+            name: Self.decorateWithGuardrails(
+                name,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
+            ),
             startTime: startTime
         )
         log.trace("🚧 emitting treeNode: \(treeNode)")
@@ -148,7 +160,9 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         displayRole: String,
         toolName: String,
         content: String,
-        startTime: TimeInterval
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool = false,
+        hasOutputGuardrail: Bool = false
     ) {
         let limit = RailtracksSwift.signpostIOContentLimit
         let truncatedContent = content.count > limit
@@ -169,12 +183,29 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             inputTokens: inputTokens,
             outputTokens: outputTokens,
             displayRole: displayRole,
-            toolName: toolName,
+            toolName: Self.decorateWithGuardrails(
+                toolName,
+                hasInputGuardrail: hasInputGuardrail,
+                hasOutputGuardrail: hasOutputGuardrail
+            ),
             content: truncatedContent,
             startTime: startTime
         )
         log.trace("🚧 emitting io: \(io)")
         RailtracksSignposts.emit(io)
+    }
+    
+    /// Instruments-only decoration: a shield (⛨, BLACK CROSS ON SHIELD) is suffixed when
+    /// the agent has any guardrails (input or output), giving a quick visual cue across
+    /// the Agent Runs, Flow Tree, and Tool I/O lanes. Applied here (not to the node's real
+    /// name) so the JSON trace keeps the undecorated name.
+    private static func decorateWithGuardrails(
+        _ name: String,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
+    ) -> String {
+        let shield = "⛨"
+        return name + ((hasInputGuardrail || hasOutputGuardrail) ? " \(shield)" : "")
     }
 }
 

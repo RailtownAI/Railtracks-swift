@@ -22,6 +22,10 @@ struct RTSNodeEvent {
     var model: String = ""
     /// Guardrail steps recorded for this node's invocation (agents only).
     var guardTraces: [RTSGuardrailTrace] = []
+    /// Whether this node (agent) has input/output guardrails. Used only to decorate
+    /// the name in signpost/Instruments output — not part of the JSON trace.
+    var hasInputGuardrail: Bool = false
+    var hasOutputGuardrail: Bool = false
 
     init(
         nodeID: UUID,
@@ -35,7 +39,9 @@ struct RTSNodeEvent {
         messages: [RTSMessage] = [],
         provider: String = "",
         model: String = "",
-        guardTraces: [RTSGuardrailTrace] = []
+        guardTraces: [RTSGuardrailTrace] = [],
+        hasInputGuardrail: Bool = false,
+        hasOutputGuardrail: Bool = false
     ) {
         self.id = nodeID
         self.name = name
@@ -49,5 +55,7 @@ struct RTSNodeEvent {
         self.provider = provider
         self.model = model
         self.guardTraces = guardTraces
+        self.hasInputGuardrail = hasInputGuardrail
+        self.hasOutputGuardrail = hasOutputGuardrail
     }
 }

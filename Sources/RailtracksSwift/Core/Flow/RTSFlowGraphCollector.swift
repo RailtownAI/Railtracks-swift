@@ -140,6 +140,10 @@ actor RTSFlowGraphCollector {
             nodeEvent.messages = bufferedMessages
         }
 
+        // Record the node synchronously before any suspension point (defensive: keeps a
+        // reentrant `finishCollection()` from ever serializing the graph without this node).
+        nodeEvents.append(nodeEvent)
+
         var isCollectionFinished = false
         switch nodeEvent.stamp.event {
         case .startCreate:
@@ -147,7 +151,9 @@ actor RTSFlowGraphCollector {
 
         case .finishExecution:
             // Messages are attached (buffer flushed above); emit point events now
-            // while all ancestor edge events are already in edgeEvents.
+            // while all ancestor edge events are already in edgeEvents. This is
+            // synchronous — it snapshots state and hands async cost/emit to a detached
+            // task, so the actor never suspends here.
             emitNodePointEvents(nodeEvent)
 
             if nodeEvent.id == rootNodeID {
@@ -165,7 +171,6 @@ actor RTSFlowGraphCollector {
         default:
             break
         }
-        nodeEvents.append(nodeEvent)
 
         if isCollectionFinished {
             await finishCollection()

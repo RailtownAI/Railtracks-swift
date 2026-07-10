@@ -27,7 +27,9 @@ public protocol RTSSignpostEmitting: Sendable {
         sessionID: UUID,
         parentName: String,
         runID: UUID,
-        input: RTSInput
+        input: RTSInput,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
     )
     
     func emitNodeEnd(
@@ -73,7 +75,9 @@ public protocol RTSSignpostEmitting: Sendable {
         error: Bool,
         ancestors: [String],
         name: String,
-        startTime: TimeInterval
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
     )
 
     func emitIO(
@@ -93,6 +97,8 @@ public protocol RTSSignpostEmitting: Sendable {
         displayRole: String,
         toolName: String,
         content: String,
-        startTime: TimeInterval
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
     )
 }

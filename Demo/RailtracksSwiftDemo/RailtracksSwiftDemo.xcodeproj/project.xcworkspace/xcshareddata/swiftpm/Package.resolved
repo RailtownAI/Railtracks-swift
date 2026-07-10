@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FabricioSffair/RailtracksInstrumentationKit",
       "state" : {
-        "revision" : "824cf48de03a08ea4b066a3a5b8626e3fe0293d6",
-        "version" : "0.1.4"
+        "revision" : "a0e837e650b7c2908e462b8aae022891803b3d36",
+        "version" : "0.1.5"
       }
     },
     {

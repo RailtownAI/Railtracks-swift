@@ -217,6 +217,14 @@ public actor RTSCostCalculator {
         return computeCost(entry: entry, usage: usage)
     }
 
+    /// Warms the in-memory pricing map (loading from remote, falling back to the disk
+    /// cache) so the first real `calculateCost` doesn't pay the fetch latency. Respects
+    /// the TTL cache — a no-op once the map is loaded and fresh — and never throws, so it
+    /// is safe to fire-and-forget at the start of every flow run.
+    public func preloadPricing() async {
+        _ = try? await ensureModelCostMap()
+    }
+
     /// Discard in-memory and disk-cached data, then re-fetch from remote.
     public func refreshPricing() async throws {
         modelCostMap = nil
