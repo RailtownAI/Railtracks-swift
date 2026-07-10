@@ -59,6 +59,7 @@ struct FunctionNodeTests {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("rts-fail-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
         RailtracksSwift.flowGraphOutputDirectory = dir
 
         let root = StubOrchestrator(nodeName: "Boom") { _, _ in
