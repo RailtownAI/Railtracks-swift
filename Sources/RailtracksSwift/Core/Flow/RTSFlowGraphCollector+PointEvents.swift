@@ -53,12 +53,10 @@ extension RTSFlowGraphCollector {
         let ancestorChain = buildAncestors(for: nodeEvent.id)
         let nodeStartTime = createStamp?.timeIntervalSince1970 ?? 0
 
-        // Build per-message IO payloads and reserve the shared `ioIndex` range up front
-        // (synchronously) so ordering stays stable relative to edge IO even though the
-        // emit runs off the actor.
+        // Build per-message IO payloads (synchronously) so ordering stays
+        // stable relative to edge IO even though the emit runs off the actor.
         let sortedMessages = nodeEvent.messages.sorted { $0.timestamp < $1.timestamp }
         var ioPayloads: [PendingNodeIO] = []
-        ioPayloads.reserveCapacity(sortedMessages.count)
         for message in sortedMessages {
             ioIndex += 1
             let isInput = message.role == .system || message.role == .user
