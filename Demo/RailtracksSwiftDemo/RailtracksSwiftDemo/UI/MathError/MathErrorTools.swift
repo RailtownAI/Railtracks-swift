@@ -67,3 +67,20 @@ struct DivisionErrorTool: RTSToolNode {
         ])
     }
 }
+
+/// Orchestrator that always throws — a deterministic way to drive `flow.run` down its error
+/// path (no LLM/tool behavior involved). Used by the demo to confirm a failed run still
+/// writes its JSON trace ("trace-ready-on-return" holds even when `run` throws).
+struct ThrowingWorkflow: RTSOrchestratorNode {
+    let id = UUID()
+    var inputs: RTSInput = [:]
+    let nodeName = "Throwing Workflow"
+
+    struct DemoError: Error, CustomStringConvertible {
+        var description: String { "Intentional demo failure" }
+    }
+
+    func run(_ input: RTSInput, context: RTSRunContext) async throws -> RTSOutput {
+        throw DemoError()
+    }
+}

@@ -78,13 +78,19 @@ public class RTSFlow: @unchecked Sendable {
             input[agent.inputKeySystemMessage] = .string(systemMessage)
         }
 
-        let output = try await nodeInvoker.invokeAgent(agent, input: input, session: session)
-        guard case let .string(result) = output[agent.outputKeyResult] else {
-            throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
+        let outcome: Result<String, Error>
+        do {
+            let output = try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+            guard case let .string(result) = output[agent.outputKeyResult] else {
+                throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
+            }
+            outcome = .success(result)
+        } catch {
+            outcome = .failure(error)
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
-        return result
+        return try outcome.get()
     }
 
     /// Runs the pipeline from an orchestrating function node as the root. The node
@@ -115,10 +121,15 @@ public class RTSFlow: @unchecked Sendable {
             createdBy: node
         )
 
-        let output = try await nodeInvoker.invokeFunction(node, input: input, context: context)
+        let outcome: Result<RTSOutput, Error>
+        do {
+            outcome = .success(try await nodeInvoker.invokeFunction(node, input: input, context: context))
+        } catch {
+            outcome = .failure(error)
+        }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
-        return output
+        return try outcome.get()
     }
 
     /// Builds the per-run node invoker + graph collector and wires the
