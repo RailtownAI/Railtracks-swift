@@ -195,10 +195,10 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         RailtracksSignposts.emit(io)
     }
     
-    /// Instruments-only decoration: a shield (⛨, BLACK CROSS ON SHIELD) is prefixed
-    /// when the agent has input guardrails and suffixed when it has output guardrails,
-    /// giving a quick visual cue on the Agent Runs lane. Applied here (not to the node's
-    /// real name) so the JSON trace keeps the undecorated name.
+    /// Instruments-only decoration: a shield (⛨, BLACK CROSS ON SHIELD) is suffixed when
+    /// the agent has any guardrails (input or output), giving a quick visual cue across
+    /// the Agent Runs, Flow Tree, and Tool I/O lanes. Applied here (not to the node's real
+    /// name) so the JSON trace keeps the undecorated name.
     private static func decorateWithGuardrails(
         _ name: String,
         hasInputGuardrail: Bool,
