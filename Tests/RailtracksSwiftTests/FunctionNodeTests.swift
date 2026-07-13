@@ -47,6 +47,43 @@ struct FunctionNodeTests {
         #expect(str(out["result"]) == "done:hi")
     }
 
+    /// A failed run still produces its JSON trace. `run` must await the collector even when
+    /// the root invocation throws — otherwise the run's locals (collector + subscriptions)
+    /// are torn down before the file is written, breaking the "trace-ready-on-return"
+    /// guarantee for errored runs. Uses an orchestrator that throws, so no LLM is needed.
+    @Test("failed run still writes the JSON trace")
+    func failedRunWritesTrace() async throws {
+        struct StubError: Error {}
+
+        // Dedicated output dir so we only see this run's file (other tests write to temp root).
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rts-fail-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        RailtracksSwift.flowGraphOutputDirectory = dir
+
+        let root = StubOrchestrator(nodeName: "Boom") { _, _ in
+            throw StubError()
+        }
+        let flow = RTSFlow(title: "FnErrorTest")
+
+        var thrown: Error?
+        do {
+            _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+        } catch {
+            thrown = error
+        }
+
+        // The error still propagates to the caller...
+        #expect(thrown is StubError)
+
+        // ...and the trace was written before `run` returned.
+        let jsonFiles = try FileManager.default
+            .contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+        #expect(!jsonFiles.isEmpty, "a failed run must still write its JSON trace")
+    }
+
     /// A function node calling another function node composes, with output propagating.
     @Test("function → function composes")
     func functionToFunction() async throws {

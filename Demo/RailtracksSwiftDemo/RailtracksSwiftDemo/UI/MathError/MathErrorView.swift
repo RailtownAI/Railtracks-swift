@@ -12,12 +12,20 @@ struct MathErrorView: View {
     var body: some View {
         VStack(spacing: 8) {
             Text("Prompt: " + viewModel.prompt)
-            Button("Run") {
-                viewModel.startPrompt()
+            HStack {
+                Button("Run") {
+                    viewModel.startPrompt()
+                }
+                .disabled(viewModel.isRunning)
+                .buttonStyle(.bordered)
+
+                Button("Force Throw", role: .destructive) {
+                    viewModel.startForceThrow()
+                }
+                .disabled(viewModel.isRunning)
+                .buttonStyle(.bordered)
             }
-            .disabled(viewModel.isRunning)
-            .buttonStyle(.bordered)
-            
+
             VStack {
                 Text("Result:")
                 TextField(
@@ -27,6 +35,12 @@ struct MathErrorView: View {
                 )
                 .textFieldStyle(.roundedBorder)
                 .padding()
+
+                if !viewModel.traceStatus.isEmpty {
+                    Text(viewModel.traceStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding()
