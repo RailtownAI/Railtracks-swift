@@ -16,11 +16,24 @@ public enum RailtracksSwift {
     public nonisolated(unsafe) static var debugMessageFileEnabled: Bool = false
 
     /// Directory where flow graph JSON files are written after each flow run.
-    /// Defaults to the app's Documents directory. Configure once at app startup before any flow runs.
-    public nonisolated(unsafe) static var flowGraphOutputDirectory: URL = FileManager.default
-        .urls(for: .documentDirectory, in: .userDomainMask)
-        .first
-    ?? FileManager.default.temporaryDirectory
+    /// Defaults to an `sessions` subfolder of the app's Documents directory.
+    /// Configure once at app startup before any flow runs.
+    public nonisolated(unsafe) static var flowGraphOutputDirectory: URL = (
+        FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)
+            .first
+        ?? FileManager.default.temporaryDirectory
+    ).appendingPathComponent("sessions", isDirectory: true)
+
+    /// Directory where evaluation report JSON files are written by `evaluate(...)`.
+    /// Defaults to an `evaluations` subfolder of the app's Documents directory.
+    /// Configure once at app startup before running an evaluation.
+    public nonisolated(unsafe) static var evaluationOutputDirectory: URL = (
+        FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)
+            .first
+        ?? FileManager.default.temporaryDirectory
+    ).appendingPathComponent("evaluations", isDirectory: true)
 
     /// Maximum character length for `content` passed to signpost IO events before truncation.
     /// Raise this to see more content in Instruments; lower it if events appear empty or malformed.

@@ -75,6 +75,34 @@ public struct RTSNumericalMetric: Codable, Sendable {
     }
 }
 
+public extension RTSNumericalMetric {
+    /// Convenience initializer that derives a deterministic `identifier` from the metric's config,
+    /// so two metrics with the same config share an id (and dedupe in `metrics_map`).
+    init(
+        name: String,
+        metricType: RTSMetricType,
+        minValue: Double? = nil,
+        maxValue: Double? = nil,
+        description: String? = nil
+    ) {
+        let material = [
+            metricType.rawValue,
+            "name=\(name)",
+            "min=\(minValue.map { String($0) } ?? "nil")",
+            "max=\(maxValue.map { String($0) } ?? "nil")",
+            "desc=\(description ?? "nil")",
+        ].joined(separator: "|")
+        self.init(
+            name: name,
+            metricType: metricType,
+            identifier: RailtracksSwift.equalityHash(material),
+            description: description,
+            minValue: minValue,
+            maxValue: maxValue
+        )
+    }
+}
+
 // MARK: - Categorical metric
 
 /// A categorical metric descriptor — a fixed set of allowed labels (`categories`).
