@@ -104,10 +104,12 @@ public struct RTSConcurrencyLimits: Sendable {
     /// TODO: measure on-device parallelism properly on a real machine (fix the group, vary only the
     /// cap, compare wall-clock) and raise `.appleAI` above 1 if concurrency demonstrably helps.
     ///
-    /// TODO: expose this map to the application side so an app can tune per-provider caps (e.g.
-    /// `.openAI: 13`, `.anthropic: 15`, …) — ideally via an `evaluate(..., limits:)` option rather
-    /// than requiring a manual `RTSConcurrencyLimiter.configure(_:)` before the first run. Blocked on
-    /// `RTSLLMProviderKind` gaining the remaining provider cases. See docs/evaluation-design.md.
+    /// Exposed to the app via `RTSEvaluation.evaluate(..., limits:)` (and directly via `configure(_:)`),
+    /// so an app can tune per-provider caps (e.g. `.openAI: 13`).
+    /// TODO: two remaining gaps — (1) `RTSLLMProviderKind` only has `.openAI`/`.appleAI`, so caps for
+    /// Anthropic/Gemini/etc. can't be set until those cases exist; (2) `configure` is "first-created
+    /// wins" (see `LLMProviderRegistry`), so it can't retune a limiter already created this process —
+    /// reconfiguration mid-process would need the registry to replace live limiters.
     public static let `default` = RTSConcurrencyLimits(
         perProvider: [.openAI: 15, .appleAI: 1],
         unbounded: [],

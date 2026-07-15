@@ -76,14 +76,19 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
         )
     }
 
-    /// App-facing initializer: builds the production `RTSJudgeCall` from the model + gateway, wired to
-    /// a trace-less `RTSFlow` sub-run. Pass the model and your categorical metric(s) and it runs.
+    /// App-facing initializer: builds the production `RTSJudgeCall` from the model + gateway.
+    /// Pass the model and your categorical metric(s) and it runs.
+    ///
+    /// - Parameter savesTrace: whether the judge's per-call `RTSFlow` sub-runs write a JSON trace.
+    ///   Defaults to **false** (judge sub-runs normally shouldn't spill trace files). Set true to debug
+    ///   or inspect what the judge sends/receives; the traces land in `flowGraphOutputDirectory`.
     public init(
         provider: RTSLLMProvider,
         gateway: RTSLLMGateway,
         metrics: [RTSCategoricalMetric],
         systemPrompt: String? = nil,
-        includesReasoning: Bool = true
+        includesReasoning: Bool = true,
+        savesTrace: Bool = false
     ) {
         self.init(
             provider: provider,
@@ -91,7 +96,11 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
             systemPrompt: systemPrompt,
             includesReasoning: includesReasoning,
             limiter: nil,
-            judgeCall: Self.gatewayJudgeCall(provider: provider, gateway: gateway)
+            judgeCall: Self.gatewayJudgeCall(
+                provider: provider,
+                gateway: gateway,
+                savesTrace: savesTrace
+            )
         )
     }
 
@@ -367,7 +376,8 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
     /// run through a trace-less `RTSFlow`, decoding the returned JSON into `RTSJudgeResponse`.
     static func gatewayJudgeCall(
         provider: RTSLLMProvider,
-        gateway: RTSLLMGateway
+        gateway: RTSLLMGateway,
+        savesTrace: Bool
     ) -> RTSJudgeCall {
         return { system, user in
             let agent = RTSAgent(
@@ -375,7 +385,7 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
                 name: "JudgeAgent",
                 outputSchema: RTSJudgeResponse.rtsSchema
             )
-            let flow = RTSFlow(title: "JudgeEvaluatorFlow", savesTrace: false)
+            let flow = RTSFlow(title: "JudgeEvaluatorFlow", savesTrace: savesTrace)
             let resultString = try await flow.run(
                 agent: agent,
                 prompt: user,

@@ -25,6 +25,7 @@ class EvaluationViewModel {
     var includeToolUse = true
     var includeLLMInference = true
     var includeJudge = false
+    var saveJudgeTraces = false
     var hasOpenAIKey = false
     var isRunning = false
     var summary = ""
@@ -145,7 +146,8 @@ class EvaluationViewModel {
                 RTSJudgeEvaluator(
                     provider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
                     gateway: gateway,
-                    metrics: [metric]
+                    metrics: [metric],
+                    savesTrace: saveJudgeTraces
                 )
             )
         }

@@ -55,6 +55,11 @@ struct EvaluationView: View {
                 }
                 .disabled(!viewModel.hasOpenAIKey)
 
+                Toggle("Save judge traces", isOn: $viewModel.saveJudgeTraces)
+                    .font(.caption)
+                    .padding(.leading, 20)
+                    .disabled(!viewModel.includeJudge)
+
                 Button(viewModel.isRunning ? "Evaluating…" : "Run Evaluation") {
                     viewModel.run()
                 }

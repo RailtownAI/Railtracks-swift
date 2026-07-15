@@ -18,14 +18,23 @@ public enum RTSEvaluation {
     ///   - agents: optional filter — only agents whose name is in this list are evaluated;
     ///     when nil, all agents present in `data` are evaluated.
     ///   - name: optional human-readable evaluation name recorded on each report.
+    ///   - limits: optional per-provider concurrency caps for LLM-backed evaluators (the judge).
+    ///     When provided, applied via `RTSConcurrencyLimiter.configure(_:)` before the run. Note the
+    ///     "first-created wins" caveat: it only affects limiters not already created this process, so
+    ///     set it on (or before) the first `evaluate()`. When nil, the built-in defaults are used.
     ///   - persist: when true (default), each report is written to `evaluationOutputDirectory`.
     public static func evaluate(
         data: [RTSAgentDataPoint],
         evaluators: [any RTSEvaluator],
         agents: [String]? = nil,
         name: String? = nil,
+        limits: RTSConcurrencyLimits? = nil,
         persist: Bool = true
     ) async -> [RTSEvaluationReport] {
+        if let limits {
+            await RTSConcurrencyLimiter.configure(limits)
+        }
+
         var pointsByAgent: [String: [RTSAgentDataPoint]] = [:]
         for point in data {
             pointsByAgent[point.agentName, default: []].append(point)
