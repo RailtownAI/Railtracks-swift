@@ -19,13 +19,22 @@ public struct RTSJudgeResponse: Codable, Sendable {
         self.reasoning = reasoning
     }
 
+    // TODO (future improvement): this full schema is used unconditionally, so when
+    // `RTSJudgeEvaluator.includesReasoning` is false the LLM still generates a `reasoning` string that
+    // we then discard (only the prompt + leaf emission honor the flag, not the schema). Selecting a
+    // metricValue-only schema per that flag (threaded through `gatewayJudgeCall`) would avoid the wasted
+    // generation. Left as-is for now: report output is already correct and this matches Python.
     public static let rtsSchema = RTSOutputSchema(
         name: "RTSJudgeResponse",
         type: .object(
             name: "RTSJudgeResponse",
             properties: [
                 RTSOutputSchema(name: "metricValue", type: .string),
-                RTSOutputSchema(name: "reasoning", type: .string, isOptional: true),
+                // `reasoning` must be REQUIRED (not optional): OpenAI structured output runs in strict
+                // mode, which demands every property appear in `required` — an optional field is omitted
+                // from `required` and the request is rejected (400), silently failing every judge call.
+                // The Swift property stays `String?` for decode tolerance across providers.
+                RTSOutputSchema(name: "reasoning", type: .string),
             ]
         )
     )

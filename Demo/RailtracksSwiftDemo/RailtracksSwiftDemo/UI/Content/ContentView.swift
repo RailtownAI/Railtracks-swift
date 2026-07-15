@@ -57,6 +57,12 @@ struct ContentView: View {
                 }
                 .background(viewModel.mode == .guardrails ? Color.accentColor.opacity(0.2) : Color.clear)
                 .buttonStyle(.bordered)
+
+                Button("Evaluation") {
+                    viewModel.mode = .evaluation
+                }
+                .background(viewModel.mode == .evaluation ? Color.accentColor.opacity(0.2) : Color.clear)
+                .buttonStyle(.bordered)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -86,8 +92,9 @@ struct ContentView: View {
                 OutputSchemaView()
             case .guardrails:
                 GuardrailsView()
+            case .evaluation:
+                EvaluationView()
             }
-            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding()

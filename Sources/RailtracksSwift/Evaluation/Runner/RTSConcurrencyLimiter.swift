@@ -95,15 +95,22 @@ public struct RTSConcurrencyLimits: Sendable {
         return perProvider[kind] ?? fallback
     }
 
-    /// Default: OpenAI capped at 15 concurrent calls, Apple on-device unbounded, others 15.
+    /// Default: OpenAI capped at 15 concurrent calls; Apple on-device capped at **1** (safety); others 15.
+    /// On-device must be bounded — unbounded fan-out was abnormally slow. Whether a *higher* cap helps
+    /// is unresolved: with the full demo workload, caps of 1 and 2 were both slow, which suggests the
+    /// cost is dominated by the sheer number of sequential on-device inferences (metrics × datapoints),
+    /// not the cap. 1 is proven to work, so it's the safe default for now.
+    ///
+    /// TODO: measure on-device parallelism properly on a real machine (fix the group, vary only the
+    /// cap, compare wall-clock) and raise `.appleAI` above 1 if concurrency demonstrably helps.
     ///
     /// TODO: expose this map to the application side so an app can tune per-provider caps (e.g.
     /// `.openAI: 13`, `.anthropic: 15`, …) — ideally via an `evaluate(..., limits:)` option rather
     /// than requiring a manual `RTSConcurrencyLimiter.configure(_:)` before the first run. Blocked on
     /// `RTSLLMProviderKind` gaining the remaining provider cases. See docs/evaluation-design.md.
     public static let `default` = RTSConcurrencyLimits(
-        perProvider: [.openAI: 15],
-        unbounded: [.appleAI],
+        perProvider: [.openAI: 15, .appleAI: 1],
+        unbounded: [],
         fallback: 15
     )
 }
