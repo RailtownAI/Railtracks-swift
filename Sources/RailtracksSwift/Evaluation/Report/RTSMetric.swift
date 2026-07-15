@@ -135,6 +135,31 @@ public struct RTSCategoricalMetric: Codable, Sendable {
     }
 }
 
+public extension RTSCategoricalMetric {
+    /// Convenience initializer that derives a deterministic `identifier` from the metric's config,
+    /// so two metrics with the same config share an id (and dedupe in `metrics_map`). This is the
+    /// app-facing way to author a judge metric (e.g. Helpfulness with its categories).
+    init(
+        name: String,
+        categories: [String],
+        description: String? = nil
+    ) {
+        let material = [
+            RTSMetricType.categorical.rawValue,
+            "name=\(name)",
+            "categories=[\(categories.joined(separator: ","))]",
+            "desc=\(description ?? "nil")",
+        ].joined(separator: "|")
+        
+        self.init(
+            name: name,
+            identifier: RailtracksSwift.equalityHash(material),
+            description: description,
+            categories: categories
+        )
+    }
+}
+
 // MARK: - Polymorphic metric
 
 /// A metric definition — a declarative *descriptor* (label + bounds/categories), not a scoring
