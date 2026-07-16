@@ -66,7 +66,7 @@ public struct RTSFlowRun: Codable {
 
 // MARK: - RTSFlowStatus
 
-public enum RTSFlowStatus: String, Codable {
+public enum RTSFlowStatus: String, Codable, Sendable {
     case completed = "Completed"
     case open = "Open"
     case failed = "Failed"

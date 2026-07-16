@@ -21,12 +21,12 @@ class MathViewModel {
 
     /// Left column — the sequential A → B track.
     var sequentialSteps: [RTSStepState] = [
-        RTSStepState(id: "A", title: "Agent A", status: .pending, subtitle: "12 × 8", chips: []),
-        RTSStepState(id: "B", title: "Agent B", status: .pending, subtitle: "A + 100", chips: []),
+        RTSStepState(id: "A", title: "Math Agent A", status: .pending, subtitle: "12 × 8", chips: []),
+        RTSStepState(id: "B", title: "Math Agent B", status: .pending, subtitle: "A + 100", chips: []),
     ]
     /// Right column — the parallel C track.
     var parallelSteps: [RTSStepState] = [
-        RTSStepState(id: "C", title: "Agent C", status: .pending, subtitle: "50 − 17", chips: []),
+        RTSStepState(id: "C", title: "Math Agent C", status: .pending, subtitle: "50 − 17", chips: []),
     ]
 
     private var cancellables = Set<AnyCancellable>()
@@ -44,9 +44,9 @@ class MathViewModel {
         subscribe(to: flow)
 
         let workflow = MathWorkflow(
-            agentA: Self.mathAgent(named: "Agent A"),
-            agentB: Self.mathAgent(named: "Agent B"),
-            agentC: Self.mathAgent(named: "Agent C")
+            agentA: Self.mathAgent(named: "Math Agent A"),
+            agentB: Self.mathAgent(named: "Math Agent B"),
+            agentC: Self.mathAgent(named: "Math Agent C")
         )
 
         Task { [weak self] in

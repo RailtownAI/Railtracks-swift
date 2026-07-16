@@ -19,6 +19,7 @@ class ContentViewModel {
         case mathError
         case outputSchema
         case guardrails
+        case evaluation
     }
 
     var libVersion: String = RailtracksSwift.version

@@ -33,6 +33,7 @@ actor RTSFlowGraphCollector {
     private var collectionState: CollectionState = .collecting
     
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never>
+    private let savesTrace: Bool
     private let completionStream: AsyncStream<Void>
     private let streamContinuation: AsyncStream<Void>.Continuation
 
@@ -44,12 +45,14 @@ actor RTSFlowGraphCollector {
         sessionID: UUID,
         nodeEventPublisher: NodeEventPublishers,
         outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never>,
+        savesTrace: Bool = true,
         signpostEmitter: (any RTSSignpostEmitting)? = nil
     ) {
         self.stampFactory = stampFactory
         self.sessionID = sessionID
         self.flowName = flowName
         self.outputFileURLSubject = outputFileURLSubject
+        self.savesTrace = savesTrace
         self.signpostEmitter = signpostEmitter
         (self.completionStream, self.streamContinuation) = AsyncStream<Void>.makeStream()
 
@@ -242,6 +245,10 @@ actor RTSFlowGraphCollector {
     }
 
     private func generateJSONFile() async {
+        guard savesTrace else {
+            log.debug("🎁 savesTrace off — skipping trace write for flow: \(flowName)")
+            return
+        }
         if !messageBuffer.isEmpty {
             for message in messageBuffer.values.flatMap({ $0 }) {
                 log.warning("⚠️🎁 Could not find node event for message: \(message.id) - runID: \(message.runID?.uuidString ?? "n/a")")

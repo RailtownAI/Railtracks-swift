@@ -12,6 +12,7 @@ import Combine
 public class RTSFlow: @unchecked Sendable {
     let id: UUID = UUID()
     let title: String
+    let savesTrace: Bool
     let signpostEmitter: any RTSSignpostEmitting
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never> = .init(nil)
     /// Publishes the outcome of the JSON trace write after each completed run.
@@ -34,12 +35,18 @@ public class RTSFlow: @unchecked Sendable {
 
     /// - Parameters:
     ///   - title: Display name for the flow, included in the trace file name.
+    ///   - savesTrace: When true (default), the run writes its JSON trace to
+    ///     `flowGraphOutputDirectory`. Set false to run without persisting a trace (mirrors Python's
+    ///     `rt.Flow(save_state=False)`) — used for internal sub-flows like the evaluation judge, whose
+    ///     runs should not spill trace files. The completion lifecycle is unaffected.
     ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
     public init(
         title: String,
+        savesTrace: Bool = true,
         signpostEmitter: (any RTSSignpostEmitting)? = nil
     ) {
         self.title = title
+        self.savesTrace = savesTrace
         self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
     }
 
@@ -184,6 +191,7 @@ public class RTSFlow: @unchecked Sendable {
             sessionID: id,
             nodeEventPublisher: nodeInvoker,
             outputFileURLSubject: outputFileURLSubject,
+            savesTrace: savesTrace,
             signpostEmitter: signpostEmitter
         )
         await collector.setup()
