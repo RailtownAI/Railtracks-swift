@@ -169,12 +169,17 @@ class EvaluationViewModel {
                 // Leave the evaluation name nil so the visualizer titles each row by its agent name
                 // (its documented fallback: `evaluation_name ?? agents[0].agent_name`). A run-level
                 // name would be identical across every per-agent report and hide that distinction.
+                // Time only evaluate() (not ingestion) with a monotonic clock — the LLM fan-out that
+                // the concurrency cap affects lives here, so this is the number to compare across caps.
+                let started = DispatchTime.now()
                 let reports = await RTSEvaluation.evaluate(
                     data: data,
                     evaluators: evaluators,
                     persist: true
                 )
-                self?.summarize(reports: reports, dataCount: data.count)
+                let elapsed = Double(DispatchTime.now().uptimeNanoseconds
+                    - started.uptimeNanoseconds) / 1_000_000_000
+                self?.summarize(reports: reports, dataCount: data.count, elapsed: elapsed)
             } catch {
                 self?.summary = "Evaluation failed: \(error)"
                 Log.debug("evaluation failed: \(error)")
@@ -182,9 +187,12 @@ class EvaluationViewModel {
         }
     }
 
-    private func summarize(reports: [RTSEvaluationReport], dataCount: Int) {
+    private func summarize(reports: [RTSEvaluationReport], dataCount: Int, elapsed: TimeInterval) {
         var lines: [String] = []
-        lines.append("Evaluated \(dataCount) data point(s) → \(reports.count) report(s).")
+        lines.append(String(
+            format: "Evaluated %d data point(s) → %d report(s) in %.2fs.",
+            dataCount, reports.count, elapsed
+        ))
         lines.append("Output: \(RailtracksSwift.evaluationOutputDirectory.path)")
         for report in reports {
             let agentName = report.agents.first?.agentName ?? "unknown agent"

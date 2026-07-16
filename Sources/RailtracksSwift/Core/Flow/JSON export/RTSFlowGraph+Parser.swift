@@ -17,13 +17,13 @@ extension RTSFlowGraph {
         startTime: TimeInterval,
         endTime: TimeInterval
     ) async -> RTSFlowGraph {
-        // TODO (duplicate node ids): a node's id is stable per node *instance*, not per invocation, so a
-        // tool called N times emits N create + N finish events sharing one id. This map keeps only the
-        // last create (last-wins), and the `nodes` array below ends up with N records sharing that id —
-        // the "duplicate node identifiers" that ingestion has to dedupe. Latency no longer depends on
-        // this pairing (it's measured at the source now), but fully fixing duplicate nodes needs
-        // per-invocation ids (cf. Python's uuid4-per-request, which rejects id reuse). Bigger change to
-        // the node/event model — deferred.
+        // NOTE (duplicate node ids): a node's id is stable per node *instance*, not per invocation, so a
+        // tool called N times emits N create + N finish events sharing one id, and the `nodes` array
+        // below ends up with N records sharing that id. This is a **shared trace-format characteristic**
+        // — the Python engine produces the same duplicate ids (confirmed), so it is not a Swift bug and
+        // matches the JSON contract. Consumers dedupe (ingestion uses last-wins). Latency no longer
+        // depends on this pairing (measured at the source now). Making ids per-invocation would diverge
+        // from Python and is a cross-team format change — see docs/duplicate-node-id.md.
         let createsByNodeID: [UUID: RTSNodeEvent] = nodeEvents
             .filter { $0.runID == nil }
             .reduce(into: [:]) { $0[$1.id] = $1 }

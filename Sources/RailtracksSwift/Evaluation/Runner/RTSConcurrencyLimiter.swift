@@ -29,9 +29,10 @@ public actor RTSConcurrencyLimiter {
     public nonisolated func withPermit<T: Sendable>(
         _ operation: @Sendable () async throws -> T
     ) async throws -> T {
-        // Fast-fail already-cancelled work before taking a permit. (A task already parked in `waiters`
-        // still unwinds only once a permit frees — prompt wake-up of parked waiters is a deferred
-        // follow-up needing a cancellation-aware continuation.)
+        // Fast-fail already-cancelled work before taking a permit. A task already parked in `waiters`
+        // unwinds only once a permit frees (it still drains — `withPermit` always releases in its
+        // catch). Promptly waking a parked waiter on cancel is intentionally not handled: it only
+        // matters when cancelling a live evaluation mid-flight, which isn't a scenario here.
         try Task.checkCancellation()
         await acquire()
         do {
