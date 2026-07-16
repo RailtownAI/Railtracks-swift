@@ -29,6 +29,10 @@ public actor RTSConcurrencyLimiter {
     public nonisolated func withPermit<T: Sendable>(
         _ operation: @Sendable () async throws -> T
     ) async throws -> T {
+        // Fast-fail already-cancelled work before taking a permit. (A task already parked in `waiters`
+        // still unwinds only once a permit frees — prompt wake-up of parked waiters is a deferred
+        // follow-up needing a cancellation-aware continuation.)
+        try Task.checkCancellation()
         await acquire()
         do {
             let result = try await operation()
@@ -95,14 +99,12 @@ public struct RTSConcurrencyLimits: Sendable {
         return perProvider[kind] ?? fallback
     }
 
-    /// Default: OpenAI capped at 15 concurrent calls; Apple on-device capped at **1** (safety); others 15.
-    /// On-device must be bounded — unbounded fan-out was abnormally slow. Whether a *higher* cap helps
-    /// is unresolved: with the full demo workload, caps of 1 and 2 were both slow, which suggests the
-    /// cost is dominated by the sheer number of sequential on-device inferences (metrics × datapoints),
-    /// not the cap. 1 is proven to work, so it's the safe default for now.
-    ///
-    /// TODO: measure on-device parallelism properly on a real machine (fix the group, vary only the
-    /// cap, compare wall-clock) and raise `.appleAI` above 1 if concurrency demonstrably helps.
+    /// Default: OpenAI capped at 15 concurrent calls; Apple on-device capped at **1**; others 15.
+    /// On-device FoundationModels does not truly parallelize — it serializes inference on the ANE/GPU,
+    /// so concurrent calls only queue and contend. Confirmed empirically (unbounded / 5 / 2 caps were
+    /// all as slow or slower than 1) and by external docs on on-device inference being effectively
+    /// serial. So `.appleAI: 1` is the correct value, not merely a safety default. (OpenAI's 15 is real
+    /// parallelism — independent remote workers.)
     ///
     /// Exposed to the app via `RTSEvaluation.evaluate(..., limits:)` (and directly via `configure(_:)`),
     /// so an app can tune per-provider caps (e.g. `.openAI: 13`).

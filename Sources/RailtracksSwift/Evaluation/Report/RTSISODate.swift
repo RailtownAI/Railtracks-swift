@@ -53,11 +53,15 @@ public struct RTSISODate: Codable, Sendable, Equatable {
     /// epoch → "yyyy-MM-dd'T'HH:mm:ss.ffffffZ" (UTC, 6 fractional digits).
     static func format(_ epoch: TimeInterval) -> String {
         let whole = floor(epoch)
-        var micros = Int(((epoch - whole) * 1_000_000).rounded())
+        var microseconds = Int(((epoch - whole) * 1_000_000).rounded())
         var seconds = whole
-        if micros >= 1_000_000 { micros -= 1_000_000; seconds += 1 }   // rounding carry
+        if microseconds >= 1_000_000 {
+            // rounding carry
+            microseconds -= 1_000_000
+            seconds += 1
+        }
         let base = secondsFormatter.string(from: Date(timeIntervalSince1970: seconds))
-        return "\(base).\(String(format: "%06d", micros))Z"
+        return "\(base).\(String(format: "%06d", microseconds))Z"
     }
 
     /// ISO-8601 (with or without fractional seconds, trailing Z) → epoch seconds.
