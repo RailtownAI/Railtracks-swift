@@ -175,14 +175,21 @@ public class RTSNodeInvoker: @unchecked Sendable {
         var output: RTSOutput = [:]
         // A blocked/errored input guardrail short-circuits: the LLM never runs.
         var invokeError: Error? = guardError
+        var runtime: TimeInterval = 0
         if invokeError == nil {
+            // Measure the node's actual execution with a monotonic clock, at the source — mirrors
+            // Python's `tracked_invoke`. The parser reads this instead of subtracting create/finish
+            // stamps, so a repeated node id can't produce a mispaired (negative) latency.
+            let started = DispatchTime.now()
             do {
                 output = try await execute(runID, workingInput)
             } catch {
                 invokeError = error
                 output = [:]
             }
-            // Output guardrails only run when the agent itself produced a result.
+            runtime = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
+            // Output guardrails only run when the agent itself produced a result. They run after the
+            // measured window (not counted as node runtime), matching Python measuring only invoke().
             if invokeError == nil, let runOutputGuardrails {
                 let result = await runOutputGuardrails(output)
                 output = result.value
@@ -221,6 +228,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             input: workingInput,
             output: output,
             error: invokeError,
+            runtime: runtime,
             guardTraces: guardTraces,
             hasInputGuardrail: runInputGuardrails != nil,
             hasOutputGuardrail: runOutputGuardrails != nil
@@ -262,6 +270,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         input: RTSInput,
         output: RTSOutput,
         error: Error?,
+        runtime: TimeInterval? = nil,
         guardTraces: [RTSGuardrailTrace] = [],
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
@@ -276,6 +285,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 output: error == nil ? output : nil,
                 error: error.map { "\($0)" },
                 runID: runID,
+                runtime: runtime,
                 guardTraces: guardTraces,
                 hasInputGuardrail: hasInputGuardrail,
                 hasOutputGuardrail: hasOutputGuardrail

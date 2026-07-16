@@ -17,6 +17,10 @@ struct RTSNodeEvent {
     var output: RTSOutput?
     var error: String?
     var runID: UUID?
+    /// Measured execution time (seconds) for this invocation, set on finish events only (nil on create
+    /// snapshots). Measured at the source with a monotonic clock — never negative, unlike reconstructing
+    /// it from create/finish stamp deltas (which mispairs when a node id repeats across invocations).
+    var runtime: TimeInterval?
     var messages: [RTSMessage] = []
     var provider: String = ""
     var model: String = ""
@@ -36,6 +40,7 @@ struct RTSNodeEvent {
         output: RTSOutput? = nil,
         error: String? = nil,
         runID: UUID? = nil,
+        runtime: TimeInterval? = nil,
         messages: [RTSMessage] = [],
         provider: String = "",
         model: String = "",
@@ -51,6 +56,7 @@ struct RTSNodeEvent {
         self.output = output
         self.error = error
         self.runID = runID
+        self.runtime = runtime
         self.messages = messages
         self.provider = provider
         self.model = model

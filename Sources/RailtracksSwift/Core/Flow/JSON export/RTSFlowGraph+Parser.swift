@@ -17,6 +17,13 @@ extension RTSFlowGraph {
         startTime: TimeInterval,
         endTime: TimeInterval
     ) async -> RTSFlowGraph {
+        // TODO (duplicate node ids): a node's id is stable per node *instance*, not per invocation, so a
+        // tool called N times emits N create + N finish events sharing one id. This map keeps only the
+        // last create (last-wins), and the `nodes` array below ends up with N records sharing that id —
+        // the "duplicate node identifiers" that ingestion has to dedupe. Latency no longer depends on
+        // this pairing (it's measured at the source now), but fully fixing duplicate nodes needs
+        // per-invocation ids (cf. Python's uuid4-per-request, which rejects id reuse). Bigger change to
+        // the node/event model — deferred.
         let createsByNodeID: [UUID: RTSNodeEvent] = nodeEvents
             .filter { $0.runID == nil }
             .reduce(into: [:]) { $0[$1.id] = $1 }
@@ -67,9 +74,10 @@ extension RTSFlowGraph {
 
     private static func makeNode(finish: RTSNodeEvent, create: RTSNodeEvent?) async -> RTSFlowGraphNode {
         let nodeType = (create ?? finish).nodeType
-        let latency = create.map {
-            RTSFlowGraphLatency(totalTime: finish.stamp.timestamp.timeIntervalSince($0.stamp.timestamp))
-        }
+        // Latency is measured at the source (RTSNodeInvoker) and carried on the finish event, rather
+        // than reconstructed as `finish.stamp − create.stamp` — the latter mispairs (and can go
+        // negative) when a node id repeats across invocations. See the duplicate-node-id TODO above.
+        let latency = finish.runtime.map { RTSFlowGraphLatency(totalTime: $0) }
         let parent: RTSFlowGraphNodeCreation? = create.map {
             RTSFlowGraphNodeCreation(
                 identifier: $0.id.uuidString,

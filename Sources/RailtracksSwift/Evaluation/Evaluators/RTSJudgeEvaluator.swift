@@ -19,25 +19,23 @@ public struct RTSJudgeResponse: Codable, Sendable {
         self.reasoning = reasoning
     }
 
-    // TODO (future improvement): this full schema is used unconditionally, so when
-    // `RTSJudgeEvaluator.includesReasoning` is false the LLM still generates a `reasoning` string that
-    // we then discard (only the prompt + leaf emission honor the flag, not the schema). Selecting a
-    // metricValue-only schema per that flag (threaded through `gatewayJudgeCall`) would avoid the wasted
-    // generation. Left as-is for now: report output is already correct and this matches Python.
-    public static let rtsSchema = RTSOutputSchema(
-        name: "RTSJudgeResponse",
-        type: .object(
+    /// The structured-output schema for a judge call. When `includesReasoning` is false, `reasoning`
+    /// is dropped from the schema entirely (not merely optional), so the LLM never generates a value we
+    /// would discard — the prompt, schema, and leaf emission then all agree. When true, `reasoning` is
+    /// **required** (not optional): OpenAI structured output runs in strict mode, which demands every
+    /// property appear in `required` — an optional field is rejected (400), silently failing the call.
+    /// Either way every *present* property is required, so the schema is always strict-safe. The Swift
+    /// `reasoning` property stays `String?` so decoding tolerates its absence in the reasoning-off case.
+    public static func schema(includesReasoning: Bool) -> RTSOutputSchema {
+        var properties = [RTSOutputSchema(name: "metricValue", type: .string)]
+        if includesReasoning {
+            properties.append(RTSOutputSchema(name: "reasoning", type: .string))
+        }
+        return RTSOutputSchema(
             name: "RTSJudgeResponse",
-            properties: [
-                RTSOutputSchema(name: "metricValue", type: .string),
-                // `reasoning` must be REQUIRED (not optional): OpenAI structured output runs in strict
-                // mode, which demands every property appear in `required` — an optional field is omitted
-                // from `required` and the request is rejected (400), silently failing every judge call.
-                // The Swift property stays `String?` for decode tolerance across providers.
-                RTSOutputSchema(name: "reasoning", type: .string),
-            ]
+            type: .object(name: "RTSJudgeResponse", properties: properties)
         )
-    )
+    }
 }
 
 /// The judge's one dependency: run a single judge prompt and return its structured response. This is
@@ -99,6 +97,7 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
             judgeCall: Self.gatewayJudgeCall(
                 provider: provider,
                 gateway: gateway,
+                includesReasoning: includesReasoning,
                 savesTrace: savesTrace
             )
         )
@@ -377,13 +376,14 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
     static func gatewayJudgeCall(
         provider: RTSLLMProvider,
         gateway: RTSLLMGateway,
+        includesReasoning: Bool,
         savesTrace: Bool
     ) -> RTSJudgeCall {
         return { system, user in
             let agent = RTSAgent(
                 llmProvider: provider,
                 name: "JudgeAgent",
-                outputSchema: RTSJudgeResponse.rtsSchema
+                outputSchema: RTSJudgeResponse.schema(includesReasoning: includesReasoning)
             )
             let flow = RTSFlow(title: "JudgeEvaluatorFlow", savesTrace: savesTrace)
             let resultString = try await flow.run(
