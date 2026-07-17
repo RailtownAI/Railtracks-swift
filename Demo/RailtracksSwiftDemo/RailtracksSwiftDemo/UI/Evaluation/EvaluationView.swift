@@ -66,6 +66,22 @@ struct EvaluationView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!viewModel.canRun)
 
+                if !viewModel.progress.isEmpty {
+                    HStack(spacing: 6) {
+                        if viewModel.isRunning {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(viewModel.progress)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if viewModel.failureCount > 0 {
+                            Text("· ⚠️ \(viewModel.failureCount)")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+
                 if !viewModel.summary.isEmpty {
                     Text(viewModel.summary)
                         .font(.system(.caption, design: .monospaced))

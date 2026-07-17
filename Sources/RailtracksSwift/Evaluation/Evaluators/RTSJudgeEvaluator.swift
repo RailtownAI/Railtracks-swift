@@ -123,14 +123,17 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
 
     // MARK: - Run
 
-    public func run(_ data: [RTSAgentDataPoint]) async throws -> RTSEvaluatorOutput {
+    public func run(
+        _ data: [RTSAgentDataPoint],
+        context: RTSEvaluatorRunContext?
+    ) async throws -> RTSEvaluatorOutput {
         let limiter: RTSConcurrencyLimiter
         if let injected = self.limiter {
             limiter = injected
         } else {
             limiter = await RTSConcurrencyLimiter.shared(for: provider.kind)
         }
-        let jobs = await invoke(data: data, limiter: limiter)
+        let jobs = await invoke(data: data, limiter: limiter, context: context)
 
         var jobsByMetric: [Int: [JudgeJob]] = [:]
         for job in jobs {
@@ -207,9 +210,11 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
     /// the evaluation.
     private func invoke(
         data: [RTSAgentDataPoint],
-        limiter: RTSConcurrencyLimiter
+        limiter: RTSConcurrencyLimiter,
+        context: RTSEvaluatorRunContext?
     ) async -> [JudgeJob] {
         let judgeCall = self.judgeCall
+        let agentName = data.first?.agentName
         return await withTaskGroup(of: JudgeJob.self, returning: [JudgeJob].self) { group in
             for (metricIndex, metric) in metrics.enumerated() {
                 let system = generateSystemPrompt(for: metric)
@@ -238,9 +243,24 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
                     }
                 }
             }
+            // This consumer loop runs sequentially on the parent task, so the progress bookkeeping
+            // needs no locking. Tick once per distinct data point (its first metric to complete), so a
+            // multi-metric judge still contributes exactly `data.count` ticks. A failed call is a
+            // non-blocking `.failed` notice — the data point is still ticked (so the bar never stalls).
             var collected: [JudgeJob] = []
+            var tickedDatapoints = Set<String>()
             for await job in group {
                 collected.append(job)
+                if tickedDatapoints.insert(job.dataId).inserted {
+                    context?.reportProgress()
+                }
+                if job.response == nil {
+                    context?.emit(.evaluationFailed(
+                        evaluator: name,
+                        agent: agentName,
+                        message: "judge call failed for datapoint \(job.dataId)"
+                    ))
+                }
             }
             return collected
         }

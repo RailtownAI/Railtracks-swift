@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Combine
 import RailtracksSwift
 import Logging
 
@@ -28,7 +29,11 @@ class EvaluationViewModel {
     var saveJudgeTraces = false
     var hasOpenAIKey = false
     var isRunning = false
+    var progress = ""
+    var failureCount = 0
     var summary = ""
+
+    private var progressCancellable: AnyCancellable?
 
     /// Display-only map: flow title → the ContentView demo button it came from. Lets a demo that emits
     /// more than one flow (e.g. "Math Error" + "Throwing Workflow") show where each trace originated.
@@ -158,41 +163,59 @@ class EvaluationViewModel {
 
         isRunning = true
         summary = "Evaluating…"
+        progress = ""
+        failureCount = 0
+
+        // The manager ingests + evaluates and owns the (serialized, throttled) progress feed. Subscribe
+        // on main so UI updates are safe. Evaluation name is left nil so the visualizer titles rows by
+        // agent name (its documented fallback `evaluation_name ?? agents[0].agent_name`).
+        let manager = RTSEvaluationManager()
+        progressCancellable = manager.progressPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.applyProgress(event)
+            }
+
         Task { [weak self] in
             defer { self?.isRunning = false }
-            do {
-                let data = try RTSEvaluationIngest.agentDataPoints(fromFiles: selectedFiles)
-                guard !data.isEmpty else {
-                    self?.summary = "No agent data points found in the selected traces."
-                    return
-                }
-                // Leave the evaluation name nil so the visualizer titles each row by its agent name
-                // (its documented fallback: `evaluation_name ?? agents[0].agent_name`). A run-level
-                // name would be identical across every per-agent report and hide that distinction.
-                // Time only evaluate() (not ingestion) with a monotonic clock — the LLM fan-out that
-                // the concurrency cap affects lives here, so this is the number to compare across caps.
-                let started = DispatchTime.now()
-                let reports = await RTSEvaluation.evaluate(
-                    data: data,
-                    evaluators: evaluators,
-                    persist: true
-                )
-                let elapsed = Double(DispatchTime.now().uptimeNanoseconds
-                    - started.uptimeNanoseconds) / 1_000_000_000
-                self?.summarize(reports: reports, dataCount: data.count, elapsed: elapsed)
-            } catch {
-                self?.summary = "Evaluation failed: \(error)"
-                Log.debug("evaluation failed: \(error)")
-            }
+            let started = DispatchTime.now()
+            let reports = await manager.run(fromFiles: selectedFiles, evaluators: evaluators)
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds
+                - started.uptimeNanoseconds) / 1_000_000_000
+            self?.summarize(reports: reports, elapsed: elapsed)
         }
     }
 
-    private func summarize(reports: [RTSEvaluationReport], dataCount: Int, elapsed: TimeInterval) {
+    /// Reflect a live progress/failure event into the UI. Already delivered on main (see `.receive(on:)`).
+    private func applyProgress(_ event: RTSEvaluationEvent) {
+        switch event {
+        case .ingesting(let filesCompleted, let totalFiles, let runsProcessed):
+            progress = "Ingesting \(filesCompleted)/\(totalFiles) files · \(runsProcessed) runs"
+        case .evaluating(let completed, let total):
+            progress = "Evaluating \(completed)/\(total)"
+        case .ingestFailed(let file, let message):
+            failureCount += 1
+            Log.debug("⚠️ ingest failure #\(failureCount) [\(file)]: \(message)")
+        case .evaluationFailed(let evaluator, let agent, let message):
+            failureCount += 1
+            Log.debug("⚠️ eval failure #\(failureCount) [\(evaluator)/\(agent ?? "?")]: \(message)")
+        case .finished(let reportCount):
+            progress = "Finished · \(reportCount) report(s)"
+        }
+    }
+
+    private func summarize(reports: [RTSEvaluationReport], elapsed: TimeInterval) {
+        let dataCount = reports.reduce(0) { sum, report in
+            sum + report.agents.reduce(0) { $0 + $1.agentNodeIds.count }
+        }
         var lines: [String] = []
         lines.append(String(
             format: "Evaluated %d data point(s) → %d report(s) in %.2fs.",
             dataCount, reports.count, elapsed
         ))
+        if failureCount > 0 {
+            lines.append("⚠️ \(failureCount) non-blocking failure(s) — see logs")
+        }
         lines.append("Output: \(RailtracksSwift.evaluationOutputDirectory.path)")
         for report in reports {
             let agentName = report.agents.first?.agentName ?? "unknown agent"

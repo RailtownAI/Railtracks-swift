@@ -37,12 +37,16 @@ public struct RTSLLMInferenceEvaluator: RTSEvaluator {
 
     public init() {}
 
-    public func run(_ data: [RTSAgentDataPoint]) async throws -> RTSEvaluatorOutput {
+    public func run(
+        _ data: [RTSAgentDataPoint],
+        context: RTSEvaluatorRunContext?
+    ) async throws -> RTSEvaluatorOutput {
         var builder = RTSForestBuilder()
         var metricResults: [RTSMetricResult] = []
         var leavesByMetric: [String: [RTSLLMMetricResult]] = [:]
 
         for datapoint in data {
+            defer { context?.reportProgress() }   // one tick per data point finished
             let agentDataId = datapoint.id.uuidString
             for call in datapoint.llmCalls {
                 let entries: [(metric: RTSNumericalMetric, value: RTSValue)] = [

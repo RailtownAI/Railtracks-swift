@@ -8,6 +8,10 @@ import Foundation
 /// Stage 2 of evaluation: run evaluators over already-ingested agent data points and produce one
 /// report per agent. Data points are grouped by agent name; each agent is evaluated concurrently
 /// (Level-A parallelism). Reports are written to `RailtracksSwift.evaluationOutputDirectory`.
+///
+/// Progress/failure events are emitted via the optional `onEvent` sink on `evaluate` (and
+/// `RTSEvaluationIngest`); `RTSEvaluationManager` bundles ingest + evaluate behind one serialized,
+/// throttled `progressPublisher`.
 public enum RTSEvaluation {
 
     /// Evaluate `data` with `evaluators`, producing one `RTSEvaluationReport` per agent.
@@ -23,13 +27,17 @@ public enum RTSEvaluation {
     ///     "first-created wins" caveat: it only affects limiters not already created this process, so
     ///     set it on (or before) the first `evaluate()`. When nil, the built-in defaults are used.
     ///   - persist: when true (default), each report is written to `evaluationOutputDirectory`.
+    ///   - onEvent: optional progress/failure sink. Emits `.evaluating(completed, total)` as evaluators
+    ///     finish data points and `.failed(...)` for non-blocking failures. Emitted from concurrent
+    ///     tasks and unthrottled — bridge through `RTSEvaluationManager` for a serialized/throttled feed.
     public static func evaluate(
         data: [RTSAgentDataPoint],
         evaluators: [any RTSEvaluator],
         agents: [String]? = nil,
         name: String? = nil,
         limits: RTSConcurrencyLimits? = nil,
-        persist: Bool = true
+        persist: Bool = true,
+        onEvent: (@Sendable (RTSEvaluationEvent) -> Void)? = nil
     ) async -> [RTSEvaluationReport] {
         if let limits {
             await RTSConcurrencyLimiter.configure(limits)
@@ -45,6 +53,19 @@ public enum RTSEvaluation {
             selected = agents.filter { pointsByAgent[$0] != nil }
         } else {
             selected = Array(pointsByAgent.keys)
+        }
+
+        // Progress: total = (data points across selected agents) × evaluator count. Every evaluator
+        // ticks once per data point it finishes (success or failure), so `completed` reaches `total`.
+        // The counter is shared across concurrent per-agent tasks, so it's lock-guarded.
+        let selectedPointCount = selected.reduce(0) { $0 + (pointsByAgent[$1]?.count ?? 0) }
+        let progressTotal = selectedPointCount * evaluators.count
+        let counter = ProgressCounter()
+        let context: RTSEvaluatorRunContext? = onEvent.map { emit in
+            RTSEvaluatorRunContext(
+                reportProgress: { emit(.evaluating(completed: counter.increment(), total: progressTotal)) },
+                emit: { emit($0) }
+            )
         }
 
         // Create the output directory once up front; a failure here disables persistence for the
@@ -65,7 +86,8 @@ public enum RTSEvaluation {
                         agentName: agentName,
                         points: points,
                         evaluators: evaluators,
-                        name: name
+                        name: name,
+                        context: context
                     )
                     if shouldPersist {
                         persistOne(report)
@@ -89,7 +111,8 @@ public enum RTSEvaluation {
         agentName: String,
         points: [RTSAgentDataPoint],
         evaluators: [any RTSEvaluator],
-        name: String?
+        name: String?,
+        context: RTSEvaluatorRunContext?
     ) async -> RTSEvaluationReport {
         let createdAt = RTSISODate(Date())
 
@@ -97,14 +120,15 @@ public enum RTSEvaluation {
         var metricsMap: [String: RTSMetric] = [:]
         for evaluator in evaluators {
             do {
-                let output = try await evaluator.run(points)
+                let output = try await evaluator.run(points, context: context)
                 evaluatorResults.append(output.result)
                 for metric in output.metrics {
                     metricsMap[metric.identifier] = metric
                 }
             } catch {
-                // A failing evaluator is logged and skipped; evaluation continues.
+                // A failing evaluator is logged and surfaced as a non-blocking event; evaluation continues.
                 log.error("🧪 evaluator \(evaluator.name) failed for agent \(agentName): \(error)")
+                context?.emit(.evaluationFailed(evaluator: evaluator.name, agent: agentName, message: "\(error)"))
             }
         }
 
@@ -157,5 +181,18 @@ public enum RTSEvaluation {
         } catch {
             log.error("🧪 could not write evaluation report \(report.evaluationId): \(error)")
         }
+    }
+}
+
+/// Thread-safe monotonic counter for evaluation progress (evaluators tick from concurrent tasks).
+private final class ProgressCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func increment() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value
     }
 }

@@ -51,7 +51,10 @@ public struct RTSToolUseEvaluator: RTSEvaluator {
         let toolName: String
     }
 
-    public func run(_ data: [RTSAgentDataPoint]) async throws -> RTSEvaluatorOutput {
+    public func run(
+        _ data: [RTSAgentDataPoint],
+        context: RTSEvaluatorRunContext?
+    ) async throws -> RTSEvaluatorOutput {
         var builder = RTSForestBuilder()
         var metricResults: [RTSMetricResult] = []
         var runtimeLeaves: [RTSToolMetricResult] = []
@@ -63,6 +66,7 @@ public struct RTSToolUseEvaluator: RTSEvaluator {
 
         // Phase 1 — per-call leaves.
         for datapoint in data {
+            defer { context?.reportProgress() }   // one tick per data point finished
             let agentDataId = datapoint.id.uuidString
             for tool in datapoint.toolCalls {
                 let key = ToolKey(agentDataId: agentDataId, toolName: tool.name)

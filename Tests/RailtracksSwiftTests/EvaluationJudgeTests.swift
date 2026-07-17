@@ -8,6 +8,7 @@
 
 import Testing
 import Foundation
+import Combine
 @testable import RailtracksSwift
 
 /// A stub `RTSJudgeCall` source: pops canned responses in call order (cycling if exhausted). Order is
@@ -39,6 +40,24 @@ private actor ConcurrencyTracker {
 
     func exit() {
         current -= 1
+    }
+}
+
+/// Thread-safe collector for progress events emitted from concurrent tasks.
+private final class EventCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [RTSEvaluationEvent] = []
+
+    func add(_ event: RTSEvaluationEvent) {
+        lock.lock()
+        events.append(event)
+        lock.unlock()
+    }
+
+    func snapshot() -> [RTSEvaluationEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
     }
 }
 
@@ -233,5 +252,77 @@ struct EvaluationJudgeTests {
             42
         }
         #expect(value == 42)
+    }
+
+    // MARK: - Progress reporting
+
+    private func evaluatingEvents(_ events: [RTSEvaluationEvent]) -> [(completed: Int, total: Int)] {
+        events.compactMap { event in
+            guard case .evaluating(let completed, let total) = event else { return nil }
+            return (completed, total)
+        }
+    }
+
+    @Test("progress: evaluating total = datapoints × evaluators, and completed reaches it")
+    func progressReachesTotal() async throws {
+        let metric = RTSCategoricalMetric(name: "Helpfulness", categories: ["good", "bad"])
+        let stub = StubJudge([RTSJudgeResponse(metricValue: "good", reasoning: nil)])
+        let judgeEvaluator = judge(metrics: [metric], reasoning: false, stub: stub)
+        let data = [dataPoint(agent: "A"), dataPoint(agent: "A"), dataPoint(agent: "A")]
+
+        let collector = EventCollector()
+        _ = await RTSEvaluation.evaluate(
+            data: data,
+            evaluators: [judgeEvaluator],   // 1 evaluator × 3 datapoints
+            persist: false,
+            onEvent: { collector.add($0) }
+        )
+
+        let progress = evaluatingEvents(collector.snapshot())
+        #expect(!progress.isEmpty)
+        #expect(progress.allSatisfy { $0.total == 3 })       // 3 datapoints × 1 evaluator
+        #expect(progress.map(\.completed).max() == 3)        // completed reaches total
+    }
+
+    @Test("progress: failed judge calls emit .failed but still tick completion")
+    func progressFailuresStillComplete() async throws {
+        let metric = RTSCategoricalMetric(name: "Helpfulness", categories: ["good", "bad"])
+        let throwingJudge = RTSJudgeEvaluator(
+            provider: .appleAI,
+            metrics: [metric],
+            includesReasoning: false,
+            limiter: RTSConcurrencyLimiter(limit: nil),
+            judgeCall: { _, _ in throw RTSError.decodingFailed("boom") }
+        )
+        let data = [dataPoint(agent: "A"), dataPoint(agent: "A")]
+
+        let collector = EventCollector()
+        _ = await RTSEvaluation.evaluate(
+            data: data,
+            evaluators: [throwingJudge],
+            persist: false,
+            onEvent: { collector.add($0) }
+        )
+
+        let events = collector.snapshot()
+        let failures = events.filter { if case .evaluationFailed = $0 { return true } else { return false } }
+        #expect(!failures.isEmpty)                                   // failures surfaced
+        #expect(evaluatingEvents(events).map(\.completed).max() == 2)  // bar still reaches total
+    }
+
+    @Test("manager: run() over no files emits .finished(0)")
+    func managerEmitsFinished() async throws {
+        let manager = RTSEvaluationManager()
+        let collector = EventCollector()
+        let cancellable = manager.progressPublisher.sink { collector.add($0) }
+        defer { cancellable.cancel() }
+
+        _ = await manager.run(fromFiles: [], evaluators: [])
+
+        let finished = collector.snapshot().contains {
+            if case .finished(let count) = $0 { return count == 0 }
+            return false
+        }
+        #expect(finished)
     }
 }

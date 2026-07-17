@@ -14,7 +14,20 @@ public protocol RTSEvaluator: Sendable {
     /// Deterministic identity hash of the evaluator's config, used as `evaluator_id`.
     var identifier: String { get }
 
-    func run(_ data: [RTSAgentDataPoint]) async throws -> RTSEvaluatorOutput
+    /// Evaluate `data`. `context` (when provided) lets the evaluator report per-data-point progress
+    /// and non-blocking failures; pass nil when progress isn't needed. Evaluators should call
+    /// `context?.reportProgress()` once per data point they finish (success or failure).
+    func run(
+        _ data: [RTSAgentDataPoint],
+        context: RTSEvaluatorRunContext?
+    ) async throws -> RTSEvaluatorOutput
+}
+
+public extension RTSEvaluator {
+    /// Convenience for callers that don't need progress reporting.
+    func run(_ data: [RTSAgentDataPoint]) async throws -> RTSEvaluatorOutput {
+        try await run(data, context: nil)
+    }
 }
 
 /// An evaluator's output: the serialized report piece plus the metric definitions it used.

@@ -11,22 +11,50 @@ import Foundation
 /// incoming edge). Mirrors Python's `extract_agent_data_points`; decoupled from evaluation.
 public enum RTSEvaluationIngest {
 
-    /// Decode and ingest a specific list of trace files.
+    /// Decode and ingest a specific list of trace files. **Fail-soft:** a file that can't be read or
+    /// decoded is skipped (emitting `.failed`) rather than aborting the whole ingest, so one corrupt
+    /// trace can't sink a large batch. Emits `.ingesting` after each file — a skipped file still counts
+    /// toward `filesCompleted` (so the bar reaches the total) but adds nothing to `runsProcessed`.
+    ///
+    /// TODO (follow-up — ingestion parallelism): files are decoded serially. Per-file decode is
+    /// independent, so a `TaskGroup` could parallelize it. It won't overlap ingestion with evaluation
+    /// (per-agent aggregation needs the complete set) — only speeds up the decode.
     public static func agentDataPoints(
-        fromFiles urls: [URL]
-    ) throws -> [RTSAgentDataPoint] {
+        fromFiles urls: [URL],
+        onEvent: (@Sendable (RTSEvaluationEvent) -> Void)? = nil
+    ) -> [RTSAgentDataPoint] {
         let decoder = JSONDecoder()
-        return try urls.flatMap { file -> [RTSAgentDataPoint] in
-            let graph = try decoder.decode(RTSFlowGraph.self, from: Data(contentsOf: file))
-            return agentDataPoints(from: graph)
+        var dataPoints: [RTSAgentDataPoint] = []
+        var runsProcessed = 0
+        for (index, file) in urls.enumerated() {
+            do {
+                let graph = try decoder.decode(RTSFlowGraph.self, from: Data(contentsOf: file))
+                let points = agentDataPoints(from: graph)
+                dataPoints.append(contentsOf: points)
+                runsProcessed += graph.runs.count
+            } catch {
+                log.error("🧪 could not decode trace \(file.lastPathComponent): \(error)")
+                onEvent?(.ingestFailed(
+                    file: file.lastPathComponent,
+                    message: "could not decode: \(error)"
+                ))
+            }
+            onEvent?(.ingesting(
+                filesCompleted: index + 1,
+                totalFiles: urls.count,
+                runsProcessed: runsProcessed
+            ))
         }
+        return dataPoints
     }
 
     /// Decode and ingest every `.json` trace in a directory, optionally restricted to files
-    /// whose name starts with `prefix` (dotfiles are always skipped).
+    /// whose name starts with `prefix` (dotfiles are always skipped). Per-file decode is fail-soft
+    /// (see `agentDataPoints(fromFiles:onEvent:)`); only directory listing can throw.
     public static func agentDataPoints(
         inDirectory directory: URL,
-        matchingPrefix prefix: String? = nil
+        matchingPrefix prefix: String? = nil,
+        onEvent: (@Sendable (RTSEvaluationEvent) -> Void)? = nil
     ) throws -> [RTSAgentDataPoint] {
         let files = try FileManager.default
             .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -36,7 +64,7 @@ public enum RTSEvaluationIngest {
                 if let prefix { return name.hasPrefix(prefix) }
                 return true
             }
-        return try agentDataPoints(fromFiles: files)
+        return agentDataPoints(fromFiles: files, onEvent: onEvent)
     }
 
     /// Ingest an already-decoded trace.
