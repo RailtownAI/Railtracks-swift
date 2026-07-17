@@ -17,13 +17,10 @@ extension RTSFlowGraph {
         startTime: TimeInterval,
         endTime: TimeInterval
     ) async -> RTSFlowGraph {
-        // NOTE (duplicate node ids): a node's id is stable per node *instance*, not per invocation, so a
-        // tool called N times emits N create + N finish events sharing one id, and the `nodes` array
-        // below ends up with N records sharing that id. This is a **shared trace-format characteristic**
-        // — the Python engine produces the same duplicate ids (confirmed), so it is not a Swift bug and
-        // matches the JSON contract. Consumers dedupe (ingestion uses last-wins). Latency no longer
-        // depends on this pairing (measured at the source now). Making ids per-invocation would diverge
-        // from Python and is a cross-team format change — see docs/duplicate-node-id.md.
+        // Node identity is per *invocation* (RTSNodeInvoker mints a fresh id per invokeCore call), so a
+        // tool called N times produces N distinct create + N distinct finish events. Each create pairs
+        // 1:1 with its finish below, and the `nodes` array gets N distinct records — matching Python.
+        // The node *instance* id (`node.id`) is not used for tracing identity.
         let createsByNodeID: [UUID: RTSNodeEvent] = nodeEvents
             .filter { $0.runID == nil }
             .reduce(into: [:]) { $0[$1.id] = $1 }
@@ -75,8 +72,8 @@ extension RTSFlowGraph {
     private static func makeNode(finish: RTSNodeEvent, create: RTSNodeEvent?) async -> RTSFlowGraphNode {
         let nodeType = (create ?? finish).nodeType
         // Latency is measured at the source (RTSNodeInvoker) and carried on the finish event, rather
-        // than reconstructed as `finish.stamp − create.stamp` — the latter mispairs (and can go
-        // negative) when a node id repeats across invocations. See the duplicate-node-id TODO above.
+        // than reconstructed as `finish.stamp − create.stamp` — measuring at the source is exact and
+        // avoids any stamp-pairing ambiguity.
         let latency = finish.runtime.map { RTSFlowGraphLatency(totalTime: $0) }
         let parent: RTSFlowGraphNodeCreation? = create.map {
             RTSFlowGraphNodeCreation(

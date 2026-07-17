@@ -7,6 +7,7 @@
 
 import Testing
 import Foundation
+import Combine
 @testable import RailtracksSwift
 
 private func str(_ v: RTSValue?) -> String? {
@@ -55,12 +56,7 @@ struct FunctionNodeTests {
     func failedRunWritesTrace() async throws {
         struct StubError: Error {}
 
-        // Dedicated output dir so we only see this run's file (other tests write to temp root).
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rts-fail-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        RailtracksSwift.flowGraphOutputDirectory = dir
+        RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
 
         let root = StubOrchestrator(nodeName: "Boom") { _, _ in
             throw StubError()
@@ -77,11 +73,17 @@ struct FunctionNodeTests {
         // The error still propagates to the caller...
         #expect(thrown is StubError)
 
-        // ...and the trace was written before `run` returned.
-        let jsonFiles = try FileManager.default
-            .contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
-        #expect(!jsonFiles.isEmpty, "a failed run must still write its JSON trace")
+        // ...and the trace was written before `run` returned. Verify via the flow's own published URL
+        // rather than scanning the shared output dir (other suites' flows mutate it concurrently).
+        var writtenURL: URL?
+        for await result in flow.outputFileURLPublisher.values {
+            if case .success(let url) = result {
+                writtenURL = url
+            }
+            break
+        }
+        let url = try #require(writtenURL, "a failed run must still write its JSON trace")
+        #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
     /// A function node calling another function node composes, with output propagating.
