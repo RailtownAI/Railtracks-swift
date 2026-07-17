@@ -39,7 +39,7 @@ public final class RTSEvaluationManager: @unchecked Sendable {
         let emit: @Sendable (RTSEvaluationEvent) -> Void = { [weak self] event in
             self?.send(event)
         }
-        let data = RTSEvaluationIngest.agentDataPoints(fromFiles: files, onEvent: emit)
+        let data = await RTSEvaluationIngest.agentDataPoints(fromFiles: files, onEvent: emit)
         let reports = await RTSEvaluation.evaluate(
             data: data,
             evaluators: evaluators,

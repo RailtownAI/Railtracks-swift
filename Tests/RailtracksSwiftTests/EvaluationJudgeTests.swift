@@ -310,6 +310,35 @@ struct EvaluationJudgeTests {
         #expect(evaluatingEvents(events).map(\.completed).max() == 2)  // bar still reaches total
     }
 
+    @Test("ingest: concurrent + fail-soft — bad files skipped, each counted, .ingestFailed emitted")
+    func ingestFailSoft() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rts-ingest-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var urls: [URL] = []
+        for index in 0..<3 {
+            let url = dir.appendingPathComponent("bad\(index).json")
+            try "not valid json".write(to: url, atomically: true, encoding: .utf8)
+            urls.append(url)
+        }
+
+        let collector = EventCollector()
+        let data = await RTSEvaluationIngest.agentDataPoints(fromFiles: urls, onEvent: { collector.add($0) })
+
+        #expect(data.isEmpty)   // all three failed to decode
+        let events = collector.snapshot()
+        let failed = events.filter { if case .ingestFailed = $0 { return true } else { return false } }
+        #expect(failed.count == 3)
+        let ingesting = events.compactMap { event -> (Int, Int) in
+            if case .ingesting(let completed, let total, _) = event { return (completed, total) }
+            return (-1, -1)
+        }.filter { $0.0 >= 0 }
+        #expect(ingesting.map(\.0).max() == 3)          // every file counted (bar reaches total)
+        #expect(ingesting.allSatisfy { $0.1 == 3 })     // totalFiles == 3
+    }
+
     @Test("manager: run() over no files emits .finished(0)")
     func managerEmitsFinished() async throws {
         let manager = RTSEvaluationManager()
