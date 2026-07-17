@@ -5,12 +5,12 @@
 
 import Foundation
 
-/// A progress/status event emitted during ingestion and evaluation. Non-blocking: `.failed` is a
-/// notification, not a stop signal (evaluation is fail-soft). Consumers receive these off the
+/// A progress/status event emitted during ingestion and evaluation. Non-blocking: the `*Failed` cases
+/// are notifications, not stop signals (evaluation is fail-soft). Consumers receive these off the
 /// producer's thread — hop to your own queue (`.receive(on:)`) before touching UI.
 public enum RTSEvaluationEvent: Sendable {
     /// Ingestion progress. A file that fails to decode still counts toward `filesCompleted` (so the bar
-    /// reaches `totalFiles`) but contributes nothing to `runsProcessed`; a `.failed` is emitted for it.
+    /// reaches `totalFiles`) but contributes nothing to `runsProcessed`; an `.ingestFailed` is emitted for it.
     case ingesting(filesCompleted: Int, totalFiles: Int, runsProcessed: Int)
     /// Evaluation progress. `total` = data-point count × evaluator count; `completed` counts each
     /// evaluator finishing a data point (success *or* failure), so the bar always reaches `total`.
@@ -26,7 +26,7 @@ public enum RTSEvaluationEvent: Sendable {
 
 /// Passed to `RTSEvaluator.run` so an evaluator can report per-data-point progress and non-blocking
 /// failures. `reportProgress` is called once per data point the evaluator finishes; `emit` surfaces
-/// events (e.g. `.failed`). Both are safe to call from concurrent tasks.
+/// events (e.g. `.evaluationFailed`). Both are safe to call from concurrent tasks.
 public struct RTSEvaluatorRunContext: Sendable {
     public let reportProgress: @Sendable () -> Void
     public let emit: @Sendable (RTSEvaluationEvent) -> Void

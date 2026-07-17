@@ -11,9 +11,9 @@ import Combine
 /// `RTSEvaluationIngest` / `RTSEvaluation.evaluate` APIs — use those directly if you don't want progress.
 ///
 /// Events are serialized (a lock) and selectively throttled: `.ingesting`/`.evaluating` coalesce to at
-/// most one per 0.1s so the UI isn't flooded, while `.failed` and `.finished` pass through immediately
-/// (failures are never dropped; completion always arrives). Events are delivered off the producer's
-/// thread — `.receive(on:)` before touching UI.
+/// most one per 0.1s so the UI isn't flooded, while the `*Failed` cases and `.finished` pass through
+/// immediately (failures are never dropped; completion always arrives). Events are delivered off the
+/// producer's thread — `.receive(on:)` before touching UI.
 public final class RTSEvaluationManager: @unchecked Sendable {
     private let subject = PassthroughSubject<RTSEvaluationEvent, Never>()
     private let lock = NSLock()
@@ -54,8 +54,8 @@ public final class RTSEvaluationManager: @unchecked Sendable {
     }
 
     /// Serialized, selectively-throttled publish. Progress events coalesce to ≤1 per interval (dropping
-    /// intermediate values is fine — progress is monotonic, and `.finished` always follows); `.failed`
-    /// and `.finished` are never throttled.
+    /// intermediate values is fine — progress is monotonic, and `.finished` always follows); the
+    /// `*Failed` cases and `.finished` are never throttled.
     private func send(_ event: RTSEvaluationEvent) {
         lock.lock()
         defer { lock.unlock() }

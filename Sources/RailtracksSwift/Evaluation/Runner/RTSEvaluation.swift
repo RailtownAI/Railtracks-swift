@@ -28,8 +28,9 @@ public enum RTSEvaluation {
     ///     set it on (or before) the first `evaluate()`. When nil, the built-in defaults are used.
     ///   - persist: when true (default), each report is written to `evaluationOutputDirectory`.
     ///   - onEvent: optional progress/failure sink. Emits `.evaluating(completed, total)` as evaluators
-    ///     finish data points and `.failed(...)` for non-blocking failures. Emitted from concurrent
-    ///     tasks and unthrottled — bridge through `RTSEvaluationManager` for a serialized/throttled feed.
+    ///     finish data points and `.evaluationFailed(...)` for non-blocking failures. Emitted from
+    ///     concurrent tasks and unthrottled — bridge through `RTSEvaluationManager` for a
+    ///     serialized/throttled feed.
     public static func evaluate(
         data: [RTSAgentDataPoint],
         evaluators: [any RTSEvaluator],
