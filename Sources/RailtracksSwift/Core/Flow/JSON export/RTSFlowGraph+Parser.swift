@@ -17,10 +17,8 @@ extension RTSFlowGraph {
         startTime: TimeInterval,
         endTime: TimeInterval
     ) async -> RTSFlowGraph {
-        // Node identity is per *invocation* (RTSNodeInvoker mints a fresh id per invokeCore call), so a
-        // tool called N times produces N distinct create + N distinct finish events. Each create pairs
-        // 1:1 with its finish below, and the `nodes` array gets N distinct records — matching Python.
-        // The node *instance* id (`node.id`) is not used for tracing identity.
+        // Node ids are per-invocation (see RTSNodeInvoker), so each create pairs 1:1 with its finish
+        // and a node invoked N times yields N distinct records.
         let createsByNodeID: [UUID: RTSNodeEvent] = nodeEvents
             .filter { $0.runID == nil }
             .reduce(into: [:]) { $0[$1.id] = $1 }

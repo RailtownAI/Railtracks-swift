@@ -80,8 +80,7 @@ actor RTSFlowGraphCollector {
         (self.completionStream, self.streamContinuation) = AsyncStream<Void>.makeStream()
         (self.eventStream, self.eventContinuation) = AsyncStream<IncomingEvent>.makeStream()
 
-        // Each sink yields synchronously into the single ordered stream; the consumer started in
-        // `setup()` drains it in publish order. Sinks capture only the continuation (Sendable), not self.
+        // Sinks capture only the continuation (Sendable), not self, and yield into `eventStream`.
         log.debug("🎁 setup node event collectors")
         nodeEventPublisher.nodeCreateEventPublisher
             .sink { [eventContinuation] nodeEvent in
@@ -131,9 +130,8 @@ actor RTSFlowGraphCollector {
         }
     }
 
-    /// Drains the merged event stream in FIFO (publish) order, dispatching each event to its handler.
-    /// One loop means at most one event is processed at a time, in order — restoring the ordering the
-    /// earlier task-per-event delivery discarded. Exits when `finishCollection` finishes the stream.
+    /// Drains the merged event stream in FIFO (publish) order, one event at a time. Exits when
+    /// `finishCollection` finishes the stream.
     private func consumeEvents() async {
         for await event in eventStream {
             switch event {
@@ -197,8 +195,7 @@ actor RTSFlowGraphCollector {
             emitNodePointEvents(nodeEvent)
             nodeInProcessCounter -= 1
 
-            // Finalize on the root node's finish. Safe because events are consumed in publish order,
-            // so the root's finish (published last) is processed after every descendant's events.
+            // Finalize on the root node's finish.
             if nodeEvent.id == rootNodeID {
                 switch collectionState {
                 case .collecting:
@@ -226,8 +223,7 @@ actor RTSFlowGraphCollector {
             emitEdgePointEvents(edgeEvent)
             edgeInProcessCounter -= 1
 
-            // Finalize on the root edge's finish (source == nil). Safe under ordered consumption:
-            // the root edge's finish is published last, so it is processed after all others.
+            // Finalize on the root edge's finish (source == nil).
             guard edgeEvent.sourceNodeID == nil else { break }
             switch collectionState {
             case .collecting:
@@ -280,9 +276,7 @@ actor RTSFlowGraphCollector {
     }
 
     private func finishCollection() async {
-        // Self-check: with ordered consumption, every create has been matched by its finish before the
-        // root's completion, so both counters must be zero here. A non-zero value means ordering was
-        // violated and the trace may be missing node(s)/edge(s).
+        // Self-check: ordered consumption should leave both counters at zero; warn if not.
         if nodeInProcessCounter != 0 || edgeInProcessCounter != 0 {
             log.warning("⚠️🎁 finalizing with unbalanced in-process counters (node: \(nodeInProcessCounter), edge: \(edgeInProcessCounter)) — event ordering may have been violated and the trace may be incomplete")
         }
