@@ -6,8 +6,9 @@
 import Foundation
 
 /// The structured response the judge LLM returns for one (metric × datapoint) call. `metricValue`
-/// is the chosen category label (kept as a raw string — validated/bucketed at aggregation, matching
-/// Python's free-string `metric_value`). Keys are internal to the judge; never written to the report.
+/// is the chosen category label, received as a raw string (matching Python's free-string
+/// `metric_value`) and resolved to a declared category or `unknown` at leaf creation (see
+/// `resolvedCategory`). Keys are internal to the judge; never written to the report.
 /// The schema is hand-written rather than via `@RTSSchema` because that macro can't emit a `public`
 /// `rtsSchema`, and this type must be public so tests can inject a stub `RTSJudgeCall`.
 public struct RTSJudgeResponse: Codable, Sendable {
@@ -155,7 +156,7 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
                     resultName: "JudgeResult/\(metric.name)",
                     metricId: metric.identifier,
                     agentDataId: [job.dataId],
-                    value: .string(response.metricValue)
+                    value: .string(Self.resolvedCategory(response.metricValue, in: metric))
                 )
                 metricResults.append(.base(resultLeaf))
                 builder.add(.base(resultLeaf))
@@ -268,9 +269,19 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
 
     // MARK: - Aggregation
 
-    /// Build one `CategoricalAggregate` over a metric's verdict leaves. `counts` zero-initializes the
-    /// declared categories (matching Python) and folds any out-of-category label into an `"unknown"`
-    /// bucket (our lossless superset — Python silently drops them). most/least-common follow the counts.
+    /// The bucket for any judge verdict that isn't one of a metric's declared categories.
+    private static let unknownCategory = "unknown"
+
+    /// Resolve a raw judge label to a grouping category: a declared category maps to itself, anything
+    /// else folds to `unknown` (our lossless superset — Python silently drops out-of-category labels).
+    /// Applied at leaf creation, so `counts` and the aggregate's child leaves always agree.
+    private static func resolvedCategory(_ raw: String, in metric: RTSCategoricalMetric) -> String {
+        metric.categories.contains(raw) ? raw : unknownCategory
+    }
+
+    /// Build one `CategoricalAggregate` over a metric's verdict leaves. Leaves are already resolved to a
+    /// declared category or `unknown` (see `resolvedCategory`), so `counts` just tallies leaf values;
+    /// declared categories are zero-initialized (matching Python). most/least-common follow the counts.
     private func addCategoricalAggregate(
         metric: RTSCategoricalMetric,
         leaves: [RTSBaseMetricResult],
@@ -282,23 +293,23 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
         }
         var sawUnknown = false
         for leaf in leaves {
-            let rawLabel: String
+            let label: String
             if case .string(let text) = leaf.value {
-                rawLabel = text
+                label = text
             } else {
-                rawLabel = "unknown"
+                label = Self.unknownCategory
             }
-            if counts[rawLabel] != nil {
-                counts[rawLabel]! += 1
+            if counts[label] != nil {
+                counts[label]! += 1
             } else {
-                counts["unknown", default: 0] += 1
+                counts[Self.unknownCategory, default: 0] += 1
                 sawUnknown = true
             }
         }
 
         var orderedLabels = metric.categories
         if sawUnknown {
-            orderedLabels.append("unknown")
+            orderedLabels.append(Self.unknownCategory)
         }
 
         var mostCommonLabel: String?
