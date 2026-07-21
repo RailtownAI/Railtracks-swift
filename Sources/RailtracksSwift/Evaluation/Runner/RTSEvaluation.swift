@@ -14,13 +14,46 @@ import Foundation
 /// throttled `progressPublisher`.
 public enum RTSEvaluation {
 
-    /// Evaluate `data` with `evaluators`, producing one `RTSEvaluationReport` per agent.
+    /// Evaluate `data`, applying every evaluator to every agent (optionally filtered to `agents`),
+    /// producing one `RTSEvaluationReport` per agent. Convenience over `evaluate(data:assignments:)`
+    /// for the common all-on-all case.
     ///
     /// - Parameters:
     ///   - data: ingested agent data points (see `RTSEvaluationIngest`).
     ///   - evaluators: the evaluators to apply to every selected agent.
     ///   - agents: optional filter — only agents whose name is in this list are evaluated;
     ///     when nil, all agents present in `data` are evaluated.
+    ///   - name: optional human-readable evaluation name recorded on each report.
+    ///   - limits: optional per-provider concurrency caps for LLM-backed evaluators (the judge).
+    ///   - persist: when true (default), each report is written to `evaluationOutputDirectory`.
+    ///   - onEvent: optional progress/failure sink (see `evaluate(data:assignments:...)`).
+    public static func evaluate(
+        data: [RTSAgentDataPoint],
+        evaluators: [any RTSEvaluator],
+        agents: [String]? = nil,
+        name: String? = nil,
+        limits: RTSConcurrencyLimits? = nil,
+        persist: Bool = true,
+        onEvent: (@Sendable (RTSEvaluationEvent) -> Void)? = nil
+    ) async -> [RTSEvaluationReport] {
+        await evaluate(
+            data: data,
+            assignments: evaluators.map { RTSEvaluatorAssignment(evaluator: $0, agents: agents) },
+            name: name,
+            limits: limits,
+            persist: persist,
+            onEvent: onEvent
+        )
+    }
+
+    /// Evaluate `data` with per-evaluator agent targeting, producing one `RTSEvaluationReport` per
+    /// agent that has at least one evaluator. See docs/evaluator-agent-targeting.md and
+    /// `RTSEvaluatorAssignment` for the targeting semantics (by name; `nil` = all; union; dedup;
+    /// untargeted agents skipped).
+    ///
+    /// - Parameters:
+    ///   - data: ingested agent data points (see `RTSEvaluationIngest`).
+    ///   - assignments: which evaluator runs on which agents.
     ///   - name: optional human-readable evaluation name recorded on each report.
     ///   - limits: optional per-provider concurrency caps for LLM-backed evaluators (the judge).
     ///     When provided, applied via `RTSConcurrencyLimiter.configure(_:)` before the run. Note the
@@ -33,8 +66,7 @@ public enum RTSEvaluation {
     ///     serialized/throttled feed.
     public static func evaluate(
         data: [RTSAgentDataPoint],
-        evaluators: [any RTSEvaluator],
-        agents: [String]? = nil,
+        assignments: [RTSEvaluatorAssignment],
         name: String? = nil,
         limits: RTSConcurrencyLimits? = nil,
         persist: Bool = true,
@@ -48,19 +80,33 @@ public enum RTSEvaluation {
         for point in data {
             pointsByAgent[point.agentName, default: []].append(point)
         }
+        let present = Set(pointsByAgent.keys)
 
-        let selected: [String]
-        if let agents {
-            selected = agents.filter { pointsByAgent[$0] != nil }
-        } else {
-            selected = Array(pointsByAgent.keys)
+        // Resolve each agent's evaluator set: the union across all matching assignments (`agents == nil`
+        // → all present), deduplicated by evaluator identifier so one evaluator never runs twice on an
+        // agent. Insertion order is preserved for stable per-agent evaluator ordering.
+        var evaluatorsByAgent: [String: [any RTSEvaluator]] = [:]
+        var seenByAgent: [String: Set<String>] = [:]
+        for assignment in assignments {
+            let targets = assignment.agents.map { Set($0).intersection(present) } ?? present
+            for agentName in targets {
+                if seenByAgent[agentName, default: []].insert(assignment.evaluator.identifier).inserted {
+                    evaluatorsByAgent[agentName, default: []].append(assignment.evaluator)
+                }
+            }
         }
 
-        // Progress: total = (data points across selected agents) × evaluator count. Every evaluator
-        // ticks once per data point it finishes (success or failure), so `completed` reaches `total`.
-        // The counter is shared across concurrent per-agent tasks, so it's lock-guarded.
-        let selectedPointCount = selected.reduce(0) { $0 + (pointsByAgent[$1]?.count ?? 0) }
-        let progressTotal = selectedPointCount * evaluators.count
+        // Only agents with at least one evaluator get a report; the rest are skipped. Sorted for
+        // deterministic scheduling.
+        let selected = evaluatorsByAgent.keys.sorted()
+
+        // Progress: total = the exact number of (evaluator, data point) work units, summed per agent
+        // over its resolved (deduped) evaluator set. Every evaluator ticks once per data point it
+        // finishes (success or failure), so `completed` reaches `total`. The counter is shared across
+        // concurrent per-agent tasks, so it's lock-guarded.
+        let progressTotal = selected.reduce(0) { sum, agentName in
+            sum + (pointsByAgent[agentName]?.count ?? 0) * (evaluatorsByAgent[agentName]?.count ?? 0)
+        }
         let counter = ProgressCounter()
         let context: RTSEvaluatorRunContext? = onEvent.map { emit in
             RTSEvaluatorRunContext(
@@ -82,6 +128,7 @@ public enum RTSEvaluation {
         ) { group in
             for agentName in selected {
                 let points = pointsByAgent[agentName] ?? []
+                let evaluators = evaluatorsByAgent[agentName] ?? []
                 group.addTask {
                     let report = await buildReport(
                         agentName: agentName,
