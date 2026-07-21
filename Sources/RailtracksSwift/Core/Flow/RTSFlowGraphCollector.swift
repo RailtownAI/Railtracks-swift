@@ -16,6 +16,13 @@ actor RTSFlowGraphCollector {
         case finished
     }
 
+    /// A node or edge event, merged into one ordered stream so the collector can process them in
+    /// publish order (see `eventStream`).
+    private enum IncomingEvent: Sendable {
+        case node(RTSNodeEvent)
+        case edge(RTSEdgeEvent)
+    }
+
     let stampFactory: RTSStampFactory
     let signpostEmitter: (any RTSSignpostEmitting)?
     var sessionID: UUID
@@ -31,11 +38,27 @@ actor RTSFlowGraphCollector {
     internal var messageBuffer: [UUID: [RTSMessage]] = [:]
     internal var ioIndex: Int = 0
     private var collectionState: CollectionState = .collecting
-    
+
+    // Outstanding (created-but-not-finished) node and edge invocations: +1 on create, -1 on finish.
+    // Finalization is driven by the root's completion (see processNode/EdgeEvent), NOT these counters.
+    // But because events are now processed in publish order, both counters MUST be zero by the time we
+    // finalize. They are a self-check: a non-zero value at finalization means event ordering was
+    // violated and the trace may be incomplete, so `finishCollection` logs a warning. See
+    // docs/duplicate-node-id.md.
+    private var nodeInProcessCounter = 0
+    private var edgeInProcessCounter = 0
+
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never>
     private let savesTrace: Bool
     private let completionStream: AsyncStream<Void>
     private let streamContinuation: AsyncStream<Void>.Continuation
+
+    // All node/edge events funnel through this one ordered stream, drained by a single consumer
+    // (`consumeEvents`), so they are processed in publish order. `PassthroughSubject.send` delivers to
+    // its sink synchronously in send-order and each sink `yield`s synchronously — so yield-order ==
+    // send-order, and a FIFO consumer restores the ordering the earlier task-per-event dispatch lost.
+    private let eventStream: AsyncStream<IncomingEvent>
+    private let eventContinuation: AsyncStream<IncomingEvent>.Continuation
 
     nonisolated(unsafe) var cancellables: Set<AnyCancellable> = []
 
@@ -55,40 +78,30 @@ actor RTSFlowGraphCollector {
         self.savesTrace = savesTrace
         self.signpostEmitter = signpostEmitter
         (self.completionStream, self.streamContinuation) = AsyncStream<Void>.makeStream()
+        (self.eventStream, self.eventContinuation) = AsyncStream<IncomingEvent>.makeStream()
 
-        log.debug("🎁 setup create node event collector")
+        // Sinks capture only the continuation (Sendable), not self, and yield into `eventStream`.
+        log.debug("🎁 setup node event collectors")
         nodeEventPublisher.nodeCreateEventPublisher
-            .sink { nodeEvent in
-                Task { [weak self] in
-                    await self?.processNodeEvent(nodeEvent)
-                }
+            .sink { [eventContinuation] nodeEvent in
+                eventContinuation.yield(.node(nodeEvent))
             }
             .store(in: &cancellables)
-
-        log.debug("🎁 setup invoke node event collector")
         nodeEventPublisher.nodeInvokeEventPublisher
-            .sink { nodeEvent in
-                Task { [weak self] in
-                    await self?.processNodeEvent(nodeEvent)
-                }
+            .sink { [eventContinuation] nodeEvent in
+                eventContinuation.yield(.node(nodeEvent))
             }
             .store(in: &cancellables)
 
-        log.debug("🎁 setup create edge event collector")
+        log.debug("🎁 setup edge event collectors")
         nodeEventPublisher.edgeCreateEventPublisher
-            .sink { edgeEvent in
-                Task { [weak self] in
-                    await self?.processEdgeEvent(edgeEvent)
-                }
+            .sink { [eventContinuation] edgeEvent in
+                eventContinuation.yield(.edge(edgeEvent))
             }
             .store(in: &cancellables)
-
-        log.debug("🎁 setup finish edge event collector")
         nodeEventPublisher.edgeFinishEventPublisher
-            .sink { edgeEvent in
-                Task { [weak self] in
-                    await self?.processEdgeEvent(edgeEvent)
-                }
+            .sink { [eventContinuation] edgeEvent in
+                eventContinuation.yield(.edge(edgeEvent))
             }
             .store(in: &cancellables)
     }
@@ -110,6 +123,24 @@ actor RTSFlowGraphCollector {
 
     func setup() {
         startTime = Date()
+        // Single ordered consumer. Started here (not in init) so `self` is fully initialized; any
+        // events published before this point are buffered by the stream and drained in order.
+        Task { [weak self] in
+            await self?.consumeEvents()
+        }
+    }
+
+    /// Drains the merged event stream in FIFO (publish) order, one event at a time. Exits when
+    /// `finishCollection` finishes the stream.
+    private func consumeEvents() async {
+        for await event in eventStream {
+            switch event {
+            case .node(let nodeEvent):
+                await processNodeEvent(nodeEvent)
+            case .edge(let edgeEvent):
+                await processEdgeEvent(edgeEvent)
+            }
+        }
     }
 
     private func processMessages(_ messages: [RTSMessage]) async {
@@ -151,6 +182,10 @@ actor RTSFlowGraphCollector {
         switch nodeEvent.stamp.event {
         case .startCreate:
             rootNodeID = nodeEvent.id
+            nodeInProcessCounter += 1
+
+        case .create:
+            nodeInProcessCounter += 1
 
         case .finishExecution:
             // Messages are attached (buffer flushed above); emit point events now
@@ -158,7 +193,9 @@ actor RTSFlowGraphCollector {
             // synchronous — it snapshots state and hands async cost/emit to a detached
             // task, so the actor never suspends here.
             emitNodePointEvents(nodeEvent)
+            nodeInProcessCounter -= 1
 
+            // Finalize on the root node's finish.
             if nodeEvent.id == rootNodeID {
                 switch collectionState {
                 case .collecting:
@@ -170,9 +207,6 @@ actor RTSFlowGraphCollector {
                     log.debug("☠️🎁 should not be processing node event if collector state is finished")
                 }
             }
-
-        default:
-            break
         }
 
         if isCollectionFinished {
@@ -187,6 +221,9 @@ actor RTSFlowGraphCollector {
         switch edgeEvent.stamp.event {
         case .finishExecution:
             emitEdgePointEvents(edgeEvent)
+            edgeInProcessCounter -= 1
+
+            // Finalize on the root edge's finish (source == nil).
             guard edgeEvent.sourceNodeID == nil else { break }
             switch collectionState {
             case .collecting:
@@ -199,6 +236,7 @@ actor RTSFlowGraphCollector {
             }
 
         case .create, .startCreate:
+            edgeInProcessCounter += 1
             if edgeEvent.sourceNodeID == nil {
                 rootRunID = edgeEvent.runID ?? edgeEvent.id
             }
@@ -238,10 +276,15 @@ actor RTSFlowGraphCollector {
     }
 
     private func finishCollection() async {
+        // Self-check: ordered consumption should leave both counters at zero; warn if not.
+        if nodeInProcessCounter != 0 || edgeInProcessCounter != 0 {
+            log.warning("⚠️🎁 finalizing with unbalanced in-process counters (node: \(nodeInProcessCounter), edge: \(edgeInProcessCounter)) — event ordering may have been violated and the trace may be incomplete")
+        }
         endTime = Date()
         await generateJSONFile()
         cancellables.removeAll()
         streamContinuation.finish()
+        eventContinuation.finish()
     }
 
     private func generateJSONFile() async {

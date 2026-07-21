@@ -27,6 +27,12 @@ public class RTSNodeInvoker: @unchecked Sendable {
     let edgeCreateEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
     let edgeFinishEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
 
+    /// The invocation id of the node currently executing on this task. A child invocation reads it
+    /// as its parent (the edge `source`). It is bound around `execute` so it flows down the async
+    /// call tree — including Conduit's tool `TaskGroup` and Apple's `LanguageModelSession.respond`,
+    /// both verified to inherit task-locals. `nil` at the flow root. See docs/duplicate-node-id.md.
+    @TaskLocal static var currentInvocationID: UUID?
+
     init(
         stampFactory: RTSStampFactory,
         sessionID: UUID,
@@ -125,8 +131,21 @@ public class RTSNodeInvoker: @unchecked Sendable {
             event = .startCreate(node.name())
         }
         let creationStamp = await stampFactory.makeStamp(event: event)
+
+        // Per-invocation graph node id (matches Python): a node invoked N times yields N distinct
+        // ids. The node *instance* id (`node.id`) is no longer used for tracing identity.
+        let invocationID = UUID()
+        // The parent invocation's id, propagated down the task tree; nil at the flow root.
+        let parentInvocationID = RTSNodeInvoker.currentInvocationID
+        #if DEBUG
+        if createdBy != nil, parentInvocationID == nil {
+            log.error("🧵 invocation-id propagation lost for \(node.name()) — its edge will be orphaned; check for Task.detached on the invoke path")
+        }
+        #endif
+
         await publishNodeCreated(
             node,
+            nodeID: invocationID,
             nodeType: nodeType,
             provider: provider,
             model: model,
@@ -155,13 +174,15 @@ public class RTSNodeInvoker: @unchecked Sendable {
             runID: runID,
             nodeType: nodeType,
             stamp: creationStamp,
+            sourceNodeID: parentInvocationID,
+            targetNodeID: invocationID,
             from: createdBy,
             to: node,
             input: workingInput
         )
 
         signpostEmitter?.emitNodeStart(
-            nodeID: node.id,
+            nodeID: invocationID,
             nodeName: node.name(),
             nodeType: nodeType,
             sessionID: sessionID,
@@ -179,10 +200,14 @@ public class RTSNodeInvoker: @unchecked Sendable {
         if invokeError == nil {
             // Measure the node's actual execution with a monotonic clock, at the source — mirrors
             // Python's `tracked_invoke`. The parser reads this instead of subtracting create/finish
-            // stamps, so a repeated node id can't produce a mispaired (negative) latency.
+            // stamps, which is exact and avoids stamp-pairing ambiguity.
             let started = DispatchTime.now()
             do {
-                output = try await execute(runID, workingInput)
+                // Bind this node's invocation id for the dynamic extent of `execute`, so any child
+                // node invoked within it reads this as its parent (edge source) via the task-local.
+                output = try await RTSNodeInvoker.$currentInvocationID.withValue(invocationID) {
+                    try await execute(runID, workingInput)
+                }
             } catch {
                 invokeError = error
                 output = [:]
@@ -199,7 +224,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         }
 
         signpostEmitter?.emitNodeEnd(
-            nodeID: node.id,
+            nodeID: invocationID,
             nodeName: node.name(),
             nodeType: nodeType,
             sessionID: sessionID,
@@ -214,6 +239,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
             edgeID: edgeID,
             nodeType: nodeType,
             stamp: completionStamp,
+            sourceNodeID: parentInvocationID,
+            targetNodeID: invocationID,
             from: createdBy,
             to: node,
             input: workingInput,
@@ -222,6 +249,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         )
         await publishNodeFinished(
             node,
+            nodeID: invocationID,
             nodeType: nodeType,
             stamp: completionStamp,
             runID: runID,
@@ -240,6 +268,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishNodeCreated(
         _ node: some RTSNode,
+        nodeID: UUID,
         nodeType: RTSFlowNodeType,
         provider: String,
         model: String,
@@ -250,7 +279,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
     ) async {
         nodeCreateEventSubject.send(
             RTSNodeEvent(
-                nodeID: node.id,
+                nodeID: nodeID,
                 name: node.name(),
                 nodeType: nodeType,
                 stamp: stamp,
@@ -264,6 +293,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishNodeFinished(
         _ node: some RTSNode,
+        nodeID: UUID,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         runID: UUID,
@@ -277,7 +307,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
     ) async {
         nodeInvokeEventSubject.send(
             RTSNodeEvent(
-                nodeID: node.id,
+                nodeID: nodeID,
                 name: node.name(),
                 nodeType: nodeType,
                 stamp: stamp,
@@ -298,6 +328,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         runID: UUID,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
+        sourceNodeID: UUID?,
+        targetNodeID: UUID,
         from source: (any RTSNode)?,
         to target: some RTSNode,
         input: RTSInput
@@ -308,8 +340,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 runID: runID,
                 stamp: stamp,
                 nodeType: nodeType,
-                sourceNodeID: source?.id,
-                targetNodeID: target.id,
+                sourceNodeID: sourceNodeID,
+                targetNodeID: targetNodeID,
                 sourceName: source?.name(),
                 targetName: target.name(),
                 input: input
@@ -321,6 +353,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         edgeID: UUID,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
+        sourceNodeID: UUID?,
+        targetNodeID: UUID,
         from source: (any RTSNode)?,
         to target: some RTSNode,
         input: RTSInput,
@@ -333,8 +367,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 runID: nil,
                 stamp: stamp,
                 nodeType: nodeType,
-                sourceNodeID: source?.id,
-                targetNodeID: target.id,
+                sourceNodeID: sourceNodeID,
+                targetNodeID: targetNodeID,
                 sourceName: source?.name(),
                 targetName: target.name(),
                 input: input,
