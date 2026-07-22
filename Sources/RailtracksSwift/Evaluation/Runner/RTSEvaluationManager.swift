@@ -26,12 +26,32 @@ public final class RTSEvaluationManager: @unchecked Sendable {
         subject.eraseToAnyPublisher()
     }
 
-    /// Ingest `files`, then evaluate with `evaluators`, publishing progress throughout and `.finished`
-    /// at the end. Parameters mirror `RTSEvaluation.evaluate`.
+    /// Ingest `files`, then evaluate with `evaluators` applied to every agent (optionally filtered to
+    /// `agents`), publishing progress throughout and `.finished` at the end. Convenience over the
+    /// `assignments:` form for the common all-on-all case. Parameters mirror `RTSEvaluation.evaluate`.
     public func run(
         fromFiles files: [URL],
         evaluators: [any RTSEvaluator],
         agents: [String]? = nil,
+        name: String? = nil,
+        limits: RTSConcurrencyLimits? = nil,
+        persist: Bool = true
+    ) async -> [RTSEvaluationReport] {
+        await run(
+            fromFiles: files,
+            assignments: evaluators.map { RTSEvaluatorAssignment(evaluator: $0, agents: agents) },
+            name: name,
+            limits: limits,
+            persist: persist
+        )
+    }
+
+    /// Ingest `files`, then evaluate with per-evaluator agent targeting, publishing progress throughout
+    /// and `.finished` at the end. See `RTSEvaluatorAssignment` for the targeting semantics. The
+    /// assignments are forwarded, not stored — the manager keeps no evaluation config.
+    public func run(
+        fromFiles files: [URL],
+        assignments: [RTSEvaluatorAssignment],
         name: String? = nil,
         limits: RTSConcurrencyLimits? = nil,
         persist: Bool = true
@@ -42,8 +62,7 @@ public final class RTSEvaluationManager: @unchecked Sendable {
         let data = await RTSEvaluationIngest.agentDataPoints(fromFiles: files, onEvent: emit)
         let reports = await RTSEvaluation.evaluate(
             data: data,
-            evaluators: evaluators,
-            agents: agents,
+            assignments: assignments,
             name: name,
             limits: limits,
             persist: persist,

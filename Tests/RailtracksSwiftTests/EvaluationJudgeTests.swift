@@ -164,7 +164,7 @@ struct EvaluationJudgeTests {
         #expect(reasoning.isEmpty)
     }
 
-    @Test("judge: out-of-category labels fold into an unknown bucket; leaf keeps raw value")
+    @Test("judge: out-of-category labels resolve to unknown on counts AND leaves (they agree)")
     func judgeUnknownBucket() async throws {
         let metric = RTSCategoricalMetric(name: "Helpfulness", categories: ["good", "bad"])
         let stub = StubJudge([
@@ -179,14 +179,19 @@ struct EvaluationJudgeTests {
         #expect(aggregate.counts["bad"] == 0)
         #expect(aggregate.counts["unknown"] == 1)
         #expect(aggregate.categories.contains("unknown"))
-        // The leaf preserves the raw label rather than rewriting it to "unknown".
-        let keptRaw = baseLeaves(output).contains { leaf in
+
+        // The out-of-category label is resolved to "unknown" on the LEAF too — the raw "spectacular"
+        // never reaches the JSON, so `counts` and the child leaves are reconcilable without re-folding.
+        let leafValues: [String] = baseLeaves(output).compactMap { leaf in
             if case .string(let text) = leaf.value {
-                return text == "spectacular"
+                return text
             }
-            return false
+            return nil
         }
-        #expect(keptRaw)
+        #expect(leafValues.sorted() == ["good", "unknown"])
+        #expect(!leafValues.contains("spectacular"))
+        // Consistency invariant: every leaf value is a key present in the aggregate's counts.
+        #expect(leafValues.allSatisfy { aggregate.counts[$0] != nil })
     }
 
     @Test("judge: multiple metrics each get their own aggregate")
