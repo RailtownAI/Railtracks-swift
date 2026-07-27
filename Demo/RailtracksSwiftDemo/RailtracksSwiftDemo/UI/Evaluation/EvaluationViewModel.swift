@@ -27,7 +27,7 @@ class EvaluationViewModel {
     var includeLLMInference = true
     var includeJudge = false
     var saveJudgeTraces = false
-    var hasOpenAIKey = false
+    var hasAnthropicKey = false
     var isRunning = false
     var progress = ""
     var failureCount = 0
@@ -50,8 +50,8 @@ class EvaluationViewModel {
     ]
 
     func onAppear() {
-        hasOpenAIKey = KeychainHelper.readOpenAIKey().isNotNilNorEmpty
-        if !hasOpenAIKey {
+        hasAnthropicKey = KeychainHelper.readAnthropicKey().isNotNilNorEmpty
+        if !hasAnthropicKey {
             includeJudge = false
         }
         scanTraces()
@@ -122,7 +122,7 @@ class EvaluationViewModel {
 
     var canRun: Bool {
         let anyFiles = groups.contains { $0.isSelected }
-        let anyEvaluator = includeToolUse || includeLLMInference || (includeJudge && hasOpenAIKey)
+        let anyEvaluator = includeToolUse || includeLLMInference || (includeJudge && hasAnthropicKey)
         return anyFiles && anyEvaluator && !isRunning
     }
 
@@ -140,8 +140,8 @@ class EvaluationViewModel {
         if includeLLMInference {
             evaluators.append(RTSLLMInferenceEvaluator())
         }
-        if includeJudge, let apiKey = KeychainHelper.readOpenAIKey() {
-            let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
+        if includeJudge, let apiKey = KeychainHelper.readAnthropicKey() {
+            let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
             let metric = RTSCategoricalMetric(
                 name: "Helpfulness",
                 categories: ["Very Helpful", "Helpful", "Not Helpful"],
@@ -149,7 +149,7 @@ class EvaluationViewModel {
             )
             evaluators.append(
                 RTSJudgeEvaluator(
-                    provider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
+                    provider: .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString),
                     gateway: gateway,
                     metrics: [metric],
                     savesTrace: saveJudgeTraces

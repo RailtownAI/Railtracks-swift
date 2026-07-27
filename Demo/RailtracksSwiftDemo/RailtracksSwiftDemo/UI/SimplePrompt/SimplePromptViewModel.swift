@@ -18,7 +18,7 @@ class SimplePromptViewModel {
     var isShowingKeyPrompt = false
 
     func startPrompt() {
-        guard let apiKey = KeychainHelper.readOpenAIKey() else {
+        guard let apiKey = KeychainHelper.readAnthropicKey() else {
             isShowingKeyPrompt = true
             return
         }
@@ -26,10 +26,10 @@ class SimplePromptViewModel {
         isRunning = true
         Task { [weak self] in
             defer { self?.isRunning = false }
-            let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
+            let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
             let flow = RTSFlow(title: "Simple prompt flow")
             let agent = RTSAgent(
-                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
+                llmProvider: .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString),
                 systemMessage: "You are a helpful assistant that calculate simple math problem asked by user."
             )
             Log.debug("starting prompt, waiting for response...")

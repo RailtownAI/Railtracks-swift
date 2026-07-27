@@ -69,8 +69,17 @@ struct ContentView: View {
                 .foregroundStyle(.tint)
             Text("Railtracks Swift Lib Version: " + viewModel.libVersion)
             HStack(spacing: 8) {
-                Text("Has OpenAI key: \(viewModel.hasOpenAIKey ? "true" : "false")")
-                Button("Update Key") {
+                Text("Anthropic key: \(viewModel.hasAnthropicKey ? "✓" : "✗")")
+                Button("Update") {
+                    viewModel.updateProvider = .anthropic
+                    viewModel.isShowingKeyUpdate = true
+                }
+                .font(.caption)
+            }
+            HStack(spacing: 8) {
+                Text("OpenAI key: \(viewModel.hasOpenAIKey ? "✓" : "✗")")
+                Button("Update") {
+                    viewModel.updateProvider = .openAI
                     viewModel.isShowingKeyUpdate = true
                 }
                 .font(.caption)
@@ -102,13 +111,14 @@ struct ContentView: View {
             viewModel.checkKeychain()
         }
         .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
-            APIKeySetupView(isUpdate: false) {
+            APIKeySetupView(provider: viewModel.promptProvider, isUpdate: false) {
                 viewModel.isShowingKeyPrompt = false
-                viewModel.refreshKeyStatus()
+                // Re-check next run loop so a second missing key re-presents cleanly.
+                DispatchQueue.main.async { viewModel.checkKeychain() }
             }
         }
         .sheet(isPresented: $viewModel.isShowingKeyUpdate) {
-            APIKeySetupView(isUpdate: true) {
+            APIKeySetupView(provider: viewModel.updateProvider, isUpdate: true) {
                 viewModel.isShowingKeyUpdate = false
                 viewModel.refreshKeyStatus()
             }

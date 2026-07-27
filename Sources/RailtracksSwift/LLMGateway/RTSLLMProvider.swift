@@ -61,23 +61,71 @@ public enum RTSOpenAIModelID {
     }
 }
 
+/// Type-safe strings for Anthropic model IDs (encapsulates Conduit's `AnthropicModelID`).
+public enum RTSAnthropicModelID {
+    // Claude 4.6
+    case claudeOpus46
+    case claudeSonnet46
+    // Claude 4.5
+    case claudeOpus45
+    case claudeSonnet45
+    // Claude 4.x
+    case claudeOpus41
+    case claudeOpus4
+    case claudeSonnet4
+    // Claude Haiku 4.5
+    case claudeHaiku45
+    // Claude 3.7
+    case claude37Sonnet
+    // Claude 3.5
+    case claude35Sonnet
+    case claude35Haiku
+    // Claude 3
+    case claude3Opus
+    case claude3Sonnet
+    case claude3Haiku
+
+    public var modelIDString: String {
+        switch self {
+        case .claudeOpus46:   return AnthropicModelID.claudeOpus46.rawValue
+        case .claudeSonnet46: return AnthropicModelID.claudeSonnet46.rawValue
+        case .claudeOpus45:   return AnthropicModelID.claudeOpus45.rawValue
+        case .claudeSonnet45: return AnthropicModelID.claudeSonnet45.rawValue
+        case .claudeOpus41:   return AnthropicModelID.claudeOpus41.rawValue
+        case .claudeOpus4:    return AnthropicModelID.claudeOpus4.rawValue
+        case .claudeSonnet4:  return AnthropicModelID.claudeSonnet4.rawValue
+        case .claudeHaiku45:  return AnthropicModelID.claudeHaiku45.rawValue
+        case .claude37Sonnet: return AnthropicModelID.claude37Sonnet.rawValue
+        case .claude35Sonnet: return AnthropicModelID.claude35Sonnet.rawValue
+        case .claude35Haiku:  return AnthropicModelID.claude35Haiku.rawValue
+        case .claude3Opus:    return AnthropicModelID.claude3Opus.rawValue
+        case .claude3Sonnet:  return AnthropicModelID.claude3Sonnet.rawValue
+        case .claude3Haiku:   return AnthropicModelID.claude3Haiku.rawValue
+        }
+    }
+}
+
 /// Provider kind without model information — used as dictionary key for API keys
 public enum RTSLLMProviderKind: Hashable, CaseIterable, Sendable {
     case openAI
+    case anthropic
     case appleAI
-    // TODO: complete the rest of the cases
+    // TODO: complete the rest of the cases (e.g. gemini)
 }
 
 /// LLM Providers that store model ID as string in its associated value
 public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     case openAI(modelIDString: String)
+    case anthropic(modelIDString: String)
     case appleAI
-    // TODO: complete the rest of the cases
-    
+    // TODO: complete the rest of the cases (e.g. gemini)
+
     public var description: String {
         switch self {
         case .openAI(let modelIDString):
             return "OpenAI-\(modelIDString)"
+        case .anthropic(let modelIDString):
+            return "Anthropic-\(modelIDString)"
         case .appleAI:
             return "AppleAI-AppleFoundationModel-on-device"
         }
@@ -85,9 +133,11 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
 
     public var providerName: String {
         switch self {
-        case .openAI: 
+        case .openAI:
             return "OpenAI"
-        case .appleAI: 
+        case .anthropic:
+            return "Anthropic"
+        case .appleAI:
             return "AppleAI"
         }
     }
@@ -96,6 +146,8 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         switch self {
         case .openAI:
             return .openAI
+        case .anthropic:
+            return .anthropic
         case .appleAI:
             return .appleAI
         }
@@ -105,7 +157,9 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         switch self {
         case .openAI(let modelIDString):
             return modelIDString
-        case .appleAI: 
+        case .anthropic(let modelIDString):
+            return modelIDString
+        case .appleAI:
             return "on-device"
         }
     }
@@ -114,7 +168,7 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         switch self {
         case .appleAI:
             return true
-        case .openAI:
+        case .openAI, .anthropic:
             return false
         }
     }
@@ -130,6 +184,8 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             switch kind {
             case .openAI:
                 return .openAI(modelIDString: "")
+            case .anthropic:
+                return .anthropic(modelIDString: "")
             case .appleAI:
                 return .appleAI
             }

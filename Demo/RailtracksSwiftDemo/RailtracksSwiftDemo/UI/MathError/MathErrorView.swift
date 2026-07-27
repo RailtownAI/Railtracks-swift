@@ -45,7 +45,7 @@ struct MathErrorView: View {
         }
         .padding()
         .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
-            APIKeySetupView(isUpdate: false) {
+            APIKeySetupView(provider: .anthropic, isUpdate: false) {
                 viewModel.isShowingKeyPrompt = false
                 viewModel.startPrompt()
             }

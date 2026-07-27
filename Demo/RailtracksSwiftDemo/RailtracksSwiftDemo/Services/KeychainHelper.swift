@@ -63,3 +63,49 @@ extension KeychainHelper {
         write(key, account: openAIAccount)
     }
 }
+
+extension KeychainHelper {
+    static let anthropicAccount = "anthropic-api-key"
+
+    static func readAnthropicKey() -> String? {
+        read(account: anthropicAccount)
+    }
+
+    static func writeAnthropicKey(_ key: String) {
+        write(key, account: anthropicAccount)
+    }
+}
+
+/// The cloud providers the demo can prompt an API key for. On-device (AppleAI) needs no key, so it
+/// isn't represented here. Lets the shared key-setup UI read/write the correct Keychain slot.
+enum DemoAPIKeyProvider {
+    case openAI
+    case anthropic
+
+    var displayName: String {
+        switch self {
+        case .openAI:
+            return "OpenAI"
+        case .anthropic:
+            return "Anthropic"
+        }
+    }
+
+    func readKey() -> String? {
+        switch self {
+        case .openAI:
+            return KeychainHelper.readOpenAIKey()
+        case .anthropic:
+            return KeychainHelper.readAnthropicKey()
+        }
+    }
+
+    func writeKey(_ key: String) {
+        switch self {
+        case .openAI:
+            KeychainHelper.writeOpenAIKey(key)
+        case .anthropic:
+            KeychainHelper.writeAnthropicKey(key)
+        }
+    }
+}

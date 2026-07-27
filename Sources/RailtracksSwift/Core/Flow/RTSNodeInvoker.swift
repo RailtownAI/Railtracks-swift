@@ -211,6 +211,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             } catch {
                 invokeError = error
                 output = [:]
+                log.error("☠️ [\(node.name())] invocation failed: \(error)")
             }
             runtime = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
             // Output guardrails only run when the agent itself produced a result. They run after the

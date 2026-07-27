@@ -32,14 +32,14 @@ class MathViewModel {
     private var cancellables = Set<AnyCancellable>()
 
     func startPrompt() {
-        guard let apiKey = KeychainHelper.readOpenAIKey() else {
+        guard let apiKey = KeychainHelper.readAnthropicKey() else {
             isShowingKeyPrompt = true
             return
         }
         resetSteps()
         isRunning = true
 
-        let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
+        let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
         let flow = RTSFlow(title: "Math Workflow")
         subscribe(to: flow)
 
@@ -108,7 +108,7 @@ class MathViewModel {
 
     private static func mathAgent(named name: String) -> RTSAgent {
         RTSAgent(
-            llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4oMini.modelIDString),
+            llmProvider: .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString),
             name: name,
             tools: [
                 AdditionTool(),

@@ -26,16 +26,28 @@ class ContentViewModel {
     var mode: ViewMode = .mathVerify
     var isShowingKeyPrompt = false
     var isShowingKeyUpdate = false
+    var hasAnthropicKey: Bool = false
     var hasOpenAIKey: Bool = false
+    /// Which provider the launch prompt is currently collecting.
+    var promptProvider: DemoAPIKeyProvider = .anthropic
+    /// Which provider the "Update" sheet is editing.
+    var updateProvider: DemoAPIKeyProvider = .anthropic
 
+    /// Prompt for any missing key, one provider at a time (re-checked after each save, so both get
+    /// collected). Anthropic first since most demos use it; MathVerify still uses OpenAI.
     func checkKeychain() {
-        hasOpenAIKey = KeychainHelper.readOpenAIKey().isNotNilNorEmpty
-        if !hasOpenAIKey {
+        refreshKeyStatus()
+        if !hasAnthropicKey {
+            promptProvider = .anthropic
+            isShowingKeyPrompt = true
+        } else if !hasOpenAIKey {
+            promptProvider = .openAI
             isShowingKeyPrompt = true
         }
     }
 
     func refreshKeyStatus() {
+        hasAnthropicKey = KeychainHelper.readAnthropicKey().isNotNilNorEmpty
         hasOpenAIKey = KeychainHelper.readOpenAIKey().isNotNilNorEmpty
     }
 }

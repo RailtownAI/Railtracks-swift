@@ -9,10 +9,12 @@ struct APIKeySetupView: View {
     @State private var viewModel: APIKeySetupViewModel
     @Environment(\.dismiss) private var dismiss
     private let isUpdate: Bool
+    private let provider: DemoAPIKeyProvider
 
-    init(isUpdate: Bool = false, onSave: @escaping () -> Void) {
+    init(provider: DemoAPIKeyProvider, isUpdate: Bool = false, onSave: @escaping () -> Void) {
+        self.provider = provider
         self.isUpdate = isUpdate
-        let vm = APIKeySetupViewModel()
+        let vm = APIKeySetupViewModel(provider: provider)
         vm.onSave = onSave
         _viewModel = State(initialValue: vm)
     }
@@ -29,9 +31,9 @@ struct APIKeySetupView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Text(isUpdate ? "Update API Key" : "API Key Required")
+            Text(isUpdate ? "Update \(provider.displayName) API Key" : "\(provider.displayName) API Key Required")
                 .font(.headline)
-            Text("Enter your OpenAI API key. It will be stored securely in the Keychain.")
+            Text("Enter your \(provider.displayName) API key. It will be stored securely in the Keychain.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

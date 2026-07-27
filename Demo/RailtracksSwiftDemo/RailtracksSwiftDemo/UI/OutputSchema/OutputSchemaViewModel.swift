@@ -19,7 +19,7 @@ class OutputSchemaViewModel {
     var isShowingKeyPrompt = false
 
     func startPrompt() {
-        guard let apiKey = KeychainHelper.readOpenAIKey() else {
+        guard let apiKey = KeychainHelper.readAnthropicKey() else {
             isShowingKeyPrompt = true
             return
         }
@@ -31,7 +31,7 @@ class OutputSchemaViewModel {
                 return
             }
             
-            let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
+            let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
             let flow = RTSFlow(title: "Extract Job Description")
             
             Log.debug("📤 Extract job description")

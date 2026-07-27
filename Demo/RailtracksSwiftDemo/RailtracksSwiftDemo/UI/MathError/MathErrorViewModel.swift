@@ -65,7 +65,7 @@ class MathErrorViewModel {
     }
 
     func startPrompt() {
-        guard let apiKey = KeychainHelper.readOpenAIKey() else {
+        guard let apiKey = KeychainHelper.readAnthropicKey() else {
             isShowingKeyPrompt = true
             return
         }
@@ -75,7 +75,7 @@ class MathErrorViewModel {
         Task { [weak self] in
             defer { self?.isRunning = false }
             self?.promptResult = "waiting..."
-            let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
+            let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
 
             let tools: [any RTSToolNode] = [
                 AdditionErrorTool(),
@@ -87,7 +87,7 @@ class MathErrorViewModel {
             self?.observeTrace(flow)
 
             let agent = RTSAgent(
-                llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
+                llmProvider: .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString),
                 tools: tools,
                 systemMessage: "You are a Math assistant. " +
                 "You must use the provided tools for every arithmetic operation — no mental calculation. " +

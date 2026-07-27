@@ -109,12 +109,11 @@ public struct RTSConcurrencyLimits: Sendable {
     ///
     /// Exposed to the app via `RTSEvaluation.evaluate(..., limits:)` (and directly via `configure(_:)`),
     /// so an app can tune per-provider caps (e.g. `.openAI: 13`).
-    /// TODO: two remaining gaps — (1) `RTSLLMProviderKind` only has `.openAI`/`.appleAI`, so caps for
-    /// Anthropic/Gemini/etc. can't be set until those cases exist; (2) `configure` is "first-created
-    /// wins" (see `LLMProviderRegistry`), so it can't retune a limiter already created this process —
-    /// reconfiguration mid-process would need the registry to replace live limiters.
+    /// TODO: `configure` is "first-created wins" (see `LLMProviderRegistry`), so it can't retune a
+    /// limiter already created this process — reconfiguration mid-process would need the registry to
+    /// replace live limiters.
     public static let `default` = RTSConcurrencyLimits(
-        perProvider: [.openAI: 15, .appleAI: 1],
+        perProvider: [.openAI: 15, .anthropic: 4, .appleAI: 1],
         unbounded: [],
         fallback: 15
     )
