@@ -27,6 +27,12 @@ public class RTSNodeInvoker: @unchecked Sendable {
     let edgeCreateEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
     let edgeFinishEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
 
+    /// Serializes the four event `send(...)` calls below. One `RTSNodeInvoker` is shared by every
+    /// agent/tool in a flow, and `PassthroughSubject.send` is NOT safe under concurrent calls — so a
+    /// flow that runs agents in parallel would otherwise data-race on event publication. This backs the
+    /// `@unchecked Sendable` conformance with real synchronization.
+    private let publishLock = NSLock()
+
     /// The invocation id of the node currently executing on this task. A child invocation reads it
     /// as its parent (the edge `source`). It is bound around `execute` so it flows down the async
     /// call tree — including Conduit's tool `TaskGroup` and Apple's `LanguageModelSession.respond`,
@@ -267,6 +273,15 @@ public class RTSNodeInvoker: @unchecked Sendable {
         return output
     }
 
+    /// Serialized `send` — the invoker is shared across a flow's agents and `PassthroughSubject.send`
+    /// isn't concurrency-safe, so parallel agents would otherwise race on event publication. This is
+    /// synchronous (no suspension), so locking here is safe and legal from the async publish methods.
+    private func lockedSend<Event>(_ subject: PassthroughSubject<Event, Never>, _ event: Event) {
+        publishLock.lock()
+        defer { publishLock.unlock() }
+        subject.send(event)
+    }
+
     private func publishNodeCreated(
         _ node: some RTSNode,
         nodeID: UUID,
@@ -278,7 +293,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
     ) async {
-        nodeCreateEventSubject.send(
+        lockedSend(nodeCreateEventSubject,
             RTSNodeEvent(
                 nodeID: nodeID,
                 name: node.name(),
@@ -306,7 +321,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
     ) async {
-        nodeInvokeEventSubject.send(
+        lockedSend(nodeInvokeEventSubject,
             RTSNodeEvent(
                 nodeID: nodeID,
                 name: node.name(),
@@ -335,7 +350,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         to target: some RTSNode,
         input: RTSInput
     ) async {
-        edgeCreateEventSubject.send(
+        lockedSend(edgeCreateEventSubject,
             RTSEdgeEvent(
                 id: edgeID,
                 runID: runID,
@@ -362,7 +377,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         output: RTSOutput,
         error: Error?
     ) async {
-        edgeFinishEventSubject.send(
+        lockedSend(edgeFinishEventSubject,
             RTSEdgeEvent(
                 id: edgeID,
                 runID: nil,
