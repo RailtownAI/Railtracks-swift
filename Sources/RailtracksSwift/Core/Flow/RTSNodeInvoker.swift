@@ -293,7 +293,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
     ) async {
-        lockedSend(nodeCreateEventSubject,
+        lockedSend(
+            nodeCreateEventSubject,
             RTSNodeEvent(
                 nodeID: nodeID,
                 name: node.name(),
@@ -321,7 +322,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
     ) async {
-        lockedSend(nodeInvokeEventSubject,
+        lockedSend(
+            nodeInvokeEventSubject,
             RTSNodeEvent(
                 nodeID: nodeID,
                 name: node.name(),
@@ -350,7 +352,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         to target: some RTSNode,
         input: RTSInput
     ) async {
-        lockedSend(edgeCreateEventSubject,
+        lockedSend(
+            edgeCreateEventSubject,
             RTSEdgeEvent(
                 id: edgeID,
                 runID: runID,
@@ -377,7 +380,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
         output: RTSOutput,
         error: Error?
     ) async {
-        lockedSend(edgeFinishEventSubject,
+        lockedSend(
+            edgeFinishEventSubject,
             RTSEdgeEvent(
                 id: edgeID,
                 runID: nil,
