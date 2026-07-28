@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/Conduit",
       "state" : {
-        "revision" : "76bd469bf45bff17e09b49095d5d18ca3e9880b0",
-        "version" : "0.3.20"
+        "revision" : "d9fd893cd0ca560cd5cb3a0d44317352627f5c36",
+        "version" : "0.3.21"
       }
     },
     {

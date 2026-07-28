@@ -37,7 +37,7 @@ struct APIKeySetupView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            SecureField("sk-...", text: $viewModel.keyInput)
+            SecureField(provider.keyPlaceholder, text: $viewModel.keyInput)
                 .textFieldStyle(.roundedBorder)
             Button("Save") {
                 viewModel.save()

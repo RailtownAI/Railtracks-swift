@@ -85,11 +85,24 @@ public struct RTSLLMGateway: Sendable {
                 agentNode: agentNode,
                 onNewSession: onNewSession
             )
+
+        case .gemini(modelIDString: let modelIDString):
+            guard let apiKey = apiKeys[provider.kind] else {
+                throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
+            }
+            return try buildCloudSession(
+                provider: GeminiProvider(apiKey: apiKey),
+                model: .gemini(modelIDString),
+                apiKeys: apiKeys,
+                invoker: invoker,
+                agentNode: agentNode,
+                onNewSession: onNewSession
+            )
         }
     }
 
     /// Builds a session for a cloud (Conduit-backed) provider. The tool-bridging is provider-agnostic,
-    /// so OpenAI and Anthropic share this — only the provider instance + model identifier differ.
+    /// so OpenAI, Anthropic, and Gemini share this — only the provider instance + model identifier differ.
     private static func buildCloudSession<Provider: AIProvider & TextGenerator>(
         provider: Provider,
         model: ModelIdentifier,

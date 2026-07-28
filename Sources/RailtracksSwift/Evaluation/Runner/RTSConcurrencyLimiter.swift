@@ -113,7 +113,7 @@ public struct RTSConcurrencyLimits: Sendable {
     /// limiter already created this process — reconfiguration mid-process would need the registry to
     /// replace live limiters.
     public static let `default` = RTSConcurrencyLimits(
-        perProvider: [.openAI: 15, .anthropic: 4, .appleAI: 1],
+        perProvider: [.openAI: 15, .anthropic: 4, .gemini: 4, .appleAI: 1],
         unbounded: [],
         fallback: 15
     )

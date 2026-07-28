@@ -11,7 +11,7 @@ import Combine
 import Logging
 
 /// Math demo using a function-node (`MathWorkflow`) as the entry point, which
-/// orchestrates three OpenAI agents: A → B in sequence, and C in parallel.
+/// orchestrates three Gemini agents: A → B in sequence, and C in parallel.
 @Observable
 class MathViewModel {
     let prompt: String = "A → B in sequence (12 × 8, then + 100); C in parallel (50 − 17)."
@@ -32,14 +32,14 @@ class MathViewModel {
     private var cancellables = Set<AnyCancellable>()
 
     func startPrompt() {
-        guard let apiKey = KeychainHelper.readAnthropicKey() else {
+        guard let apiKey = KeychainHelper.readGeminiKey() else {
             isShowingKeyPrompt = true
             return
         }
         resetSteps()
         isRunning = true
 
-        let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
+        let gateway = RTSLLMGateway(apiKeys: [.gemini: apiKey])
         let flow = RTSFlow(title: "Math Workflow")
         subscribe(to: flow)
 
@@ -108,7 +108,7 @@ class MathViewModel {
 
     private static func mathAgent(named name: String) -> RTSAgent {
         RTSAgent(
-            llmProvider: .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString),
+            llmProvider: .gemini(modelIDString: RTSGeminiModelID.gemini25Flash.modelIDString),
             name: name,
             tools: [
                 AdditionTool(),
@@ -121,7 +121,9 @@ class MathViewModel {
                 + "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. "
                 + "If there is multiplication in the math, you must use the provided multiplication tool to perform the calculation. "
                 + "If there is division in the math, you must use the provided division tool to perform the calculation. "
-                + "You will calculate simple math problem asked by user."
+                + "You will calculate simple math problem asked by user. "
+                + "As soon as a tool returns the numeric result, stop calling tools and reply with only that number as your final answer. "
+                + "Never call a tool again for a calculation you have already performed."
         )
     }
 }

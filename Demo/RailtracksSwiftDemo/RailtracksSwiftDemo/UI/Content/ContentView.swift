@@ -77,6 +77,14 @@ struct ContentView: View {
                 .font(.caption)
             }
             HStack(spacing: 8) {
+                Text("Gemini key: \(viewModel.hasGeminiKey ? "✓" : "✗")")
+                Button("Update") {
+                    viewModel.updateProvider = .gemini
+                    viewModel.isShowingKeyUpdate = true
+                }
+                .font(.caption)
+            }
+            HStack(spacing: 8) {
                 Text("OpenAI key: \(viewModel.hasOpenAIKey ? "✓" : "✗")")
                 Button("Update") {
                     viewModel.updateProvider = .openAI

@@ -45,7 +45,7 @@ struct MathView: View {
         }
         .padding()
         .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
-            APIKeySetupView(provider: .anthropic, isUpdate: false) {
+            APIKeySetupView(provider: .gemini, isUpdate: false) {
                 viewModel.isShowingKeyPrompt = false
                 viewModel.startPrompt()
             }
