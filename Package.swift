@@ -40,7 +40,7 @@ let package = Package(
             from: "600.0.0"
         ),
         .package(
-            url: "https://github.com/RailtownAI/railtracks-swift-visualizer-instruments",
+            url: "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
             exact: "1.0.0"
         ),
     ],
@@ -59,7 +59,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Conduit", package: "Conduit"),
-                .product(name: "RailtracksInstrumentationKit", package: "railtracks-swift-visualizer-instruments"),
+                .product(name: "RailtracksInstrumentationKit", package: "railtracks-swift-instrumentation-kit"),
                 "RTSMacro"
             ]
         ),
