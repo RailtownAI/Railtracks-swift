@@ -49,11 +49,11 @@ struct EvaluationView: View {
                 Toggle("Tool Use", isOn: $viewModel.includeToolUse)
                 Toggle("LLM Inference", isOn: $viewModel.includeLLMInference)
                 Toggle(isOn: $viewModel.includeJudge) {
-                    Text(viewModel.hasOpenAIKey
-                         ? "Judge — Helpfulness (OpenAI)"
-                         : "Judge — needs OpenAI key")
+                    Text(viewModel.hasAnthropicKey
+                         ? "Judge — Helpfulness (Anthropic)"
+                         : "Judge — needs Anthropic key")
                 }
-                .disabled(!viewModel.hasOpenAIKey)
+                .disabled(!viewModel.hasAnthropicKey)
 
                 Toggle("Save judge traces", isOn: $viewModel.saveJudgeTraces)
                     .font(.caption)

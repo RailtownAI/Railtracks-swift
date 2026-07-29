@@ -61,23 +61,111 @@ public enum RTSOpenAIModelID {
     }
 }
 
+/// Type-safe strings for Anthropic model IDs (encapsulates Conduit's `AnthropicModelID`).
+public enum RTSAnthropicModelID {
+    // Claude 4.6
+    case claudeOpus46
+    case claudeSonnet46
+    // Claude 4.5
+    case claudeOpus45
+    case claudeSonnet45
+    // Claude 4.x
+    case claudeOpus41
+    case claudeOpus4
+    case claudeSonnet4
+    // Claude Haiku 4.5
+    case claudeHaiku45
+    // Claude 3.7
+    case claude37Sonnet
+    // Claude 3.5
+    case claude35Sonnet
+    case claude35Haiku
+    // Claude 3
+    case claude3Opus
+    case claude3Sonnet
+    case claude3Haiku
+
+    public var modelIDString: String {
+        switch self {
+        case .claudeOpus46:   return AnthropicModelID.claudeOpus46.rawValue
+        case .claudeSonnet46: return AnthropicModelID.claudeSonnet46.rawValue
+        case .claudeOpus45:   return AnthropicModelID.claudeOpus45.rawValue
+        case .claudeSonnet45: return AnthropicModelID.claudeSonnet45.rawValue
+        case .claudeOpus41:   return AnthropicModelID.claudeOpus41.rawValue
+        case .claudeOpus4:    return AnthropicModelID.claudeOpus4.rawValue
+        case .claudeSonnet4:  return AnthropicModelID.claudeSonnet4.rawValue
+        case .claudeHaiku45:  return AnthropicModelID.claudeHaiku45.rawValue
+        case .claude37Sonnet: return AnthropicModelID.claude37Sonnet.rawValue
+        case .claude35Sonnet: return AnthropicModelID.claude35Sonnet.rawValue
+        case .claude35Haiku:  return AnthropicModelID.claude35Haiku.rawValue
+        case .claude3Opus:    return AnthropicModelID.claude3Opus.rawValue
+        case .claude3Sonnet:  return AnthropicModelID.claude3Sonnet.rawValue
+        case .claude3Haiku:   return AnthropicModelID.claude3Haiku.rawValue
+        }
+    }
+}
+
+/// Type-safe strings for Gemini model IDs.
+///
+/// Unlike `RTSOpenAIModelID` / `RTSAnthropicModelID`, Conduit ships **no** `GeminiModelID` type to
+/// encapsulate — its `GeminiProvider` accepts an arbitrary model string and places it directly in the
+/// request path (`models/{id}:generateContent`). These raw strings are therefore maintained here by
+/// hand and must be updated as Google publishes / retires models.
+public enum RTSGeminiModelID {
+    // Gemini 3
+    case gemini3Pro
+    case gemini3Flash
+    // Gemini 2.5
+    case gemini25Pro
+    case gemini25Flash
+    case gemini25FlashLite
+    // Gemini 2.0
+    case gemini20Flash
+    case gemini20FlashLite
+    // Gemini 1.5
+    case gemini15Pro
+    case gemini15Flash
+    case gemini15Flash8B
+
+    public var modelIDString: String {
+        switch self {
+        case .gemini3Pro:        return "gemini-3-pro-preview"
+        case .gemini3Flash:      return "gemini-3-flash-preview"
+        case .gemini25Pro:       return "gemini-2.5-pro"
+        case .gemini25Flash:     return "gemini-2.5-flash"
+        case .gemini25FlashLite: return "gemini-2.5-flash-lite"
+        case .gemini20Flash:     return "gemini-2.0-flash"
+        case .gemini20FlashLite: return "gemini-2.0-flash-lite"
+        case .gemini15Pro:       return "gemini-1.5-pro"
+        case .gemini15Flash:     return "gemini-1.5-flash"
+        case .gemini15Flash8B:   return "gemini-1.5-flash-8b"
+        }
+    }
+}
+
 /// Provider kind without model information — used as dictionary key for API keys
 public enum RTSLLMProviderKind: Hashable, CaseIterable, Sendable {
     case openAI
+    case anthropic
+    case gemini
     case appleAI
-    // TODO: complete the rest of the cases
 }
 
 /// LLM Providers that store model ID as string in its associated value
 public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     case openAI(modelIDString: String)
+    case anthropic(modelIDString: String)
+    case gemini(modelIDString: String)
     case appleAI
-    // TODO: complete the rest of the cases
-    
+
     public var description: String {
         switch self {
         case .openAI(let modelIDString):
             return "OpenAI-\(modelIDString)"
+        case .anthropic(let modelIDString):
+            return "Anthropic-\(modelIDString)"
+        case .gemini(let modelIDString):
+            return "Gemini-\(modelIDString)"
         case .appleAI:
             return "AppleAI-AppleFoundationModel-on-device"
         }
@@ -85,9 +173,13 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
 
     public var providerName: String {
         switch self {
-        case .openAI: 
+        case .openAI:
             return "OpenAI"
-        case .appleAI: 
+        case .anthropic:
+            return "Anthropic"
+        case .gemini:
+            return "Gemini"
+        case .appleAI:
             return "AppleAI"
         }
     }
@@ -96,6 +188,10 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         switch self {
         case .openAI:
             return .openAI
+        case .anthropic:
+            return .anthropic
+        case .gemini:
+            return .gemini
         case .appleAI:
             return .appleAI
         }
@@ -105,7 +201,11 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         switch self {
         case .openAI(let modelIDString):
             return modelIDString
-        case .appleAI: 
+        case .anthropic(let modelIDString):
+            return modelIDString
+        case .gemini(let modelIDString):
+            return modelIDString
+        case .appleAI:
             return "on-device"
         }
     }
@@ -114,7 +214,7 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         switch self {
         case .appleAI:
             return true
-        case .openAI:
+        case .openAI, .anthropic, .gemini:
             return false
         }
     }
@@ -130,6 +230,10 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             switch kind {
             case .openAI:
                 return .openAI(modelIDString: "")
+            case .anthropic:
+                return .anthropic(modelIDString: "")
+            case .gemini:
+                return .gemini(modelIDString: "")
             case .appleAI:
                 return .appleAI
             }

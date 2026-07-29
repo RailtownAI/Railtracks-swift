@@ -100,21 +100,23 @@ public struct RTSConcurrencyLimits: Sendable {
         return perProvider[kind] ?? fallback
     }
 
-    /// Default: OpenAI capped at 15 concurrent calls; Apple on-device capped at **1**; others 15.
+    /// Default: OpenAI capped at 15 concurrent calls; Anthropic and Gemini at **4**; Apple on-device
+    /// capped at **1**; others fall back to 15.
     /// On-device FoundationModels does not truly parallelize — it serializes inference on the ANE/GPU,
     /// so concurrent calls only queue and contend. Confirmed empirically (unbounded / 5 / 2 caps were
     /// all as slow or slower than 1) and by external docs on on-device inference being effectively
     /// serial. So `.appleAI: 1` is the correct value, not merely a safety default. (OpenAI's 15 is real
-    /// parallelism — independent remote workers.)
+    /// parallelism — independent remote workers.) Anthropic and Gemini get a conservative **4**: their
+    /// per-key burst limits trip well below OpenAI's, and Conduit already retries 429s, so a lower cap
+    /// preserves useful parallelism while avoiding rate-limit storms.
     ///
     /// Exposed to the app via `RTSEvaluation.evaluate(..., limits:)` (and directly via `configure(_:)`),
     /// so an app can tune per-provider caps (e.g. `.openAI: 13`).
-    /// TODO: two remaining gaps — (1) `RTSLLMProviderKind` only has `.openAI`/`.appleAI`, so caps for
-    /// Anthropic/Gemini/etc. can't be set until those cases exist; (2) `configure` is "first-created
-    /// wins" (see `LLMProviderRegistry`), so it can't retune a limiter already created this process —
-    /// reconfiguration mid-process would need the registry to replace live limiters.
+    /// TODO: `configure` is "first-created wins" (see `LLMProviderRegistry`), so it can't retune a
+    /// limiter already created this process — reconfiguration mid-process would need the registry to
+    /// replace live limiters.
     public static let `default` = RTSConcurrencyLimits(
-        perProvider: [.openAI: 15, .appleAI: 1],
+        perProvider: [.openAI: 15, .anthropic: 4, .gemini: 4, .appleAI: 1],
         unbounded: [],
         fallback: 15
     )

@@ -59,7 +59,7 @@ class GuardrailsViewModel {
     }
 
     func startPrompt() {
-        guard let apiKey = KeychainHelper.readOpenAIKey() else {
+        guard let apiKey = KeychainHelper.readAnthropicKey() else {
             isShowingKeyPrompt = true
             return
         }
@@ -67,7 +67,7 @@ class GuardrailsViewModel {
         isRunning = true
         Task { [weak self] in
             defer { self?.isRunning = false }
-            let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
+            let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
             let flow = RTSFlow(title: "Safe Support Assistant")
             do {
                 // Reject obvious prompt-injection first; otherwise redact PII before the model sees it.
@@ -90,7 +90,7 @@ class GuardrailsViewModel {
                 }
 
                 let agent = RTSAgent(
-                    llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4oMini.modelIDString),
+                    llmProvider: .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString),
                     name: "Safe Support Assistant",
                     systemMessage: "You are a helpful customer-support assistant. Answer concisely.",
                     inputGuardrails: inputGuards,

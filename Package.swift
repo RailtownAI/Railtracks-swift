@@ -22,11 +22,12 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/RailtownAI/Conduit",
-            exact: "0.3.20",
+            exact: "0.3.21",
             traits: [
                 .trait(name: "OpenAI"),
                 .trait(name: "OpenRouter"),
                 .trait(name: "Anthropic"),
+                .trait(name: "Gemini"),
                 .trait(name: "MLX"),
             ]
         ),
@@ -39,8 +40,8 @@ let package = Package(
             from: "600.0.0"
         ),
         .package(
-            url: "https://github.com/FabricioSffair/RailtracksInstrumentationKit",
-            exact: "0.1.5"
+            url: "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
+            exact: "1.0.0"
         ),
     ],
     targets: [
@@ -58,7 +59,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Conduit", package: "Conduit"),
-                .product(name: "RailtracksInstrumentationKit", package: "RailtracksInstrumentationKit"),
+                .product(name: "RailtracksInstrumentationKit", package: "railtracks-swift-instrumentation-kit"),
                 "RTSMacro"
             ]
         ),

@@ -35,7 +35,7 @@ struct MathVerifyView: View {
         }
         .padding()
         .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
-            APIKeySetupView(isUpdate: false) {
+            APIKeySetupView(provider: .openAI, isUpdate: false) {
                 viewModel.isShowingKeyPrompt = false
                 viewModel.startPrompt()
             }

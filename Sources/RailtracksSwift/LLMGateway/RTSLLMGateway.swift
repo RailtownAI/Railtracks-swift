@@ -61,50 +61,94 @@ public struct RTSLLMGateway: Sendable {
             return RTSLLMSession.build(appleAI: appleAISession, agentNode: agentNode)
 
         case .openAI(modelIDString: let modelIDString):
-            let conduitTools: [any Tool] = agentNode.tools.map { tool in
-                if let agentTool = tool as? RTSAgentTool {
-                    let makeSession: @Sendable () throws -> RTSLLMSession = {
-                        try RTSLLMGateway.buildSession(
-                            apiKeys: apiKeys,
-                            invoker: invoker,
-                            agentNode: agentTool.wrappedAgent,
-                            onNewSession: onNewSession
-                        )
-                    }
-                    return RTSConduitAgentToolBridge(
-                        agentTool: agentTool,
-                        makeSession: makeSession,
-                        onNewSession: onNewSession,
-                        nodeInvoker: invoker,
-                        createdBy: agentNode
-                    )
-                } else if let orchestratorTool = tool as? RTSOrchestratorTool {
-                    let makeSession: @Sendable (any RTSAgentNode) throws -> RTSLLMSession = { subAgent in
-                        try RTSLLMGateway.buildSession(
-                            apiKeys: apiKeys,
-                            invoker: invoker,
-                            agentNode: subAgent,
-                            onNewSession: onNewSession
-                        )
-                    }
-                    return RTSConduitOrchestratorToolBridge(
-                        orchestratorTool: orchestratorTool,
-                        makeSession: makeSession,
-                        onNewSession: onNewSession,
-                        nodeInvoker: invoker,
-                        createdBy: agentNode
-                    )
-                } else {
-                    return tool.asConduitTool(invoker: invoker, createdBy: agentNode)
-                }
-            }
             guard let apiKey = apiKeys[provider.kind] else {
                 throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
             }
-            let openAIProvider = OpenAIProvider(apiKey: apiKey)
-            let model = ModelIdentifier.openAI(modelIDString)
-            return try RTSLLMSession.build(provider: openAIProvider, model: model, agentNode: agentNode, conduitTools: conduitTools)
+            return try buildCloudSession(
+                provider: OpenAIProvider(apiKey: apiKey),
+                model: .openAI(modelIDString),
+                apiKeys: apiKeys,
+                invoker: invoker,
+                agentNode: agentNode,
+                onNewSession: onNewSession
+            )
+
+        case .anthropic(modelIDString: let modelIDString):
+            guard let apiKey = apiKeys[provider.kind] else {
+                throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
+            }
+            return try buildCloudSession(
+                provider: AnthropicProvider(apiKey: apiKey),
+                model: .anthropic(modelIDString),
+                apiKeys: apiKeys,
+                invoker: invoker,
+                agentNode: agentNode,
+                onNewSession: onNewSession
+            )
+
+        case .gemini(modelIDString: let modelIDString):
+            guard let apiKey = apiKeys[provider.kind] else {
+                throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
+            }
+            return try buildCloudSession(
+                provider: GeminiProvider(apiKey: apiKey),
+                model: .gemini(modelIDString),
+                apiKeys: apiKeys,
+                invoker: invoker,
+                agentNode: agentNode,
+                onNewSession: onNewSession
+            )
         }
+    }
+
+    /// Builds a session for a cloud (Conduit-backed) provider. The tool-bridging is provider-agnostic,
+    /// so OpenAI, Anthropic, and Gemini share this — only the provider instance + model identifier differ.
+    private static func buildCloudSession<Provider: AIProvider & TextGenerator>(
+        provider: Provider,
+        model: ModelIdentifier,
+        apiKeys: [RTSLLMProviderKind: String],
+        invoker: RTSNodeInvoker,
+        agentNode: any RTSAgentNode,
+        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
+    ) throws -> RTSLLMSession where Provider.ModelID == ModelIdentifier {
+        let conduitTools: [any Tool] = agentNode.tools.map { tool in
+            if let agentTool = tool as? RTSAgentTool {
+                let makeSession: @Sendable () throws -> RTSLLMSession = {
+                    try RTSLLMGateway.buildSession(
+                        apiKeys: apiKeys,
+                        invoker: invoker,
+                        agentNode: agentTool.wrappedAgent,
+                        onNewSession: onNewSession
+                    )
+                }
+                return RTSConduitAgentToolBridge(
+                    agentTool: agentTool,
+                    makeSession: makeSession,
+                    onNewSession: onNewSession,
+                    nodeInvoker: invoker,
+                    createdBy: agentNode
+                )
+            } else if let orchestratorTool = tool as? RTSOrchestratorTool {
+                let makeSession: @Sendable (any RTSAgentNode) throws -> RTSLLMSession = { subAgent in
+                    try RTSLLMGateway.buildSession(
+                        apiKeys: apiKeys,
+                        invoker: invoker,
+                        agentNode: subAgent,
+                        onNewSession: onNewSession
+                    )
+                }
+                return RTSConduitOrchestratorToolBridge(
+                    orchestratorTool: orchestratorTool,
+                    makeSession: makeSession,
+                    onNewSession: onNewSession,
+                    nodeInvoker: invoker,
+                    createdBy: agentNode
+                )
+            } else {
+                return tool.asConduitTool(invoker: invoker, createdBy: agentNode)
+            }
+        }
+        return try RTSLLMSession.build(provider: provider, model: model, agentNode: agentNode, conduitTools: conduitTools)
     }
 }
 

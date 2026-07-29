@@ -26,16 +26,33 @@ class ContentViewModel {
     var mode: ViewMode = .mathVerify
     var isShowingKeyPrompt = false
     var isShowingKeyUpdate = false
+    var hasAnthropicKey: Bool = false
     var hasOpenAIKey: Bool = false
+    var hasGeminiKey: Bool = false
+    /// Which provider the launch prompt is currently collecting.
+    var promptProvider: DemoAPIKeyProvider = .anthropic
+    /// Which provider the "Update" sheet is editing.
+    var updateProvider: DemoAPIKeyProvider = .anthropic
 
+    /// Prompt for any missing key, one provider at a time (re-checked after each save, so each gets
+    /// collected). Anthropic first (most demos), then Gemini (Math), then OpenAI (MathVerify).
     func checkKeychain() {
-        hasOpenAIKey = KeychainHelper.readOpenAIKey().isNotNilNorEmpty
-        if !hasOpenAIKey {
+        refreshKeyStatus()
+        if !hasAnthropicKey {
+            promptProvider = .anthropic
+            isShowingKeyPrompt = true
+        } else if !hasGeminiKey {
+            promptProvider = .gemini
+            isShowingKeyPrompt = true
+        } else if !hasOpenAIKey {
+            promptProvider = .openAI
             isShowingKeyPrompt = true
         }
     }
 
     func refreshKeyStatus() {
+        hasAnthropicKey = KeychainHelper.readAnthropicKey().isNotNilNorEmpty
         hasOpenAIKey = KeychainHelper.readOpenAIKey().isNotNilNorEmpty
+        hasGeminiKey = KeychainHelper.readGeminiKey().isNotNilNorEmpty
     }
 }
