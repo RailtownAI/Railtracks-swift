@@ -22,8 +22,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/RailtownAI/Conduit",
-            branch: "wb-10-image-input-in-chat-session",
-//            exact: "0.3.21",
+            exact: "0.3.22",
             traits: [
                 .trait(name: "OpenAI"),
                 .trait(name: "OpenRouter"),
