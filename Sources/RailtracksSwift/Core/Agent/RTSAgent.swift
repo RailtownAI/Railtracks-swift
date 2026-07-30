@@ -26,6 +26,7 @@ public protocol RTSAgentNode: RTSNode {
 public extension RTSAgentNode {
     public var inputKeySystemMessage: String { "systemMessage" }
     public var inputKeyPrompt: String { "prompt" }
+    public var inputKeyImages: String { "images" }
     public var outputKeyResult: String { "result" }
 
     var agentName: String {
@@ -48,8 +49,17 @@ public extension RTSAgentNode {
         if case let .string(systemMessage) = inputs[inputKeySystemMessage] {
             session.setSystemPrompt(systemMessage, runID: runID)
         }
+        var images: [RTSImage] = []
+        if case let .array(values) = inputs[inputKeyImages] {
+            images = values.compactMap { value in
+                guard case let .image(image) = value else {
+                    return nil
+                }
+                return image
+            }
+        }
         do {
-            let result = try await session.run(prompt, runID: runID)
+            let result = try await session.run(prompt, images: images, runID: runID)
             return [outputKeyResult: .string(result)]
         } catch {
             log.debug("agent(\(id)) failed at running prompt: \(prompt) | \(error)")

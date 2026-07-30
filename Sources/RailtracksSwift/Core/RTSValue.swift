@@ -19,7 +19,11 @@ public enum RTSValue: Codable, Sendable {
     case string(String)
     case array([RTSValue])
     case object([String: RTSValue])
-    
+    /// A multimodal image input. Encodes as a redacted `{modality, type, info}` descriptor — the
+    /// base64 payload is held in memory only and never serialized into the trace. Not produced on
+    /// decode (a serialized descriptor round-trips back as `.object`, which no consumer reads).
+    case image(RTSImage)
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
@@ -66,6 +70,12 @@ public enum RTSValue: Codable, Sendable {
               for (key, value) in dict {
                   try container.encode(value, forKey: AnyCodingKey(key))
               }
+          case .image(let image):
+              // Redacted descriptor matching the Python run-report schema; base64 is never serialized.
+              var container = encoder.container(keyedBy: AnyCodingKey.self)
+              try container.encode("image", forKey: AnyCodingKey("modality"))
+              try container.encode(image.sourceType, forKey: AnyCodingKey("type"))
+              try container.encode(image.sourceInfo, forKey: AnyCodingKey("info"))
           }
       }
                       

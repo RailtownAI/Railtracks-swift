@@ -63,6 +63,12 @@ struct ContentView: View {
                 }
                 .background(viewModel.mode == .evaluation ? Color.accentColor.opacity(0.2) : Color.clear)
                 .buttonStyle(.bordered)
+
+                Button("Vision") {
+                    viewModel.mode = .vision
+                }
+                .background(viewModel.mode == .vision ? Color.accentColor.opacity(0.2) : Color.clear)
+                .buttonStyle(.bordered)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -111,6 +117,8 @@ struct ContentView: View {
                 GuardrailsView()
             case .evaluation:
                 EvaluationView()
+            case .vision:
+                VisionView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
