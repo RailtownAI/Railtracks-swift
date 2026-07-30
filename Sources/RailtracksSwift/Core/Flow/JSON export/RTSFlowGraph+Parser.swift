@@ -245,9 +245,30 @@ private extension RTSMessage {
             switch self.content {
             case .text(let string):
                 content = RTSGeneratedContent(kind: .string(string))
-            case .parts:
-                // TODO: map ContentPart array (images, audio) to structured RTSGeneratedContent
-                content = RTSGeneratedContent(kind: .string(self.content.textValue))
+            case .parts(let parts):
+                // Python-shaped multimodal content: text parts as {type:"text", text}, image parts as
+                // the redacted {modality:"image", type, info} descriptor (no base64).
+                content = RTSGeneratedContent(kind: .array(parts.map { part in
+                    switch part {
+                    case .text(let text):
+                        return RTSGeneratedContent(kind: .structure([
+                            "type": RTSGeneratedContent(kind: .string("text")),
+                            "text": RTSGeneratedContent(kind: .string(text))
+                        ]))
+                    case .image(let image):
+                        return RTSGeneratedContent(kind: .structure([
+                            "modality": RTSGeneratedContent(kind: .string("image")),
+                            "type": RTSGeneratedContent(kind: .string(image.type)),
+                            "info": RTSGeneratedContent(kind: .string(image.info))
+                        ]))
+                    case .audio:
+                        return RTSGeneratedContent(kind: .structure([
+                            "modality": RTSGeneratedContent(kind: .string("audio")),
+                            "type": RTSGeneratedContent(kind: .string("data_uri")),
+                            "info": RTSGeneratedContent(kind: .string("..."))
+                        ]))
+                    }
+                }))
             }
         }
         return RTSFlowGraphMessage(role: role.rawValue, content: content)

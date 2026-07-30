@@ -81,19 +81,22 @@ extension RTSMessage {
         case image(ImageContent)
         case audio(AudioContent)
 
-        private enum CodingKeys: String, CodingKey { case type, text, base64Data, mimeType, format }
-        private enum PartType: String, Codable { case text, image, audio }
+        private enum CodingKeys: String, CodingKey { case type, text, modality, info, base64Data, format }
+        // Image parts are discriminated by the `modality` key (matching Python); text/audio by `type`.
+        private enum PartType: String, Codable { case text, audio }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            if container.contains(.modality) {
+                self = .image(ImageContent(
+                    type: try container.decode(String.self, forKey: .type),
+                    info: try container.decode(String.self, forKey: .info)
+                ))
+                return
+            }
             switch try container.decode(PartType.self, forKey: .type) {
             case .text:
                 self = .text(try container.decode(String.self, forKey: .text))
-            case .image:
-                self = .image(ImageContent(
-                    base64Data: try container.decode(String.self, forKey: .base64Data),
-                    mimeType: try container.decode(String.self, forKey: .mimeType)
-                ))
             case .audio:
                 self = .audio(AudioContent(
                     base64Data: try container.decode(String.self, forKey: .base64Data),
@@ -109,9 +112,10 @@ extension RTSMessage {
                 try container.encode(PartType.text, forKey: .type)
                 try container.encode(string, forKey: .text)
             case .image(let image):
-                try container.encode(PartType.image, forKey: .type)
-                try container.encode(image.base64Data, forKey: .base64Data)
-                try container.encode(image.mimeType, forKey: .mimeType)
+                // Redacted descriptor matching Python: {modality:"image", type, info}. No base64.
+                try container.encode("image", forKey: .modality)
+                try container.encode(image.type, forKey: .type)
+                try container.encode(image.info, forKey: .info)
             case .audio(let audio):
                 try container.encode(PartType.audio, forKey: .type)
                 try container.encode(audio.base64Data, forKey: .base64Data)
@@ -124,17 +128,18 @@ extension RTSMessage {
 // MARK: - RTSMessage.ImageContent
 
 extension RTSMessage {
-    /// Base64-encoded image attached to a multi-modal message.
+    /// Redacted descriptor for an image attached to a multi-modal message. Matches the Python
+    /// run-report schema (`{modality: "image", type, info}`); the base64 bytes are dropped at the
+    /// trace boundary and never stored here.
     public struct ImageContent: Sendable, Codable {
-        public let base64Data: String
-        public let mimeType: String
+        /// Source kind: `"local"`, `"url"`, or `"data_uri"`.
+        public let type: String
+        /// Source reference: a file path / URL, or `"..."` for redacted in-memory data.
+        public let info: String
 
-        /// - Parameters:
-        ///   - base64Data: Base64-encoded image bytes.
-        ///   - mimeType: MIME type of the image. Defaults to `"image/jpeg"`.
-        public init(base64Data: String, mimeType: String = "image/jpeg") {
-            self.base64Data = base64Data
-            self.mimeType = mimeType
+        public init(type: String, info: String) {
+            self.type = type
+            self.info = info
         }
     }
 }
@@ -232,7 +237,9 @@ private extension Message.ContentPart {
 
 private extension Message.ImageContent {
     var toRTSImageContent: RTSMessage.ImageContent {
-        RTSMessage.ImageContent(base64Data: base64Data, mimeType: mimeType)
+        // base64 is dropped at the trace boundary; images are embedded as data URIs at send time,
+        // so at the message level they are always `data_uri` with a redacted `info`.
+        RTSMessage.ImageContent(type: "data_uri", info: "...")
     }
 }
 
