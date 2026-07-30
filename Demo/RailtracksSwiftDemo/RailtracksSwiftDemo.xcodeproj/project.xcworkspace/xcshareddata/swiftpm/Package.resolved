@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/Conduit",
       "state" : {
-        "revision" : "d9fd893cd0ca560cd5cb3a0d44317352627f5c36",
-        "version" : "0.3.21"
+        "branch" : "wb-10-image-input-in-chat-session",
+        "revision" : "cc0fde1a375026805c2d09b0d83ee4b53b19ae3f"
       }
     },
     {

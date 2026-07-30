@@ -213,6 +213,13 @@ private extension RTSValue {
             return RTSGeneratedContent(kind: .array(elements.map { $0.toGeneratedContent() }))
         case .object(let props):
             return RTSGeneratedContent(kind: .structure(props.mapValues { $0.toGeneratedContent() }))
+        case .image(let image):
+            // Redacted descriptor for input_kwargs — mirrors RTSValue.image encoding; no base64.
+            return RTSGeneratedContent(kind: .structure([
+                "modality": RTSGeneratedContent(kind: .string("image")),
+                "type": RTSGeneratedContent(kind: .string(image.sourceType)),
+                "info": RTSGeneratedContent(kind: .string(image.sourceInfo))
+            ]))
         }
     }
 }

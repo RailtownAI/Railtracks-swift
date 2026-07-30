@@ -60,12 +60,15 @@ public class RTSFlow: @unchecked Sendable {
     ///   - prompt: User prompt passed to the agent.
     ///   - gateway: Gateway used to build LLM sessions for the agent and any sub-agents.
     ///   - systemMessage: Optional system message applied to the agent's session before the prompt is sent.
+    ///   - images: Optional images attached to the prompt for multimodal (vision) input. Requires a
+    ///     vision-capable cloud model; ignored by on-device (AppleAI) agents.
     /// - Returns: The agent's text output.
     public func run(
         agent: some RTSAgentNode,
         prompt: String,
         gateway: RTSLLMGateway,
-        systemMessage: String? = nil
+        systemMessage: String? = nil,
+        images: [RTSImage] = []
     ) async throws -> String {
         let (nodeInvoker, collector, subscriptions) = await startCollecting()
         let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
@@ -83,6 +86,9 @@ public class RTSFlow: @unchecked Sendable {
         input[agent.inputKeyPrompt] = .string(prompt)
         if let systemMessage {
             input[agent.inputKeySystemMessage] = .string(systemMessage)
+        }
+        if !images.isEmpty {
+            input[agent.inputKeyImages] = .array(images.map { .image($0) })
         }
 
         let outcome: Result<String, Error>

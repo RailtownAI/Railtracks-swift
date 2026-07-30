@@ -259,6 +259,8 @@ extension RTSFlowGraphCollector {
             guard let data = try? JSONEncoder().encode(value),
                   let str = String(data: data, encoding: .utf8) else { return "\(value)" }
             return str
+        case .image(let image):
+            return "[image \(image.mimeType)]"
         }
     }
 

@@ -15,7 +15,7 @@ protocol MessagePublisher {
 
 /// Encapsulation layer for LLM session underneath
 public final class RTSLLMSession: Sendable {
-    private let _run: @Sendable (String, UUID?) async throws -> String
+    private let _run: @Sendable (String, [RTSImage], UUID?) async throws -> String
     private let _setSystemPrompt: @Sendable (String, UUID?) -> Void
     private let _messages: (@Sendable () -> [RTSMessage])
     let messageSubject: BufferedPassthroughSubject<[RTSMessage]>
@@ -33,7 +33,7 @@ public final class RTSLLMSession: Sendable {
     ///   `run` or `setSystemPrompt` call. Subscribers (e.g. `RTSFlowGraphCollector`) use this
     ///   to receive messages stamped with their `runID` without polling `messages()`.
     init(
-        run: @escaping @Sendable (String, UUID?) async throws -> String,
+        run: @escaping @Sendable (String, [RTSImage], UUID?) async throws -> String,
         setSystemPrompt: @escaping @Sendable (String, UUID?) -> Void,
         message: @escaping @Sendable () -> [RTSMessage],
         messageSubject: BufferedPassthroughSubject<[RTSMessage]>,
@@ -47,15 +47,19 @@ public final class RTSLLMSession: Sendable {
     }
 
     public func run(_ prompt: String) async throws -> String {
-        try await run(prompt, runID: nil)
+        try await run(prompt, images: [], runID: nil)
     }
 
     func run(_ prompt: String, runID: UUID) async throws -> String {
-        try await run(prompt, runID: Optional(runID))
+        try await run(prompt, images: [], runID: Optional(runID))
     }
 
-    private func run(_ prompt: String, runID: UUID?) async throws -> String {
-        let response = try await _run(prompt, runID)
+    func run(_ prompt: String, images: [RTSImage], runID: UUID) async throws -> String {
+        try await run(prompt, images: images, runID: Optional(runID))
+    }
+
+    private func run(_ prompt: String, images: [RTSImage], runID: UUID?) async throws -> String {
+        let response = try await _run(prompt, images, runID)
         #if DEBUG
         guard RailtracksSwift.debugMessageFileEnabled else {
             return response
@@ -109,7 +113,10 @@ extension RTSLLMSession {
         let runIDMap = RunIDMap()
         let relay = BufferedPassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
-            run: { prompt, runID in
+            run: { prompt, images, runID in
+                if !images.isEmpty {
+                    log.warning("⚠️ [\(agentName)] AppleAI is text-only; ignoring \(images.count) image input(s).")
+                }
                 let beforeCount = appleAI.messages().count
                 let publishNewMessages: (AppleAIResponse?) -> Void = { response in
                     guard let runID else { return }
@@ -183,7 +190,7 @@ extension RTSLLMSession {
         let runIDMap = RunIDMap()
         let relay = BufferedPassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
-            run: { prompt, runID in
+            run: { prompt, images, runID in
                 // Capturing ids before send to filter out messages that doesn't belong to latest prompt
                 // only works if session is never ran concurrently.  Given each agent own its own session,
                 // and there's no intention to have same agent instance used in parallel pipeline
@@ -200,7 +207,15 @@ extension RTSLLMSession {
                     log.trace("💎 [\(agentName)] run(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }
                 do {
-                    let response = try await chatSession.send(prompt)
+                    let response: String
+                    if images.isEmpty {
+                        response = try await chatSession.send(prompt)
+                    } else {
+                        let parts: [Message.ContentPart] = [.text(prompt)] + images.map {
+                            .image(Message.ImageContent(base64Data: $0.base64Data, mimeType: $0.mimeType))
+                        }
+                        response = try await chatSession.send(parts)
+                    }
                     publishNewMessages()
                     return response
                 } catch {

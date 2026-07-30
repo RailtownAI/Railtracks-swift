@@ -43,16 +43,20 @@ public struct RTSRunContext: Sendable {
         self.createdBy = createdBy
     }
 
-    /// Invoke an agent with a prompt; returns its text result.
+    /// Invoke an agent with a prompt (and optional images for multimodal input); returns its text result.
     public func call(
         _ agent: some RTSAgentNode,
         prompt: String,
-        systemMessage: String? = nil
+        systemMessage: String? = nil,
+        images: [RTSImage] = []
     ) async throws -> String {
         var input = agent.inputs
         input[agent.inputKeyPrompt] = .string(prompt)
         if let systemMessage {
             input[agent.inputKeySystemMessage] = .string(systemMessage)
+        }
+        if !images.isEmpty {
+            input[agent.inputKeyImages] = .array(images.map { .image($0) })
         }
         let output = try await call(agent, input: input)
         guard case let .string(result) = output[agent.outputKeyResult] else {
