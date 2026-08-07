@@ -328,6 +328,10 @@ actor RTSFlowGraphCollector {
         do {
             let json = try encoder.encode(graph)
             log.trace("🎁 Messages: \(String(data: json, encoding: .utf8) ?? "<invalid JSON data>")")
+            try FileManager.default.createDirectory(
+                at: RailtracksSwift.flowGraphOutputDirectory,
+                withIntermediateDirectories: true
+            )
             try json.write(to: url, options: .atomic)
             log.debug("🎁 flow graph JSON written to \(url.path)")
             self.outputFileURLSubject.send(.success(url))
