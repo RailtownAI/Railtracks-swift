@@ -204,6 +204,31 @@ extension RailtracksSwiftTestSuite {
             #expect(!decoded.isEmpty)
         }
 
+        // MARK: - collision detection
+
+        /// Only the pure `collisions(among:)` query is exercised. Constructing an `RTSAgent` with
+        /// colliding tool names is deliberately *not* tested: `RTSAgent.init` calls
+        /// `assertNoCollisions`, which traps in a DEBUG build and would abort the whole test run.
+        @Test("Names that convert to one identifier are reported as colliding")
+        func collidingNamesAreDetected() throws {
+            let collisions = RTSProviderSafeName.collisions(among: [
+                "Photo Search",     // ─┬─ both convert to "Photo_Search"
+                "Photo.Search",     // ─┘
+                "Weather",
+            ])
+            #expect(collisions.count == 1)
+            let colliding = try #require(collisions["Photo_Search"])
+            #expect(Set(colliding) == ["Photo Search", "Photo.Search"])
+            #expect(collisions["Weather"] == nil)
+        }
+
+        @Test("Distinct names report no collisions")
+        func distinctNamesDoNotCollide() {
+            // Escaping keeps non-ASCII names apart where flattening would have collided them.
+            let authored = ["Photo Summary Search", "写真検索", "写真要約", "get-weather", "🎉"]
+            #expect(RTSProviderSafeName.collisions(among: authored).isEmpty)
+        }
+
         @Test("Every sanitized name satisfies the provider rule")
         func allSanitizedNamesAreAccepted() {
             let authored = [

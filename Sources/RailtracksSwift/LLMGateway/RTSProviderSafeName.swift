@@ -115,6 +115,28 @@ enum RTSProviderSafeName {
         return "\(truncated)_h\(RailtracksSwift.equalityHash(normalized).prefix(6))"
     }
 
+    /// Authored names that convert to the same identifier, keyed by that identifier. Only entries
+    /// claimed by more than one name are returned, so an empty result means every name is addressable.
+    static func collisions(among authoredNames: [String]) -> [String: [String]] {
+        Dictionary(grouping: authoredNames, by: { sanitized($0) })
+            .filter { $0.value.count > 1 }
+    }
+
+    /// Reports tool names that collapse onto one identifier at the moment an agent is constructed,
+    /// rather than waiting for its first invocation.
+    ///
+    /// A collision is always a bug: the LLM has one name for two tools, and the provider's tool
+    /// dispatch resolves it by name, so one tool silently shadows the other. `assertionFailure` makes
+    /// that impossible to miss while developing; a shipped app only gets the warning, because
+    /// degrading beats trapping on a user's device.
+    static func assertNoCollisions(among authoredNames: [String], agentName: String) {
+        for (providerFacing, authored) in collisions(among: authoredNames) {
+            let message = "⚠️ [\(agentName)] tool names \(authored) all convert to '\(providerFacing)' — the LLM cannot address them separately"
+            log.warning("\(message)")
+            assertionFailure(message)
+        }
+    }
+
     /// Warns about the rewrites and collisions `sanitized(_:)` introduces for one agent's tool set,
     /// showing each authored name next to the name that replaces it, so a rewrite is visible rather
     /// than silently applied.
@@ -126,8 +148,7 @@ enum RTSProviderSafeName {
             let described = rewrites.map { "'\($0.authored)' → '\($0.providerFacing)'" }
             log.warning("⚠️ [\(agentName)] tool name(s) rewritten to satisfy provider naming rules: \(described)")
         }
-        let collisions = Dictionary(grouping: authoredNames, by: { sanitized($0) })
-            .filter { $0.value.count > 1 }
+        let collisions = collisions(among: authoredNames)
         for (providerFacing, authored) in collisions {
             log.warning("⚠️ [\(agentName)] tool names \(authored) all map to '\(providerFacing)' — the LLM cannot tell them apart")
         }

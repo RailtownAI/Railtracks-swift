@@ -99,5 +99,12 @@ public struct RTSAgent: RTSAgentNode {
         if let systemMessage {
             inputs[inputKeySystemMessage] = .string(systemMessage)
         }
+        // Caught here, at construction, rather than on the first LLM call: two tools whose names
+        // convert to one provider identifier are indistinguishable to the model, and one shadows the
+        // other. The gateway repeats this check for agents built dynamically, which never reach here.
+        RTSProviderSafeName.assertNoCollisions(
+            among: tools.map(\.toolName),
+            agentName: self.agentName
+        )
     }
 }
