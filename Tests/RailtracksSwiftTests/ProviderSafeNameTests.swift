@@ -21,6 +21,30 @@ private struct StubTool: RTSToolNode {
     let callableRoutine = RTSClosure { _ in [:] }
 }
 
+/// Reverses `RTSProviderSafeName`'s `_uXXXX` escapes, standing in for whatever reads a trace and wants
+/// the authored name back. Deliberately a separate implementation, not a call into the library, so the
+/// encoding is pinned by an independent decoder rather than by its own inverse.
+private func decodeEscapes(_ encoded: String) -> String {
+    var units: [UInt16] = []
+    var rest = Substring(encoded)
+    while let escape = rest.range(of: "_u") {
+        units.append(contentsOf: Array(rest[rest.startIndex..<escape.lowerBound].utf16))
+        let hexStart = escape.upperBound
+        guard
+            let hexEnd = rest.index(hexStart, offsetBy: 4, limitedBy: rest.endIndex),
+            let unit = UInt16(rest[hexStart..<hexEnd], radix: 16)
+        else {
+            // Not a well-formed escape — keep it literally and stop.
+            units.append(contentsOf: Array(rest.utf16))
+            return String(decoding: units, as: UTF16.self)
+        }
+        units.append(unit)
+        rest = rest[hexEnd...]
+    }
+    units.append(contentsOf: Array(rest.utf16))
+    return String(decoding: units, as: UTF16.self)
+}
+
 /// The rule every supported provider's function name must satisfy: first character a letter or an
 /// underscore, remainder `[A-Za-z0-9_-]`, at most 64 characters. This is the intersection of the
 /// OpenAI/Anthropic pattern `^[a-zA-Z0-9_-]{1,64}$` and Gemini's (looser) rule.
@@ -68,39 +92,66 @@ extension RailtracksSwiftTestSuite {
             #expect(RTSProviderSafeName.sanitized("-tool") == "_-tool")
         }
 
-        @Test("Accented Latin loses the accent but keeps its shape")
+        @Test("Accented Latin is escaped in place")
         func accentedLatinSanitized() {
-            #expect(RTSProviderSafeName.sanitized("Fotoübersicht") == "Foto_bersicht")
+            #expect(RTSProviderSafeName.sanitized("Fotoübersicht") == "Foto_u00FCbersicht")
+            #expect(RTSProviderSafeName.sanitized("Résumé Parser") == "R_u00E9sum_u00E9_Parser")
         }
 
-        @Test("Non-Latin scripts fall back to a stable hash rather than a row of underscores")
-        func nonLatinScriptsHashed() {
+        @Test("Non-Latin scripts are escaped, not flattened or hashed")
+        func nonLatinScriptsAreEscaped() {
             let japanese = RTSProviderSafeName.sanitized("写真検索")
-            #expect(japanese.hasPrefix("\(RTSProviderSafeName.fallback)_"))
+            #expect(japanese == "_u5199_u771F_u691C_u7D22")
             #expect(isAcceptedByProviders(japanese))
-            // Same authored name always yields the same identifier — no per-process hash seed.
+            // Same authored name always yields the same identifier.
             #expect(RTSProviderSafeName.sanitized("写真検索") == japanese)
             // Two equal-length names of the same script must not collide, which a naive
             // character-for-character replacement would ("____" for both).
             #expect(RTSProviderSafeName.sanitized("写真要約") != japanese)
         }
 
+        @Test("A mixed-script name keeps its ASCII and escapes the rest")
+        func mixedScriptNameEscapesOnlyNonASCII() {
+            // An escape carries its own leading `_` and no trailing one, so the space contributes the
+            // single separator before "Search" rather than doubling it.
+            #expect(RTSProviderSafeName.sanitized("写真 Search") == "_u5199_u771F_Search")
+        }
+
+        @Test("An escaped name decodes back to what was authored")
+        func escapedNamesRoundTrip() {
+            // The point of escaping over flattening: the identifier the provider echoes into the trace
+            // can be read back without a lookup table.
+            for authored in ["写真検索", "Fotoübersicht", "🎉", "Ελληνικά", "Резюме", "写真-検索_v2"] {
+                let sanitized = RTSProviderSafeName.sanitized(authored)
+                #expect(decodeEscapes(sanitized) == authored, "'\(authored)' did not round-trip")
+            }
+        }
+
+        @Test("Illegal ASCII is not recoverable — only non-ASCII is escaped")
+        func illegalASCIIIsNotRecoverable() {
+            // Spaces, dots and colons become `_` by design: the substitution is self-evident, so it is
+            // not worth 6 characters of budget each. Decoding therefore returns the `_` form.
+            #expect(decodeEscapes(RTSProviderSafeName.sanitized("写真 Search")) == "写真_Search")
+        }
+
         @Test("Decomposed and precomposed spellings yield the same identifier")
         func unicodeNormalizationIsStable() {
-            // "Fotoübersicht" with a precomposed U+00FC vs. u + U+0308 combining diaeresis. Both are one
-            // grapheme cluster, so sanitizing (which walks `Character`s) must not depend on normalization —
-            // otherwise the same visible name could reach the provider under two different identifiers.
+            // "Fotoübersicht" with a precomposed U+00FC vs. u + U+0308 combining diaeresis. Escapes are
+            // per UTF-16 unit, so without the NFC pass these would encode differently and one visible
+            // name would reach the provider under two identifiers.
             let precomposed = "Foto\u{00FC}bersicht"
             let decomposed = "Fotou\u{0308}bersicht"
             #expect(precomposed.unicodeScalars.count != decomposed.unicodeScalars.count)
             #expect(RTSProviderSafeName.sanitized(precomposed) == RTSProviderSafeName.sanitized(decomposed))
-            #expect(RTSProviderSafeName.sanitized(decomposed) == "Foto_bersicht")
+            #expect(RTSProviderSafeName.sanitized(decomposed) == "Foto_u00FCbersicht")
         }
 
-        @Test("A multi-scalar emoji collapses to one underscore, not one per scalar")
-        func zeroWidthJoinerEmojiCollapses() {
-            // Family emoji: five scalars joined by ZWJ, a single grapheme cluster.
-            #expect(RTSProviderSafeName.sanitized("photo 👨‍👩‍👧 tool") == "photo___tool")
+        @Test("A multi-scalar emoji escapes every scalar and still round-trips")
+        func zeroWidthJoinerEmojiIsEscaped() {
+            // Family emoji: one grapheme cluster, five scalars joined by ZWJ.
+            let sanitized = RTSProviderSafeName.sanitized("photo 👨‍👩‍👧 tool")
+            #expect(isAcceptedByProviders(sanitized))
+            #expect(decodeEscapes(sanitized) == "photo 👨‍👩‍👧 tool".replacingOccurrences(of: " ", with: "_"))
         }
 
         @Test("Emoji-only and empty names are still legal identifiers")
@@ -110,12 +161,47 @@ extension RailtracksSwiftTestSuite {
             #expect(RTSProviderSafeName.sanitized("🎉🎉") != RTSProviderSafeName.sanitized(""))
         }
 
+        @Test("Names with nothing decodable fall back to distinct hashes")
+        func punctuationOnlyNamesStayDistinct() {
+            let identifiers = ["", "  ", "...", "___"].map { RTSProviderSafeName.sanitized($0) }
+            for identifier in identifiers {
+                #expect(isAcceptedByProviders(identifier))
+            }
+            // Nothing survives escaping for any of these, so only a hash keeps them apart.
+            #expect(Set(identifiers).count == identifiers.count)
+        }
+
         @Test("Over-long names are truncated to the shortest provider limit")
         func overLongNamesTruncated() {
             let authored = String(repeating: "a", count: 200)
             let sanitized = RTSProviderSafeName.sanitized(authored)
             #expect(sanitized.count == RTSProviderSafeName.maxLength)
             #expect(isAcceptedByProviders(sanitized))
+        }
+
+        @Test("Truncation keeps names distinct even when they share a long prefix")
+        func truncationStaysUnique() {
+            let shared = String(repeating: "a", count: 80)
+            let first = RTSProviderSafeName.sanitized(shared + "one")
+            let second = RTSProviderSafeName.sanitized(shared + "two")
+            #expect(first != second)
+            #expect(isAcceptedByProviders(first))
+            #expect(isAcceptedByProviders(second))
+        }
+
+        @Test("Truncation never splits an escape sequence")
+        func truncationCutsOnEscapeBoundaries() {
+            // 20 CJK characters: 120 characters of escapes, well past the limit.
+            let authored = String(repeating: "写真検索記録", count: 4)
+            let sanitized = RTSProviderSafeName.sanitized(authored)
+            #expect(sanitized.count <= RTSProviderSafeName.maxLength)
+            #expect(isAcceptedByProviders(sanitized))
+            // Drop the `_h<hash>` uniqueness suffix, then every remaining escape must be whole —
+            // a split escape would silently decode to a different character.
+            let body = sanitized.components(separatedBy: "_h")[0]
+            let decoded = decodeEscapes(body)
+            #expect(authored.hasPrefix(decoded), "decoded prefix '\(decoded)' is not a prefix of the authored name")
+            #expect(!decoded.isEmpty)
         }
 
         @Test("Every sanitized name satisfies the provider rule")
