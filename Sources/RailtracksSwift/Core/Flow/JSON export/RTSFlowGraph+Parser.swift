@@ -225,6 +225,18 @@ private extension RTSValue {
 }
 
 private extension RTSMessage {
+    /// Tool names in the message log are the provider-facing ones and are *deliberately* not mapped
+    /// back to the authored spelling.
+    ///
+    /// Both `name` fields below carry what the provider echoes — the identifier `RTSProviderSafeName`
+    /// registered — while `nodes[].name`, `nodes[].parent.name` and `steps[].identifier` carry the
+    /// authored name. So one trace holds both `Photo Summary Search` (graph) and
+    /// `Photo_Summary_Search` (messages) for the same tool.
+    ///
+    /// This mirrors the Python engine, which sanitizes the same way and likewise leaves the reader to
+    /// connect the two spellings. Normalizing either direction here would make the two engines' traces
+    /// diverge, which costs more than the split does: nothing joins these fields by name — the
+    /// visualizer and `RTSEvaluationIngest` both correlate through the graph edges.
     func toFlowGraphMessage() -> RTSFlowGraphMessage {
         let content: RTSGeneratedContent
         if role == .tool, let toolCallID = metadata?.custom?["tool_call_id"] {

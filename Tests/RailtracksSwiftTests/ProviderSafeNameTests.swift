@@ -10,6 +10,9 @@
 import Testing
 import Foundation
 @testable import RailtracksSwift
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 /// Tool whose name is supplied by the test.
 private struct StubTool: RTSToolNode {
@@ -20,6 +23,58 @@ private struct StubTool: RTSToolNode {
     let parameterSchema = RTSToolSchema(parameters: [])
     let callableRoutine = RTSClosure { _ in [:] }
 }
+
+#if canImport(FoundationModels)
+
+/// AppleAI tool that **cannot** be bridged: `RTSAppleAIToolBridge` requires
+/// `Arguments: Encodable & Generable, Output == String`, and these `Arguments` are `Generable` but not
+/// `Encodable`. `makeAppleAIBridge` therefore returns `nil` and `AppleAISession.build` hands this value
+/// to `LanguageModelSession` directly — the path with no bridge to sanitize on its behalf.
+@available(macOS 26, iOS 26, *)
+private struct UnbridgeableAppleAITool: RTSAppleAIToolNode {
+    let id = UUID()
+    var inputs: RTSInput = [:]
+    let toolName: String
+    let toolDescription = "stub AppleAI tool"
+    let callableRoutine = RTSClosure { _ in [:] }
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Any short string.")
+        var input: String
+    }
+
+    typealias Output = String
+
+    func call(arguments: Arguments) async throws -> String {
+        "ok"
+    }
+}
+
+/// AppleAI tool that satisfies the bridge's constraints, so it reaches the model through
+/// `RTSAppleAIToolBridge` instead.
+@available(macOS 26, iOS 26, *)
+private struct BridgeableAppleAITool: RTSAppleAIToolNode {
+    let id = UUID()
+    var inputs: RTSInput = [:]
+    let toolName: String
+    let toolDescription = "stub AppleAI tool"
+    let callableRoutine = RTSClosure { _ in [:] }
+
+    @Generable
+    struct Arguments: Encodable {
+        @Guide(description: "Any short string.")
+        var input: String
+    }
+
+    typealias Output = String
+
+    func call(arguments: Arguments) async throws -> String {
+        "ok"
+    }
+}
+
+#endif
 
 /// Reverses `RTSProviderSafeName`'s `_uXXXX` escapes, standing in for whatever reads a trace and wants
 /// the authored name back. Deliberately a separate implementation, not a call into the library, so the
@@ -43,6 +98,48 @@ private func decodeEscapes(_ encoded: String) -> String {
     }
     units.append(contentsOf: Array(rest.utf16))
     return String(decoding: units, as: UTF16.self)
+}
+
+/// Accumulates the diagnostics `RTSProviderSafeName.reportCollision` would otherwise have sent to
+/// `assertionFailure`. `@unchecked Sendable` is sound here: the reporter is invoked synchronously on
+/// the calling thread, and the target is serialized (see `RailtracksSwiftTestSuite`).
+private final class CollisionRecorder: @unchecked Sendable {
+    var messages: [String] = []
+}
+
+/// Runs `body` with the collision reporter swapped for a collector, and returns everything it
+/// reported. Without this the calls below would trap in a DEBUG build and abort the test run — which
+/// is exactly the behavior under test, so it has to be observed rather than triggered.
+private func recordingCollisions(during body: () -> Void) -> [String] {
+    let recorder = CollisionRecorder()
+    let previous = RTSProviderSafeName.reportCollision
+    RTSProviderSafeName.reportCollision = { message in
+        recorder.messages.append(message)
+    }
+    defer {
+        RTSProviderSafeName.reportCollision = previous
+    }
+    body()
+    return recorder.messages
+}
+
+/// Custom `RTSAgentNode` conformer — the case `RTSAgent.init` could never have covered.
+private struct StubAgentNode: RTSAgentNode {
+    let id = UUID()
+    var inputs: RTSInput = [:]
+    let agentName: String
+    let tools: [any RTSToolNode]
+    let llmProvider: RTSLLMProvider = .openAI(modelIDString: "gpt-4o")
+    let outputSchema: RTSOutputSchema? = nil
+}
+
+/// Drives `RTSLLMGateway.buildSession` far enough to run the name checks, which happen before the
+/// provider switch. The build itself is expected to fail on the missing API key — that failure is not
+/// what is under test here, and swallowing it keeps these tests offline.
+private func buildSessionIgnoringProviderErrors(for agent: any RTSAgentNode) {
+    let gateway = RTSLLMGateway(apiKeys: [:])
+    let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+    _ = try? gateway.session(invoker: invoker, agentNode: agent, onNewSession: { _ in })
 }
 
 /// The rule every supported provider's function name must satisfy: first character a letter or an
@@ -206,9 +303,6 @@ extension RailtracksSwiftTestSuite {
 
         // MARK: - collision detection
 
-        /// Only the pure `collisions(among:)` query is exercised. Constructing an `RTSAgent` with
-        /// colliding tool names is deliberately *not* tested: `RTSAgent.init` calls
-        /// `assertNoCollisions`, which traps in a DEBUG build and would abort the whole test run.
         @Test("Names that convert to one identifier are reported as colliding")
         func collidingNamesAreDetected() throws {
             let collisions = RTSProviderSafeName.collisions(among: [
@@ -251,6 +345,160 @@ extension RailtracksSwiftTestSuite {
             }
         }
 
+        // MARK: - collision reporting
+
+        @Test("A collision is escalated once per colliding identifier, naming agent and tools")
+        func collisionIsReported() throws {
+            let reported = recordingCollisions {
+                RTSProviderSafeName.assertNoCollisions(
+                    among: ["Photo Search", "Photo.Search", "Weather"],
+                    agentName: "Root Agent"
+                )
+            }
+
+            let message = try #require(reported.first)
+            #expect(reported.count == 1)
+            // The developer has to be able to act on this without reading the library: which agent,
+            // which authored names, and the identifier they collapse onto.
+            #expect(message.contains("Root Agent"))
+            #expect(message.contains("Photo Search"))
+            #expect(message.contains("Photo.Search"))
+            #expect(message.contains("Photo_Search"))
+            #expect(!message.contains("Weather"))
+        }
+
+        @Test("Two tools sharing one authored name are escalated too")
+        func exactDuplicateNamesAreReported() {
+            // The case that used to pass silently, with one tool shadowing the other at dispatch.
+            let reported = recordingCollisions {
+                RTSProviderSafeName.assertNoCollisions(
+                    among: ["Search", "Search"],
+                    agentName: "Root Agent"
+                )
+            }
+            #expect(reported.count == 1)
+        }
+
+        @Test("Distinct names escalate nothing")
+        func distinctNamesAreNotReported() {
+            let reported = recordingCollisions {
+                RTSProviderSafeName.assertNoCollisions(
+                    among: ["Photo Summary Search", "写真検索", "get-weather"],
+                    agentName: "Root Agent"
+                )
+            }
+            #expect(reported.isEmpty)
+        }
+
+        @Test("Identical names are reported as duplication, not as a rewriting collision")
+        func duplicateMessageDescribesDuplication() throws {
+            let reported = recordingCollisions {
+                RTSProviderSafeName.assertNoCollisions(
+                    among: ["Photo Search", "Photo Search"],
+                    agentName: "Root Agent"
+                )
+            }
+
+            let message = try #require(reported.first)
+            #expect(message.contains("2 tools are named 'Photo Search'"))
+            #expect(message.contains("distinct toolName"))
+            // Rewriting is a red herring here — the authored names are already identical.
+            #expect(!message.contains("rewritten"))
+        }
+
+        @Test("Distinct names that converge explain the rewriting and the way out")
+        func rewritingCollisionExplainsTheCause() throws {
+            let reported = recordingCollisions {
+                RTSProviderSafeName.assertNoCollisions(
+                    among: ["Photo Search", "Photo.Search"],
+                    agentName: "Root Agent"
+                )
+            }
+
+            let message = try #require(reported.first)
+            #expect(message.contains("rewritten"))
+            #expect(message.contains("[A-Za-z0-9_-]"))
+            #expect(message.contains("'Photo Search'"))
+            #expect(message.contains("'Photo.Search'"))
+        }
+
+        @Test("A group mixing both causes lists each authored name once")
+        func mixedCollisionGroupListsNamesOnce() throws {
+            // "Photo Search" twice plus "Photo.Search": both spellings rewrite to "Photo_Search", so
+            // the group holds a duplicate *and* a rewriting collision at once.
+            let reported = recordingCollisions {
+                RTSProviderSafeName.assertNoCollisions(
+                    among: ["Photo Search", "Photo Search", "Photo.Search"],
+                    agentName: "Root Agent"
+                )
+            }
+
+            let message = try #require(reported.first)
+            #expect(message.components(separatedBy: "'Photo Search'").count - 1 == 1)
+            #expect(message.contains("'Photo.Search'"))
+            // One group, one diagnostic — two would read as two separate bugs.
+            #expect(reported.count == 1)
+        }
+
+        @Test("Building a session for an agent with colliding tool names escalates")
+        func sessionBuildReportsCollision() throws {
+            // The report has to reach the developer while the session is assembled, before the tool
+            // set is handed to the model.
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Root Agent",
+                tools: [
+                    StubTool(toolName: "Photo Search"),
+                    StubTool(toolName: "Photo.Search"),
+                ]
+            )
+            let reported = recordingCollisions {
+                buildSessionIgnoringProviderErrors(for: agent)
+            }
+
+            let message = try #require(reported.first)
+            #expect(reported.count == 1)
+            #expect(message.contains("Root Agent"))
+            #expect(message.contains("Photo_Search"))
+        }
+
+        @Test("A custom RTSAgentNode conformer is checked too, not just RTSAgent")
+        func customAgentNodeReportsCollision() throws {
+            // The reason the check lives in the gateway rather than in `RTSAgent.init`: a conformer
+            // that assembles its own tool list never runs that initializer, and an app generating tool
+            // names dynamically is the likeliest source of a collision.
+            let agent = StubAgentNode(
+                agentName: "Dynamic Agent",
+                tools: [
+                    StubTool(toolName: "Photo Search"),
+                    StubTool(toolName: "Photo.Search"),
+                ]
+            )
+            let reported = recordingCollisions {
+                buildSessionIgnoringProviderErrors(for: agent)
+            }
+
+            let message = try #require(reported.first)
+            #expect(message.contains("Dynamic Agent"))
+            #expect(message.contains("Photo_Search"))
+        }
+
+        @Test("Building a session with distinct tool names escalates nothing")
+        func sessionBuildStaysQuietWhenNamesAreDistinct() {
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Root Agent",
+                tools: [
+                    StubTool(toolName: "Photo Search"),
+                    StubTool(toolName: "Weather Lookup"),
+                ]
+            )
+            let reported = recordingCollisions {
+                buildSessionIgnoringProviderErrors(for: agent)
+            }
+            #expect(reported.isEmpty)
+        }
+
         // MARK: - bridges
 
         @Test("Conduit tool bridge presents the sanitized name, node keeps the authored one")
@@ -265,6 +513,50 @@ extension RailtracksSwiftTestSuite {
             #expect(tool.toolName == "Photo Summary Search")
             #expect(tool.name() == "Photo Summary Search")
         }
+
+        #if canImport(FoundationModels)
+
+        @Test("An unbridgeable AppleAI tool still presents a sanitized name to FoundationModels")
+        func unbridgeableAppleAIToolSanitizesItsOwnName() throws {
+            guard #available(macOS 26, iOS 26, *) else {
+                print("⏭️  AppleAI naming test skipped — requires macOS 26 / iOS 26.")
+                return
+            }
+
+            let tool = UnbridgeableAppleAITool(toolName: "Photo Search")
+            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let agent = RTSAgent(llmProvider: .appleAI, name: "Root Agent")
+
+            // Precondition for this test to mean anything: no bridge, so `AppleAISession.build` passes
+            // the conformer itself to `LanguageModelSession`.
+            #expect(tool.makeAppleAIBridge(invoker: invoker, createdBy: agent) == nil)
+
+            // The model-facing identifier, which is the whole purpose of `Tool.name`.
+            let modelFacing: String = tool.name
+            #expect(modelFacing == "Photo_Search")
+            // The authored spelling survives on everything the trace reads.
+            #expect(tool.toolName == "Photo Search")
+            #expect(tool.name() == "Photo Search")
+        }
+
+        @Test("A bridged AppleAI tool presents the same identifier as the unbridged path")
+        func bridgedAppleAIToolSanitizesToTheSameName() throws {
+            guard #available(macOS 26, iOS 26, *) else {
+                print("⏭️  AppleAI naming test skipped — requires macOS 26 / iOS 26.")
+                return
+            }
+
+            let tool = BridgeableAppleAITool(toolName: "Photo Search")
+            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let agent = RTSAgent(llmProvider: .appleAI, name: "Root Agent")
+
+            let bridge = try #require(tool.makeAppleAIBridge(invoker: invoker, createdBy: agent))
+            // The bridge sanitizes an already-sanitized name; `sanitized(_:)` is idempotent on its own
+            // output, so both AppleAI paths and the cloud bridges agree on one identifier.
+            #expect(bridge.name == "Photo_Search")
+        }
+
+        #endif
 
         @Test("Agent-as-tool bridge sanitizes the wrapped agent's name")
         func conduitAgentToolBridgeSanitizes() {

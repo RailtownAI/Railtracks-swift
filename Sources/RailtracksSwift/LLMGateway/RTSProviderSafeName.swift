@@ -122,35 +122,86 @@ enum RTSProviderSafeName {
             .filter { $0.value.count > 1 }
     }
 
-    /// Reports tool names that collapse onto one identifier at the moment an agent is constructed,
-    /// rather than waiting for its first invocation.
+    /// The diagnostic for one collision group.
+    ///
+    /// Split in two because the two ways a group forms need different fixes, and one explanation
+    /// actively misleads in the other's case. Identical authored names are a plain duplicate — saying
+    /// they "convert to" a shared identifier reads as a no-op and sends the developer looking at the
+    /// sanitizer. Distinct names that converge are a consequence of provider-safe rewriting, which a
+    /// developer has no reason to have in mind until it is named.
+    static func collisionMessage(
+        providerFacing: String,
+        authored: [String],
+        agentName: String
+    ) -> String {
+        let distinct = Set(authored).sorted()
+        // The authored spelling, not `providerFacing`: the duplicate is in what the developer wrote.
+        if let onlyName = distinct.first, distinct.count == 1 {
+            return """
+                ⚠️ [\(agentName)] \(authored.count) tools are named '\(onlyName)'. The LLM addresses a \
+                tool by name, so it cannot tell them apart and every call dispatches to whichever tool \
+                registered last. Give each tool a distinct toolName.
+                """
+        }
+        // Deduplicated: a group can mix both causes (two tools named "Search" plus one "Search."),
+        // and repeating a name in the list makes the rewriting point harder to see.
+        let listed = distinct.map { "'\($0)'" }.joined(separator: ", ")
+        return """
+            ⚠️ [\(agentName)] tool names \(listed) all become '\(providerFacing)' once rewritten for the \
+            provider, which accepts only [A-Za-z0-9_-]. The LLM cannot address them separately. Choose \
+            names that stay distinct after non-alphanumeric characters are replaced.
+            """
+    }
+
+    /// How a detected collision is escalated after it has been logged. Defaults to
+    /// `assertionFailure`, which traps in a DEBUG build and is compiled out of a release one.
+    ///
+    /// This exists as a seam for the library's own tests. Calling `assertNoCollisions` with colliding
+    /// names would otherwise abort the whole test run, which left the one diagnostic that is meant to
+    /// be impossible to miss as the only behavior here with no coverage. A test installs a collector,
+    /// asserts on the message, and restores the previous value in a `defer`.
+    ///
+    /// Not synchronized, and nothing outside the tests should assign it: production only ever reads
+    /// it, and the test target is `.serialized` (see `RailtracksSwiftTestSuite`).
+    nonisolated(unsafe) static var reportCollision: @Sendable (String) -> Void = { message in
+        assertionFailure(message)
+    }
+
+    /// Reports tool names that collapse onto one identifier, called from `RTSLLMGateway.buildSession`
+    /// so it covers every agent — `RTSAgent` and custom `RTSAgentNode` conformers alike — and fires
+    /// while the session is being built, before the tool set reaches the model.
     ///
     /// A collision is always a bug: the LLM has one name for two tools, and the provider's tool
-    /// dispatch resolves it by name, so one tool silently shadows the other. `assertionFailure` makes
+    /// dispatch resolves it by name, so one tool silently shadows the other. `reportCollision` makes
     /// that impossible to miss while developing; a shipped app only gets the warning, because
     /// degrading beats trapping on a user's device.
     static func assertNoCollisions(among authoredNames: [String], agentName: String) {
         for (providerFacing, authored) in collisions(among: authoredNames) {
-            let message = "⚠️ [\(agentName)] tool names \(authored) all convert to '\(providerFacing)' — the LLM cannot address them separately"
+            let message = collisionMessage(
+                providerFacing: providerFacing,
+                authored: authored,
+                agentName: agentName
+            )
             log.warning("\(message)")
-            assertionFailure(message)
+            reportCollision(message)
         }
     }
 
-    /// Warns about the rewrites and collisions `sanitized(_:)` introduces for one agent's tool set,
-    /// showing each authored name next to the name that replaces it, so a rewrite is visible rather
-    /// than silently applied.
+    /// Warns about the rewrites `sanitized(_:)` introduces for one agent's tool set, showing each
+    /// authored name next to the name that replaces it, so a rewrite is visible rather than silently
+    /// applied.
+    ///
+    /// Informational only: a rewrite is expected and harmless. Collisions are the bug, and they are
+    /// reported by `assertNoCollisions` — called alongside this from the same place — so that one
+    /// condition produces one log line rather than two.
     static func logRewrites(of authoredNames: [String], agentName: String) {
         let rewrites = authoredNames
             .map { (authored: $0, providerFacing: sanitized($0)) }
             .filter { $0.authored != $0.providerFacing }
-        if !rewrites.isEmpty {
-            let described = rewrites.map { "'\($0.authored)' → '\($0.providerFacing)'" }
-            log.warning("⚠️ [\(agentName)] tool name(s) rewritten to satisfy provider naming rules: \(described)")
+        guard !rewrites.isEmpty else {
+            return
         }
-        let collisions = collisions(among: authoredNames)
-        for (providerFacing, authored) in collisions {
-            log.warning("⚠️ [\(agentName)] tool names \(authored) all map to '\(providerFacing)' — the LLM cannot tell them apart")
-        }
+        let described = rewrites.map { "'\($0.authored)' → '\($0.providerFacing)'" }
+        log.warning("⚠️ [\(agentName)] tool name(s) rewritten to satisfy provider naming rules: \(described)")
     }
 }
