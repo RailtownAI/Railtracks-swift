@@ -16,7 +16,8 @@ struct RTSConduitToolBridge: Tool {
     internal let nodeInvoker: RTSNodeInvoker
     internal let createdBy: any RTSAgentNode
 
-    var name: String { node.name() }
+    /// Sanitized: providers reject function names outside `[A-Za-z0-9_-]`. See `RTSProviderSafeName`.
+    var name: String { RTSProviderSafeName.sanitized(node.name()) }
     var description: String { node.toolDescription }
     var parameters: GenerationSchema { node.parameterSchema.toGenerationSchema() }
 

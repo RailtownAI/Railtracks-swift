@@ -32,7 +32,9 @@ struct RTSConduitAgentToolBridge: Tool {
         self.createdBy = createdBy
     }
 
-    var name: String { agentTool.name() }
+    /// Sanitized: an agent-as-tool takes its name from `agentName`, which is written for humans and
+    /// so is especially likely to contain spaces. See `RTSProviderSafeName`.
+    var name: String { RTSProviderSafeName.sanitized(agentTool.name()) }
     var description: String { agentTool.toolDescription }
     var parameters: GenerationSchema { agentTool.parameterSchema.toGenerationSchema() }
 

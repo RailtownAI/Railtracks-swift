@@ -35,7 +35,8 @@ struct RTSConduitOrchestratorToolBridge: Tool {
         self.createdBy = createdBy
     }
 
-    var name: String { orchestratorTool.name() }
+    /// Sanitized: providers reject function names outside `[A-Za-z0-9_-]`. See `RTSProviderSafeName`.
+    var name: String { RTSProviderSafeName.sanitized(orchestratorTool.name()) }
     var description: String { orchestratorTool.toolDescription }
     var parameters: GenerationSchema { orchestratorTool.parameterSchema.toGenerationSchema() }
 

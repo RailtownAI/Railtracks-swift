@@ -34,6 +34,10 @@ public struct RTSLLMGateway: Sendable {
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
     ) throws -> RTSLLMSession {
         let provider = agentNode.llmProvider
+        RTSProviderSafeName.logRewrites(
+            of: agentNode.tools.map(\.toolName),
+            agentName: agentNode.agentName
+        )
         switch provider {
         case .appleAI:
             guard #available(macOS 26, iOS 26, *) else {

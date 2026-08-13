@@ -37,7 +37,7 @@ struct RTSAppleAIAgentToolBridge: Tool {
         nodeInvoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode
     ) {
-        self.name = agentTool.name()
+        self.name = RTSProviderSafeName.sanitized(agentTool.name())
         self.description = agentTool.toolDescription
         self.parameters = parameters
         self.agentTool = agentTool
