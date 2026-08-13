@@ -81,54 +81,56 @@ struct TaskLocalProbeTool: Tool {
     }
 }
 
-@Suite("AppleAI task-local propagation probe")
-struct AppleAITaskLocalProbeTests {
+extension RailtracksSwiftTestSuite {
+    @Suite("AppleAI task-local propagation probe")
+    struct AppleAITaskLocalProbeTests {
 
-    @Test("LanguageModelSession.respond preserves @TaskLocal into Tool.call")
-    func respondPreservesTaskLocal() async throws {
-        guard #available(macOS 26, iOS 26, *) else {
-            print("⏭️  AppleAI probe skipped — requires macOS 26 / iOS 26.")
-            return
-        }
+        @Test("LanguageModelSession.respond preserves @TaskLocal into Tool.call")
+        func respondPreservesTaskLocal() async throws {
+            guard #available(macOS 26, iOS 26, *) else {
+                print("⏭️  AppleAI probe skipped — requires macOS 26 / iOS 26.")
+                return
+            }
 
-        let availability = SystemLanguageModel.default.availability
-        guard case .available = availability else {
-            print("⏭️  AppleAI probe skipped — on-device model unavailable: \(availability). "
-                + "Run this from the Demo app (Xcode) where the model is reachable, if `swift test` can't see it.")
-            return
-        }
+            let availability = SystemLanguageModel.default.availability
+            guard case .available = availability else {
+                print("⏭️  AppleAI probe skipped — on-device model unavailable: \(availability). "
+                    + "Run this from the Demo app (Xcode) where the model is reachable, if `swift test` can't see it.")
+                return
+            }
 
-        let recorder = ProbeRecorder()
-        let expected = UUID()
-        let tool = TaskLocalProbeTool(recorder: recorder)
+            let recorder = ProbeRecorder()
+            let expected = UUID()
+            let tool = TaskLocalProbeTool(recorder: recorder)
 
-        try await TaskLocalProbe.$marker.withValue(expected) {
-            let session = LanguageModelSession(
-                tools: [tool],
-                instructions: "You must call the task_local_probe tool exactly once."
+            try await TaskLocalProbe.$marker.withValue(expected) {
+                let session = LanguageModelSession(
+                    tools: [tool],
+                    instructions: "You must call the task_local_probe tool exactly once."
+                )
+                _ = try await session.respond(
+                    to: "Call the task_local_probe tool now with input 'go'."
+                )
+            }
+
+            // Three distinct outcomes:
+            //   • tool never called       → inconclusive (model chose not to call it — not a result)
+            //   • called, observed match  → task-locals propagate → the fix works as designed
+            //   • called, observed nil    → Apple severs the task tree → use explicit-propagation fallback
+            guard recorder.wasCalled else {
+                Issue.record("Inconclusive: the model did not call the probe tool. Re-run, or adjust the prompt.")
+                return
+            }
+
+            #expect(
+                recorder.observed == expected,
+                """
+                Apple did NOT preserve the task-local into Tool.call (observed=\(String(describing: recorder.observed))).
+                The AppleAI path needs the explicit-propagation fallback (thread the parent invocation id
+                through AppleAISession → RTSAppleAIToolBridge.createdBy) instead of a @TaskLocal.
+                """
             )
-            _ = try await session.respond(
-                to: "Call the task_local_probe tool now with input 'go'."
-            )
         }
-
-        // Three distinct outcomes:
-        //   • tool never called       → inconclusive (model chose not to call it — not a result)
-        //   • called, observed match  → task-locals propagate → the fix works as designed
-        //   • called, observed nil    → Apple severs the task tree → use explicit-propagation fallback
-        guard recorder.wasCalled else {
-            Issue.record("Inconclusive: the model did not call the probe tool. Re-run, or adjust the prompt.")
-            return
-        }
-
-        #expect(
-            recorder.observed == expected,
-            """
-            Apple did NOT preserve the task-local into Tool.call (observed=\(String(describing: recorder.observed))).
-            The AppleAI path needs the explicit-propagation fallback (thread the parent invocation id
-            through AppleAISession → RTSAppleAIToolBridge.createdBy) instead of a @TaskLocal.
-            """
-        )
     }
 }
 

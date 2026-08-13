@@ -27,46 +27,48 @@ private struct StubOrchestrator: RTSOrchestratorNode {
 }
 
 // Serialized: runs a full `RTSFlow`, which touches the process-global `flowGraphOutputDirectory`.
-@Suite("Output directory", .serialized)
-struct OutputDirectoryTests {
+extension RailtracksSwiftTestSuite {
+    @Suite("Output directory", .serialized)
+    struct OutputDirectoryTests {
 
-    /// The exact file this flow wrote, via its `outputFileURLPublisher`. Throws on `.failure`, so a
-    /// write error (the pre-fix behavior when the directory is missing) fails the test.
-    private func writtenTraceURL(_ flow: RTSFlow) async throws -> URL {
-        for await result in flow.outputFileURLPublisher.values {
-            switch result {
-            case .success(let url):
-                return url
-            case .failure(let error):
-                throw error
+        /// The exact file this flow wrote, via its `outputFileURLPublisher`. Throws on `.failure`, so a
+        /// write error (the pre-fix behavior when the directory is missing) fails the test.
+        private func writtenTraceURL(_ flow: RTSFlow) async throws -> URL {
+            for await result in flow.outputFileURLPublisher.values {
+                switch result {
+                case .success(let url):
+                    return url
+                case .failure(let error):
+                    throw error
+                }
             }
-        }
-        struct NoTraceURL: Error {}
-        throw NoTraceURL()
-    }
-
-    @Test("flow run creates a missing output directory and writes the report")
-    func createsMissingOutputDirectory() async throws {
-        // A unique, nested path guaranteed not to exist — exercises intermediate-directory creation.
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rts-test-\(UUID().uuidString)", isDirectory: true)
-        let outputDirectory = base.appendingPathComponent("sessions", isDirectory: true)
-        #expect(!FileManager.default.fileExists(atPath: outputDirectory.path))
-        defer {
-            try? FileManager.default.removeItem(at: base)
+            struct NoTraceURL: Error {}
+            throw NoTraceURL()
         }
 
-        RailtracksSwift.flowGraphOutputDirectory = outputDirectory
+        @Test("flow run creates a missing output directory and writes the report")
+        func createsMissingOutputDirectory() async throws {
+            // A unique, nested path guaranteed not to exist — exercises intermediate-directory creation.
+            let base = FileManager.default.temporaryDirectory
+                .appendingPathComponent("rts-test-\(UUID().uuidString)", isDirectory: true)
+            let outputDirectory = base.appendingPathComponent("sessions", isDirectory: true)
+            #expect(!FileManager.default.fileExists(atPath: outputDirectory.path))
+            defer {
+                try? FileManager.default.removeItem(at: base)
+            }
 
-        let root = StubOrchestrator(nodeName: "Root") { _, _ in
-            ["result": .string("ok")]
+            RailtracksSwift.flowGraphOutputDirectory = outputDirectory
+
+            let root = StubOrchestrator(nodeName: "Root") { _, _ in
+                ["result": .string("ok")]
+            }
+            let flow = RTSFlow(title: "OutputDirCreate")
+            _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            // Before the fix this emitted `.failure(writeFileFailed)`, so `writtenTraceURL` would throw.
+            let url = try await writtenTraceURL(flow)
+            #expect(FileManager.default.fileExists(atPath: url.path))
+            #expect(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path))
         }
-        let flow = RTSFlow(title: "OutputDirCreate")
-        _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
-
-        // Before the fix this emitted `.failure(writeFileFailed)`, so `writtenTraceURL` would throw.
-        let url = try await writtenTraceURL(flow)
-        #expect(FileManager.default.fileExists(atPath: url.path))
-        #expect(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path))
     }
 }
