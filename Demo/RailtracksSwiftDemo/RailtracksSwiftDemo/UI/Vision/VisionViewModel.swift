@@ -6,6 +6,7 @@
 import Foundation
 import RailtracksSwift
 import Logging
+import ImageIO
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -25,8 +26,41 @@ class VisionViewModel {
 
     /// Normalize picked photo data (which may be HEIC/PNG/…) to JPEG.
     func setPickedImage(_ data: Data) {
-        pickedImageData = Self.jpegData(from: data) ?? data
+        let normalized = Self.jpegData(from: data) ?? data
+        Self.logDimensions(original: data, normalized: normalized)
+        pickedImageData = normalized
         promptResult = ""
+    }
+
+    /// Logs the pixel dimensions on both sides of the JPEG re-encode.
+    ///
+    /// Gemini charges 258 tokens for an image no larger than 384px in either dimension, and tiles
+    /// anything bigger into 768×768 tiles at 258 tokens each — so a large photo cannot cost less than
+    /// four tiles. An observed 258 therefore means the model received a sub-384px image, and these two
+    /// lines say whether it arrived that way or whether `jpegData(from:)` shrank it.
+    private static func logDimensions(original: Data, normalized: Data) {
+        let describe: (Data) -> String = { data in
+            guard let size = pixelSize(of: data) else {
+                return "unreadable (\(data.count) bytes)"
+            }
+            return "\(size.width)×\(size.height) (\(data.count) bytes)"
+        }
+        Log.debug("🖼️ picked image: \(describe(original))")
+        Log.debug("🖼️ after JPEG normalize: \(describe(normalized))")
+    }
+
+    /// True pixel dimensions, read from the image header rather than by decoding — `UIImage.size` is in
+    /// points, so it would need scaling to mean anything here.
+    private static func pixelSize(of data: Data) -> (width: Int, height: Int)? {
+        guard
+            let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? Int,
+            let height = properties[kCGImagePropertyPixelHeight] as? Int
+        else {
+            return nil
+        }
+        return (width, height)
     }
 
     func startPrompt() {
