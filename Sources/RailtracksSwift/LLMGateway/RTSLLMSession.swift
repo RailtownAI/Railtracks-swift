@@ -172,7 +172,7 @@ extension RTSLLMSession {
         model: P.ModelID,
         agentNode: any RTSAgentNode,
         conduitTools: [any Tool],
-        applyProviderOptions: @Sendable (inout GenerateConfig) -> Void = { _ in }
+        applyProviderOptions: @Sendable (inout GenerateConfig) -> Void
     ) throws -> RTSLLMSession {
         let agentName = agentNode.agentName
         let providerName = agentNode.llmProvider.providerName

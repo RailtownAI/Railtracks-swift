@@ -34,10 +34,11 @@ class VisionViewModel {
 
     /// Logs the pixel dimensions on both sides of the JPEG re-encode.
     ///
-    /// Gemini charges 258 tokens for an image no larger than 384px in either dimension, and tiles
-    /// anything bigger into 768×768 tiles at 258 tokens each — so a large photo cannot cost less than
-    /// four tiles. An observed 258 therefore means the model received a sub-384px image, and these two
-    /// lines say whether it arrived that way or whether `jpegData(from:)` shrank it.
+    /// Kept because image token cost is not readable from the image itself. On Gemini 3.x every
+    /// `mediaResolution` level is a flat per-image allocation, so these dimensions do not change the
+    /// cost at all; on 2.5 they matter only at `.high`, which tiles. What the two lines are actually
+    /// for is confirming the picked photo reaches the provider at full size — whether
+    /// `jpegData(from:)` shrank it — which affects the detail the model sees, not the token count.
     private static func logDimensions(original: Data, normalized: Data) {
         let describe: (Data) -> String = { data in
             guard let size = pixelSize(of: data) else {
@@ -78,8 +79,15 @@ class VisionViewModel {
             defer { self?.isRunning = false }
             let gateway = RTSLLMGateway(apiKeys: [.gemini: apiKey])
             let flow = RTSFlow(title: "Image Summary")
+            // `.medium` is already Gemini 2.5's default, so this pins today's cost rather than
+            // lowering it. Set explicitly because the families default differently — Gemini 3 defaults
+            // to `.high`, roughly 4x the image tokens — so pinning keeps this demo's cost the same if
+            // the model changes. Summarizing a scene does not need that detail; raise it for OCR.
             let agent = RTSAgent(
-                llmProvider: .gemini(modelIDString: RTSGeminiModelID.gemini31Pro.modelIDString),
+                llmProvider: .gemini(
+                    modelIDString: RTSGeminiModelID.gemini25Flash.modelIDString,
+                    options: RTSGeminiOptions(mediaResolution: .medium)
+                ),
                 name: "Image Summarizer",
                 systemMessage: "You are a helpful assistant that describes and summarizes images."
             )
