@@ -24,7 +24,9 @@ struct RTSAppleAIToolBridge<WrappedTool: RTSAppleAIToolNode>: Tool
     let nodeInvoker: RTSNodeInvoker
     let createdBy: any RTSAgentNode
 
-    var name: String { wrappedTool.name }
+    /// Sanitized for consistency with the cloud bridges — FoundationModels accepts any name, but a
+    /// tool should not present a different name to the model depending on the provider.
+    var name: String { RTSProviderSafeName.sanitized(wrappedTool.name) }
     var description: String { wrappedTool.description }
 
     func call(arguments: WrappedTool.Arguments) async throws -> String {

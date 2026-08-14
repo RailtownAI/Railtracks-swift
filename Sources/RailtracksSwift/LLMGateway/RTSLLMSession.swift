@@ -183,8 +183,13 @@ extension RTSLLMSession {
         }
         if let schema = agentNode.outputSchema {
             let generationSchema = try schema.toGenerationSchema()
+            // OpenAI applies the same identifier rule to the response-format name as to tool names.
+            let schemaName = RTSProviderSafeName.sanitized(schema.name)
+            if schemaName != schema.name {
+                log.warning("⚠️ [\(agentName)] output schema name '\(schema.name)' rewritten to '\(schemaName)' to satisfy provider naming rules")
+            }
             chatSession.config = chatSession.config
-                .responseFormat(.jsonSchema(name: schema.name, schema: generationSchema))
+                .responseFormat(.jsonSchema(name: schemaName, schema: generationSchema))
                 .maxTokens(agentNode.outputSchemaMaxToken)
         }
         let runIDMap = RunIDMap()

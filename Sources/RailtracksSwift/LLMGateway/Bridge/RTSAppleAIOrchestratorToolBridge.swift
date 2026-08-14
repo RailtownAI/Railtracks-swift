@@ -34,7 +34,7 @@ struct RTSAppleAIOrchestratorToolBridge: Tool {
         nodeInvoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode
     ) {
-        self.name = orchestratorTool.name()
+        self.name = RTSProviderSafeName.sanitized(orchestratorTool.name())
         self.description = orchestratorTool.toolDescription
         self.parameters = parameters
         self.orchestratorTool = orchestratorTool

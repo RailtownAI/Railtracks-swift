@@ -34,6 +34,20 @@ public struct RTSLLMGateway: Sendable {
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
     ) throws -> RTSLLMSession {
         let provider = agentNode.llmProvider
+        // The provider-agnostic seam every agent passes through, `RTSAgent` and custom
+        // `RTSAgentNode` conformers alike — so the collision check lives here rather than in any one
+        // agent's initializer, where a conformer that builds its own tool list would never run it.
+        //
+        // TODO: dedupe the logging. This runs once per *session build*, i.e. once per agent
+        // invocation, so the same line repeats: once per run for the root agent, and — the unbounded
+        // case — once per call for a sub-agent, since `RTSAgentTool` builds its session lazily at call
+        // time. A sub-agent the model calls 20 times logs its rewrites 20 times. Keying on
+        // `agentName` + the tool-name set would collapse it, at the cost of shared mutable state here
+        // (a lock or an actor). Only affects release builds: in DEBUG `assertNoCollisions` traps on
+        // the first collision, and a rewrite alone is informational.
+        let authoredToolNames = agentNode.tools.map(\.toolName)
+        RTSProviderSafeName.logRewrites(of: authoredToolNames, agentName: agentNode.agentName)
+        RTSProviderSafeName.assertNoCollisions(among: authoredToolNames, agentName: agentNode.agentName)
         switch provider {
         case .appleAI:
             guard #available(macOS 26, iOS 26, *) else {

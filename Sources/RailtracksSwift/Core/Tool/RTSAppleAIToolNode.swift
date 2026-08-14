@@ -14,7 +14,9 @@ import FoundationModels
 ///
 /// ## Defaults provided by this protocol
 ///
-/// - `name` / `description` forward to `toolName` / `toolDescription` — define each once.
+/// - `name` / `description` forward to `toolName` / `toolDescription` — define each once. `name` is
+///   sanitized on the way out (`Photo Search` → `Photo_Search`) so the model sees one identifier for
+///   this tool whichever provider is behind it; `toolName` keeps the authored spelling for tracing.
 /// - `parameterSchema` is derived automatically from `Arguments.generationSchema` (requires
 ///   `@Generable Arguments`), so the `@Guide` descriptions you write for AppleAI also populate
 ///   the OpenAI tool schema with no extra work.
@@ -52,7 +54,15 @@ public protocol RTSAppleAIToolNode: RTSToolNode, Tool {
 
 @available(macOS 26, iOS 26, *)
 public extension RTSAppleAIToolNode {
-    var name: String { toolName }
+    /// The identifier FoundationModels sees. Sanitized for the same reason the cloud bridges
+    /// sanitize: FoundationModels accepts any name, but a tool must not present a different name to
+    /// the model depending on which provider is behind it.
+    ///
+    /// This matters on the path where `makeAppleAIBridge` returns `nil` and the conformer is handed
+    /// to `LanguageModelSession` directly — there is no bridge in between to sanitize on its behalf,
+    /// so it has to happen here. The authored name is untouched on `toolName` and `name()`, which is
+    /// what the flow graph trace records.
+    var name: String { RTSProviderSafeName.sanitized(toolName) }
     var description: String { toolDescription }
     func makeAppleAIBridge(invoker: RTSNodeInvoker, createdBy: any RTSAgentNode) -> (any Tool)? { nil }
 }
