@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/Conduit",
       "state" : {
-        "revision" : "6e5b927d8d90bc03dcad9f24ce63922ad2c7764d",
-        "version" : "0.3.22"
+        "branch" : "6182-gemini-media-resolution-setting",
+        "revision" : "fc94b107bef5cca9d755e57dcde21c0b3e7ee0dd"
       }
     },
     {

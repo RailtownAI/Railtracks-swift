@@ -171,7 +171,8 @@ extension RTSLLMSession {
         provider: P,
         model: P.ModelID,
         agentNode: any RTSAgentNode,
-        conduitTools: [any Tool]
+        conduitTools: [any Tool],
+        applyProviderOptions: @Sendable (inout GenerateConfig) -> Void = { _ in }
     ) throws -> RTSLLMSession {
         let agentName = agentNode.agentName
         let providerName = agentNode.llmProvider.providerName
@@ -181,6 +182,11 @@ extension RTSLLMSession {
             chatSession.config = chatSession.config.tools(conduitTools)
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)
         }
+        // Provider-specific settings, applied through a closure so this builder stays
+        // provider-agnostic — only the gateway's per-provider switch knows what they are.
+        var config = chatSession.config
+        applyProviderOptions(&config)
+        chatSession.config = config
         if let schema = agentNode.outputSchema {
             let generationSchema = try schema.toGenerationSchema()
             // OpenAI applies the same identifier rule to the response-format name as to tool names.

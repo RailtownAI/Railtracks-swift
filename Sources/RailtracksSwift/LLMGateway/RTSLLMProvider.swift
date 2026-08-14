@@ -151,11 +151,44 @@ public enum RTSLLMProviderKind: Hashable, CaseIterable, Sendable {
     case appleAI
 }
 
+/// Per-image token budget for Gemini vision input.
+///
+/// Gemini allocates a flat number of tokens per image based on this setting — image dimensions do not
+/// affect the count, so a thumbnail and a 4032×3024 photo cost the same. Measured on
+/// `gemini-3-flash-preview`: `.low` 252 tokens, `.medium` 558, `.high` 1075, with `.high` as the model
+/// default. Lowering it is a cost and context-budget lever for work that does not need fine detail;
+/// the ceiling matters for OCR, dense charts, and small objects.
+///
+/// Gemini 3 only. Earlier models charge a flat per-image rate that this cannot change, and
+/// `.ultraHigh` is rejected outright by `gemini-3-flash-preview`. `RTSLLMGateway` warns about both
+/// combinations while building the session.
+public enum RTSGeminiMediaResolution: String, Sendable, Equatable {
+    case low
+    case medium
+    case high
+    case ultraHigh
+}
+
+/// Settings that exist only on Gemini.
+///
+/// These live in the `.gemini` case's associated value rather than on `RTSAgent` so that swapping an
+/// agent to another provider discards them *by construction* — there is nowhere on `.openAI` or
+/// `.anthropic` to put them. A shared options bag would instead survive the swap and silently do
+/// nothing, which is the failure this shape is chosen to prevent.
+public struct RTSGeminiOptions: Sendable, Equatable {
+    /// Per-image token budget for vision input. `nil` leaves the model default in place.
+    public var mediaResolution: RTSGeminiMediaResolution?
+
+    public init(mediaResolution: RTSGeminiMediaResolution? = nil) {
+        self.mediaResolution = mediaResolution
+    }
+}
+
 /// LLM Providers that store model ID as string in its associated value
 public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     case openAI(modelIDString: String)
     case anthropic(modelIDString: String)
-    case gemini(modelIDString: String)
+    case gemini(modelIDString: String, options: RTSGeminiOptions = RTSGeminiOptions())
     case appleAI
 
     public var description: String {
@@ -164,7 +197,7 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             return "OpenAI-\(modelIDString)"
         case .anthropic(let modelIDString):
             return "Anthropic-\(modelIDString)"
-        case .gemini(let modelIDString):
+        case .gemini(let modelIDString, _):
             return "Gemini-\(modelIDString)"
         case .appleAI:
             return "AppleAI-AppleFoundationModel-on-device"
@@ -203,7 +236,7 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             return modelIDString
         case .anthropic(let modelIDString):
             return modelIDString
-        case .gemini(let modelIDString):
+        case .gemini(let modelIDString, _):
             return modelIDString
         case .appleAI:
             return "on-device"
