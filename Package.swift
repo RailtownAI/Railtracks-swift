@@ -22,7 +22,8 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/RailtownAI/Conduit",
-            exact: "0.3.22",
+//            exact: "0.3.22",
+            branch: "6182-gemini-media-resolution-setting",
             traits: [
                 .trait(name: "OpenAI"),
                 .trait(name: "OpenRouter"),

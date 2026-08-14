@@ -79,7 +79,7 @@ class VisionViewModel {
             let gateway = RTSLLMGateway(apiKeys: [.gemini: apiKey])
             let flow = RTSFlow(title: "Image Summary")
             let agent = RTSAgent(
-                llmProvider: .gemini(modelIDString: RTSGeminiModelID.gemini25Flash.modelIDString),
+                llmProvider: .gemini(modelIDString: RTSGeminiModelID.gemini31Pro.modelIDString),
                 name: "Image Summarizer",
                 systemMessage: "You are a helpful assistant that describes and summarizes images."
             )

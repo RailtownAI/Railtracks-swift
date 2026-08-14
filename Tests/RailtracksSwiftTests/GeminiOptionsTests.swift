@@ -3,8 +3,8 @@
 //  RailtracksSwiftTests
 //
 //  Covers the provider-specific settings path: Gemini-only options ride in the `.gemini` case's
-//  associated value, reach Conduit's `GenerateConfig`, and are reported when the chosen model cannot
-//  honor them.
+//  associated value and reach Conduit's `GenerateConfig` without disturbing what else is configured
+//  there.
 //
 
 import Testing
@@ -12,32 +12,7 @@ import Foundation
 import Conduit
 @testable import RailtracksSwift
 
-/// Accumulates the diagnostics `RTSGeminiOptions.reportUnsupportedSetting` would otherwise send to
-/// `assertionFailure`. `@unchecked Sendable` is sound here: the reporter is invoked synchronously on
-/// the calling thread, and the suite below is `.serialized`.
-private final class SettingRecorder: @unchecked Sendable {
-    var messages: [String] = []
-}
-
-/// Runs `body` with the reporter swapped for a collector, and returns everything it reported. Without
-/// this the calls below would trap in a DEBUG build and abort the test run — which is the behavior
-/// under test, so it has to be observed rather than triggered.
-private func recordingWarnings(during body: () -> Void) -> [String] {
-    let recorder = SettingRecorder()
-    let previous = RTSGeminiOptions.reportUnsupportedSetting
-    RTSGeminiOptions.reportUnsupportedSetting = { message in
-        recorder.messages.append(message)
-    }
-    defer {
-        RTSGeminiOptions.reportUnsupportedSetting = previous
-    }
-    body()
-    return recorder.messages
-}
-
-/// `.serialized` because the validation tests swap `RTSGeminiOptions.reportUnsupportedSetting`, a
-/// process-wide `nonisolated(unsafe)` seam that would race if these ran concurrently.
-@Suite("Gemini provider options", .serialized)
+@Suite("Gemini provider options")
 struct GeminiOptionsTests {
 
     // MARK: - Conduit mapping
@@ -51,23 +26,31 @@ struct GeminiOptionsTests {
         #expect(geminiOptions.mediaResolution == .low)
     }
 
-    @Test("Every case maps onto a Conduit counterpart")
+    @Test("Every exposed case maps onto a Conduit counterpart")
     func everyCaseMaps() {
         let expected: [RTSGeminiMediaResolution: GeminiOptions.MediaResolution] = [
             .low: .low,
             .medium: .medium,
             .high: .high,
-            .ultraHigh: .ultraHigh,
         ]
         for (rtsValue, conduitValue) in expected {
             #expect(rtsValue.conduitValue == conduitValue)
         }
     }
 
+    @Test("ultraHigh is withheld from library consumers")
+    func ultraHighIsNotExposed() {
+        // Conduit carries `.ultraHigh` so the value stays reachable if Google enables it, but v1beta
+        // rejects it with HTTP 400 on every Gemini model, so RailtracksSwift does not offer it. If a
+        // case named this ever appears, `conduitValue` must be revisited before it ships.
+        #expect(RTSGeminiMediaResolution(rawValue: "ultraHigh") == nil)
+    }
+
     @Test("An unset media resolution writes nothing at all")
     func unsetWritesNothing() {
         // Absent must stay absent rather than becoming an explicit level — the model default is the
-        // provider's business, and writing one would silently pin it.
+        // provider's business, and writing one would silently pin it. The two families default
+        // differently (3.x to high, 2.5 to medium), so pinning would change cost on a model swap.
         var config = GenerateConfig.default
         RTSGeminiOptions().applyToConduitConfig(&config)
         let geminiOptions: GeminiOptions? = config[custom: GeminiProvider.self]
@@ -109,79 +92,5 @@ struct GeminiOptionsTests {
         #expect(provider.modelID == "gemini-3-flash-preview")
         #expect(provider.description == "Gemini-gemini-3-flash-preview")
         #expect(provider.kind == .gemini)
-    }
-
-    // MARK: - validation
-
-    @Test("A pre-Gemini-3 model warns that the setting is ignored")
-    func preGemini3ModelWarns() throws {
-        let reported = recordingWarnings {
-            RTSGeminiOptions.warnAboutUnsupportedSettings(
-                RTSGeminiOptions(mediaResolution: .low),
-                modelIDString: "gemini-2.5-flash",
-                agentName: "Image Summarizer"
-            )
-        }
-
-        let message = try #require(reported.first)
-        #expect(reported.count == 1)
-        // Actionable without reading the library: which agent, which model, what happens instead.
-        #expect(message.contains("Image Summarizer"))
-        #expect(message.contains("gemini-2.5-flash"))
-        #expect(message.contains("ignored"))
-    }
-
-    @Test("ultraHigh on Flash warns about the 400 it would cause")
-    func ultraHighOnFlashWarns() throws {
-        let reported = recordingWarnings {
-            RTSGeminiOptions.warnAboutUnsupportedSettings(
-                RTSGeminiOptions(mediaResolution: .ultraHigh),
-                modelIDString: "gemini-3-flash-preview",
-                agentName: "Image Summarizer"
-            )
-        }
-
-        let message = try #require(reported.first)
-        #expect(message.contains("ultraHigh"))
-        #expect(message.contains("400"))
-    }
-
-    @Test("A supported combination warns about nothing")
-    func supportedCombinationIsQuiet() {
-        let reported = recordingWarnings {
-            RTSGeminiOptions.warnAboutUnsupportedSettings(
-                RTSGeminiOptions(mediaResolution: .high),
-                modelIDString: "gemini-3-flash-preview",
-                agentName: "Image Summarizer"
-            )
-        }
-        #expect(reported.isEmpty)
-    }
-
-    @Test("ultraHigh on Pro is allowed through")
-    func ultraHighOnProIsQuiet() {
-        // Only Flash is known to reject it; warning on Pro would train developers to ignore this.
-        let reported = recordingWarnings {
-            RTSGeminiOptions.warnAboutUnsupportedSettings(
-                RTSGeminiOptions(mediaResolution: .ultraHigh),
-                modelIDString: "gemini-3-pro-preview",
-                agentName: "Image Summarizer"
-            )
-        }
-        #expect(reported.isEmpty)
-    }
-
-    @Test("No media resolution means no validation noise on any model")
-    func unsetNeverWarns() {
-        for model in ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-3-flash-preview"] {
-            let reported = recordingWarnings {
-                RTSGeminiOptions.warnAboutUnsupportedSettings(
-                    RTSGeminiOptions(),
-                    modelIDString: model,
-                    agentName: "Image Summarizer"
-                )
-            }
-            #expect(reported.isEmpty, "'\(model)' warned with no setting applied")
-        }
     }
 }

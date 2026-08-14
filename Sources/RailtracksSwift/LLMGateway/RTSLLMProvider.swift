@@ -111,34 +111,43 @@ public enum RTSAnthropicModelID {
 /// encapsulate — its `GeminiProvider` accepts an arbitrary model string and places it directly in the
 /// request path (`models/{id}:generateContent`). These raw strings are therefore maintained here by
 /// hand and must be updated as Google publishes / retires models.
+/// Verified against `GET /v1beta/models` on 2026-08-14. Google retires Gemini models aggressively —
+/// the 1.5 and 2.0 families and `gemini-3-pro-preview` were all live when first written here and have
+/// since been shut down — so re-check this list against that endpoint rather than trusting it.
 public enum RTSGeminiModelID {
-    // Gemini 3
-    case gemini3Pro
+    // Gemini 3.x
+    case gemini37Flash
+    case gemini36Flash
+    case gemini35Flash
+    case gemini35FlashLite
+    case gemini31Pro
+    case gemini31FlashLite
     case gemini3Flash
     // Gemini 2.5
     case gemini25Pro
     case gemini25Flash
     case gemini25FlashLite
-    // Gemini 2.0
-    case gemini20Flash
-    case gemini20FlashLite
-    // Gemini 1.5
-    case gemini15Pro
-    case gemini15Flash
-    case gemini15Flash8B
+    // Floating aliases — always the current model of that tier. Useful precisely because the pinned
+    // identifiers above go stale; the trade is that the model can change under you.
+    case proLatest
+    case flashLatest
+    case flashLiteLatest
 
     public var modelIDString: String {
         switch self {
-        case .gemini3Pro:        return "gemini-3-pro-preview"
+        case .gemini37Flash:     return "gemini-3.7-flash"
+        case .gemini36Flash:     return "gemini-3.6-flash"
+        case .gemini35Flash:     return "gemini-3.5-flash"
+        case .gemini35FlashLite: return "gemini-3.5-flash-lite"
+        case .gemini31Pro:       return "gemini-3.1-pro-preview"
+        case .gemini31FlashLite: return "gemini-3.1-flash-lite"
         case .gemini3Flash:      return "gemini-3-flash-preview"
         case .gemini25Pro:       return "gemini-2.5-pro"
         case .gemini25Flash:     return "gemini-2.5-flash"
         case .gemini25FlashLite: return "gemini-2.5-flash-lite"
-        case .gemini20Flash:     return "gemini-2.0-flash"
-        case .gemini20FlashLite: return "gemini-2.0-flash-lite"
-        case .gemini15Pro:       return "gemini-1.5-pro"
-        case .gemini15Flash:     return "gemini-1.5-flash"
-        case .gemini15Flash8B:   return "gemini-1.5-flash-8b"
+        case .proLatest:         return "gemini-pro-latest"
+        case .flashLatest:       return "gemini-flash-latest"
+        case .flashLiteLatest:   return "gemini-flash-lite-latest"
         }
     }
 }
@@ -153,20 +162,33 @@ public enum RTSLLMProviderKind: Hashable, CaseIterable, Sendable {
 
 /// Per-image token budget for Gemini vision input.
 ///
-/// Gemini allocates a flat number of tokens per image based on this setting — image dimensions do not
-/// affect the count, so a thumbnail and a 4032×3024 photo cost the same. Measured on
-/// `gemini-3-flash-preview`: `.low` 252 tokens, `.medium` 558, `.high` 1075, with `.high` as the model
-/// default. Lowering it is a cost and context-budget lever for work that does not need fine detail;
-/// the ceiling matters for OCR, dense charts, and small objects.
+/// Both Gemini 3 and 2.5 honor this, but each level costs differently per family *and* the families
+/// default to different levels — so moving an agent between them changes its image cost without any
+/// code change. Per-image tokens, measured against `:countTokens`:
 ///
-/// Gemini 3 only. Earlier models charge a flat per-image rate that this cannot change, and
-/// `.ultraHigh` is rejected outright by `gemini-3-flash-preview`. `RTSLLMGateway` warns about both
-/// combinations while building the session.
+/// | Family | `.low` | `.medium` | `.high` |
+/// |---|---|---|---|
+/// | Gemini 3.x | 252 | 558 | **1075** (default) |
+/// | Gemini 2.5 | 66 | **258** (default) | scales with image size |
+///
+/// On Gemini 3 every level is a flat allocation — a 300px thumbnail and a 3072px photo both cost the
+/// level's figure, because the image is resampled to fit the budget. The same holds for `.low` and
+/// `.medium` on 2.5. The one exception is `.high` on 2.5, which tiles: 258 tokens for an image within
+/// 384px on both sides, rising with dimensions (2322 measured at 3072×1786). Only there does image
+/// size drive cost, and it is not reliably predictable from Google's published tiling formula —
+/// measure it for the sizes you actually send.
+///
+/// Lowering the level is a cost and context-budget lever for work that does not need fine detail; the
+/// ceiling matters for OCR, dense charts, and small objects. Note that on Gemini 3 a small image at
+/// `.high` still costs the full 1075 — the budget is charged whether the image can use it or not.
+///
+/// Google also documents an `ultra_high` level. It is deliberately not offered here: `v1beta` rejects
+/// it with HTTP 400 on every Gemini model tested, Flash and Pro, 3.x and 2.5 alike. Conduit keeps the
+/// case so the value stays reachable if Google enables it; RailtracksSwift does not expose it.
 public enum RTSGeminiMediaResolution: String, Sendable, Equatable {
     case low
     case medium
     case high
-    case ultraHigh
 }
 
 /// Settings that exist only on Gemini.

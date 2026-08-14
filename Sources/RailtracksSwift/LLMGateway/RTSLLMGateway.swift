@@ -104,11 +104,6 @@ public struct RTSLLMGateway: Sendable {
             guard let apiKey = apiKeys[provider.kind] else {
                 throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
             }
-            RTSGeminiOptions.warnAboutUnsupportedSettings(
-                options,
-                modelIDString: modelIDString,
-                agentName: agentNode.agentName
-            )
             return try buildCloudSession(
                 provider: GeminiProvider(apiKey: apiKey),
                 model: .gemini(modelIDString),
