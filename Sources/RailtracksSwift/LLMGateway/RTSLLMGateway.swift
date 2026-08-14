@@ -87,7 +87,7 @@ public struct RTSLLMGateway: Sendable {
                 onNewSession: onNewSession,
                 // No provider-specific settings on this path. Passed explicitly rather than defaulted
                 // so a new provider case cannot silently skip forwarding its own.
-                applyProviderOptions: { _ in }
+                applyProviderOptions: { _, _ in }
             )
 
         case .anthropic(modelIDString: let modelIDString):
@@ -103,7 +103,7 @@ public struct RTSLLMGateway: Sendable {
                 onNewSession: onNewSession,
                 // No provider-specific settings on this path. Passed explicitly rather than defaulted
                 // so a new provider case cannot silently skip forwarding its own.
-                applyProviderOptions: { _ in }
+                applyProviderOptions: { _, _ in }
             )
 
         case .gemini(modelIDString: let modelIDString, options: let options):
@@ -131,7 +131,7 @@ public struct RTSLLMGateway: Sendable {
         invoker: RTSNodeInvoker,
         agentNode: any RTSAgentNode,
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
-        applyProviderOptions: @escaping @Sendable (inout GenerateConfig) -> Void
+        applyProviderOptions: @escaping @Sendable (inout GenerateConfig, RTSRequestModalities) -> Void
     ) throws -> RTSLLMSession where Provider.ModelID == ModelIdentifier {
         let conduitTools: [any Tool] = agentNode.tools.map { tool in
             if let agentTool = tool as? RTSAgentTool {

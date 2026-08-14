@@ -172,7 +172,7 @@ extension RTSLLMSession {
         model: P.ModelID,
         agentNode: any RTSAgentNode,
         conduitTools: [any Tool],
-        applyProviderOptions: @Sendable (inout GenerateConfig) -> Void
+        applyProviderOptions: @escaping @Sendable (inout GenerateConfig, RTSRequestModalities) -> Void
     ) throws -> RTSLLMSession {
         let agentName = agentNode.agentName
         let providerName = agentNode.llmProvider.providerName
@@ -182,11 +182,6 @@ extension RTSLLMSession {
             chatSession.config = chatSession.config.tools(conduitTools)
             chatSession.toolExecutor = ToolExecutor(tools: conduitTools)
         }
-        // Provider-specific settings, applied through a closure so this builder stays
-        // provider-agnostic — only the gateway's per-provider switch knows what they are.
-        var config = chatSession.config
-        applyProviderOptions(&config)
-        chatSession.config = config
         if let schema = agentNode.outputSchema {
             let generationSchema = try schema.toGenerationSchema()
             // OpenAI applies the same identifier rule to the response-format name as to tool names.
@@ -218,15 +213,22 @@ extension RTSLLMSession {
                     log.trace("💎 [\(agentName)] run(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }
                 do {
-                    let response: String
+                    let content: Message.Content
                     if images.isEmpty {
-                        response = try await chatSession.send(prompt)
+                        content = .text(prompt)
                     } else {
-                        let parts: [Message.ContentPart] = [.text(prompt)] + images.map {
+                        content = .parts([.text(prompt)] + images.map {
                             .image(Message.ImageContent(base64Data: $0.base64Data, mimeType: $0.mimeType))
-                        }
-                        response = try await chatSession.send(parts)
+                        })
                     }
+                    // Provider-specific settings, applied per request through a closure so this
+                    // builder stays provider-agnostic — only the gateway's per-provider switch knows
+                    // what they are, and only the options themselves know which modalities they
+                    // apply to. Derived from `chatSession.config` so the tools and output schema set
+                    // above are carried into the override rather than replaced by it.
+                    var requestConfig = chatSession.config
+                    applyProviderOptions(&requestConfig, RTSRequestModalities(content))
+                    let response = try await chatSession.send(content, config: requestConfig)
                     publishNewMessages()
                     return response
                 } catch {

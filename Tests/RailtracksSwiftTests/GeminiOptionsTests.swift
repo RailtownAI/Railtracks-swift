@@ -20,10 +20,43 @@ struct GeminiOptionsTests {
     @Test("Media resolution reaches Conduit's Gemini options")
     func mediaResolutionReachesConduit() throws {
         var config = GenerateConfig.default
-        RTSGeminiOptions(mediaResolution: .low).applyToConduitConfig(&config)
+        RTSGeminiOptions(mediaResolution: .low).applyToConduitConfig(&config, modalities: [.text, .image])
 
         let geminiOptions: GeminiOptions = try #require(config[custom: GeminiProvider.self])
         #expect(geminiOptions.mediaResolution == .low)
+    }
+
+    @Test("A text-only request is not given a media resolution")
+    func textOnlyWithholdsMediaResolution() {
+        // An agent configured for images also sends plain text turns. Gemini happens to ignore an
+        // irrelevant mediaResolution, but withholding it is the provider-independent behavior.
+        var config = GenerateConfig.default
+        RTSGeminiOptions(mediaResolution: .low).applyToConduitConfig(&config, modalities: [.text])
+        let geminiOptions: GeminiOptions? = config[custom: GeminiProvider.self]
+        #expect(geminiOptions == nil)
+    }
+
+    @Test("Video counts as a media resolution modality, not just image")
+    func videoIsAMediaModality() throws {
+        // Google defines the budget as tokens "per input image or video frame", so keying this off
+        // images alone would silently drop the setting from a video request.
+        var config = GenerateConfig.default
+        RTSGeminiOptions(mediaResolution: .high).applyToConduitConfig(&config, modalities: [.text, .video])
+
+        let geminiOptions: GeminiOptions = try #require(config[custom: GeminiProvider.self])
+        #expect(geminiOptions.mediaResolution == .high)
+    }
+
+    // MARK: - modality derivation
+
+    @Test("Modalities are derived from the payload, not from the caller's arguments")
+    func modalitiesDerivedFromContent() {
+        let image = Message.ImageContent(base64Data: "abc123", mimeType: "image/png")
+
+        #expect(RTSRequestModalities(.text("hello")) == [.text])
+        #expect(RTSRequestModalities(.parts([.text("describe"), .image(image)])) == [.text, .image])
+        // No text part at all — the reason `.text` is a member rather than assumed present.
+        #expect(RTSRequestModalities(.parts([.image(image)])) == [.image])
     }
 
     @Test("Every exposed case maps onto a Conduit counterpart")
@@ -52,7 +85,7 @@ struct GeminiOptionsTests {
         // provider's business, and writing one would silently pin it. The two families default
         // differently (3.x to high, 2.5 to medium), so pinning would change cost on a model swap.
         var config = GenerateConfig.default
-        RTSGeminiOptions().applyToConduitConfig(&config)
+        RTSGeminiOptions().applyToConduitConfig(&config, modalities: [.text, .image])
         let geminiOptions: GeminiOptions? = config[custom: GeminiProvider.self]
         #expect(geminiOptions == nil)
     }
@@ -63,7 +96,7 @@ struct GeminiOptionsTests {
         // clobber a thinkingConfig set elsewhere.
         var config = GenerateConfig.default
         config[custom: GeminiProvider.self] = GeminiOptions(thinkingConfig: ["thinkingLevel": "low"])
-        RTSGeminiOptions(mediaResolution: .high).applyToConduitConfig(&config)
+        RTSGeminiOptions(mediaResolution: .high).applyToConduitConfig(&config, modalities: [.text, .image])
 
         let geminiOptions: GeminiOptions = try #require(config[custom: GeminiProvider.self])
         #expect(geminiOptions.mediaResolution == .high)

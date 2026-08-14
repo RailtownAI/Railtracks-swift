@@ -30,11 +30,29 @@ extension RTSGeminiMediaResolution {
 }
 
 extension RTSGeminiOptions {
-    /// Writes these settings onto a Conduit `GenerateConfig`, preserving whatever the caller already
-    /// configured. Gemini owns the `GeminiOptions` payload as one custom-options slot, so this reads
-    /// the existing value back before writing rather than replacing it wholesale.
-    func applyToConduitConfig(_ config: inout GenerateConfig) {
-        guard let mediaResolution else {
+    /// The modalities `mediaResolution` is meaningful for.
+    ///
+    /// Declared beside the setting so the request pipeline never has to know what any individual
+    /// Gemini option means. Video belongs here as much as image: Google defines the parameter as the
+    /// budget allocated "per input image **or video frame**", so keying this off "does the request
+    /// have an image" in the pipeline would already be wrong for a video request.
+    private static let mediaResolutionModalities: RTSRequestModalities = [.image, .video]
+
+    /// Writes these settings onto a Conduit `GenerateConfig` for a request carrying `modalities`,
+    /// preserving whatever the caller already configured.
+    ///
+    /// Settings are withheld from requests they cannot affect — an agent that sets a media resolution
+    /// and then sends a text-only turn puts nothing extra on that request. Gemini happens to ignore an
+    /// irrelevant `mediaResolution` (verified: identical token counts, no error), but that is Gemini's
+    /// behavior, not a guarantee any provider owes us.
+    ///
+    /// Gemini owns the `GeminiOptions` payload as one custom-options slot, so this reads the existing
+    /// value back before writing rather than replacing it wholesale.
+    func applyToConduitConfig(_ config: inout GenerateConfig, modalities: RTSRequestModalities) {
+        guard
+            let mediaResolution,
+            !modalities.isDisjoint(with: Self.mediaResolutionModalities)
+        else {
             return
         }
         var geminiOptions: GeminiOptions = config[custom: GeminiProvider.self] ?? GeminiOptions()
