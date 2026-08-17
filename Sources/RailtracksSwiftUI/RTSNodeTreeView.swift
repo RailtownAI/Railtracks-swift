@@ -138,7 +138,7 @@ struct RTSNodeTreeRowView: View {
             ForEach(Array(row.ancestorLines.enumerated()), id: \.offset) { level, destination in
                 if let destination {
                     Rectangle()
-                        .fill(destination.tint)
+                        .fill(destination.lineTint)
                         .frame(width: Self.lineWidth, height: Self.rowHeight)
                         .offset(x: CGFloat(level) * Self.indent + (Self.indent - Self.lineWidth) / 2)
                 }
@@ -149,7 +149,7 @@ struct RTSNodeTreeRowView: View {
                 isLastSibling: row.isLastSibling,
                 indent: Self.indent
             )
-            .stroke(row.item.state.tint, lineWidth: Self.lineWidth)
+            .stroke(row.item.state.lineTint, lineWidth: Self.lineWidth)
         }
         .frame(width: CGFloat(row.depth) * Self.indent, height: Self.rowHeight)
     }
@@ -200,7 +200,7 @@ struct RTSNodeStatusIcon: View {
             // root's prefix is zero-width, so a stem drawn there would never render for it.
             if showsChildStem {
                 RTSTreeChildStem()
-                    .stroke(state.tint, lineWidth: RTSNodeTreeRowView.lineWidth)
+                    .stroke(state.lineTint, lineWidth: RTSNodeTreeRowView.lineWidth)
             }
             Circle()
                 .fill(state.tint)
@@ -230,6 +230,12 @@ struct RTSTreeChildStem: Shape {
 extension RTSNodeStatus.State {
     /// Semantic colours so both appearances stay legible; state owns colour outright, which is why
     /// node type is drawn as a separate glyph rather than tinted.
+    /// Connector colour: the state's tint at half strength, so lines read as structure and the
+    /// circles stay the thing your eye lands on.
+    var lineTint: Color {
+        tint.opacity(0.5)
+    }
+
     var tint: Color {
         switch self {
         case .queued:

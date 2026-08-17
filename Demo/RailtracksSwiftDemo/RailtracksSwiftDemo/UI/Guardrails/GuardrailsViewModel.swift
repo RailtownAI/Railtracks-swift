@@ -7,6 +7,7 @@
 
 import Foundation
 import RailtracksSwift
+import RailtracksSwiftUI
 import FoundationModels
 import Logging
 
@@ -49,6 +50,11 @@ class GuardrailsViewModel {
     var promptResult: String = ""
     var isRunning = false
     var isShowingKeyPrompt = false
+    /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
+    /// per run — the model outlives them and accumulates each run as its own root. Useful on this
+    /// screen in particular: a blocked input guardrail short-circuits before the LLM runs, so the
+    /// agent shows as failed with no children beneath it.
+    @MainActor let nodeTree = RTSNodeTreeModel()
     
     func isSelected(_ preset: Preset) -> Bool {
         preset.text == prompt
@@ -69,6 +75,7 @@ class GuardrailsViewModel {
             defer { self?.isRunning = false }
             let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
             let flow = RTSFlow(title: "Safe Support Assistant")
+            await self?.nodeTree.attach(to: flow)
             do {
                 // Reject obvious prompt-injection first; otherwise redact PII before the model sees it.
                 let injectionGuard = try RTSBlockTextInputGuardrail(

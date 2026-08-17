@@ -5,6 +5,7 @@
 
 import Foundation
 import RailtracksSwift
+import RailtracksSwiftUI
 import Combine
 import Logging
 
@@ -19,12 +20,19 @@ class MathErrorViewModel {
     var traceStatus: String = ""
     var isRunning = false
     var isShowingKeyPrompt = false
+    /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
+    /// per run — the model outlives them and accumulates each run as its own root. Both buttons on
+    /// this screen therefore stack into one history, which is the point: the failing run's tree sits
+    /// alongside the others with its node marked red.
+    @MainActor let nodeTree = RTSNodeTreeModel()
 
     private var cancellables = Set<AnyCancellable>()
 
     /// Observe the flow's trace-file output so we can confirm the JSON is written even when
-    /// `flow.run` throws. Subscribe before calling `run`.
-    private func observeTrace(_ flow: RTSFlow) {
+    /// `flow.run` throws, and feed the call tree. Subscribe before calling `run`.
+    @MainActor
+    private func observe(_ flow: RTSFlow) {
+        nodeTree.attach(to: flow)
         cancellables.removeAll()
         flow.outputFileURLPublisher
             .receive(on: DispatchQueue.main)
@@ -48,7 +56,7 @@ class MathErrorViewModel {
             defer { self?.isRunning = false }
             self?.promptResult = "waiting..."
             let flow = RTSFlow(title: "Throwing Workflow")
-            self?.observeTrace(flow)
+            await self?.observe(flow)
             do {
                 _ = try await flow.run(ThrowingWorkflow(), input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
                 self?.promptResult = "n/a — expected a failure"
@@ -84,7 +92,7 @@ class MathErrorViewModel {
             ]
 
             let flow = RTSFlow(title: "Math Error")
-            self?.observeTrace(flow)
+            await self?.observe(flow)
 
             let agent = RTSAgent(
                 llmProvider: .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString),

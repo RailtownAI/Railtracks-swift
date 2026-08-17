@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import RailtracksSwiftUI
 import Logging
 
 struct GuardrailsView: View {
@@ -49,6 +50,12 @@ struct GuardrailsView: View {
                 .padding(.horizontal)
             }
             .padding([.top, .bottom], 16)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Call tree:").font(.caption).foregroundStyle(.secondary)
+                RTSNodeTreeView(model: viewModel.nodeTree)
+                    .frame(minHeight: 180)
+            }
         }
         .padding()
     }
