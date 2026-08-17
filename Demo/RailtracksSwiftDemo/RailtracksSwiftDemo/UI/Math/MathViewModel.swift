@@ -81,6 +81,10 @@ class MathViewModel {
     private func updateStep(name: String, state: RTSNodeStatus.State) {
         let status: StepStatus
         switch state {
+        case .queued:
+            // Steps here are pre-declared, so a node waiting on its input guardrails can sit in the
+            // pending state it started in rather than jumping straight to in-progress.
+            status = .pending
         case .executing:
             status = .inProgress
         case .completed:

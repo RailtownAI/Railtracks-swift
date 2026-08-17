@@ -163,14 +163,31 @@ public class RTSFlow: @unchecked Sendable {
         )
 
         var subscriptions = Set<AnyCancellable>()
+        // Three lifecycle signals, one per state transition. `.queued` covers the window where input
+        // guardrails run — brief for most nodes, but a model-backed guardrail makes it visible.
+        let statusOf: @Sendable (RTSNodeEvent, RTSNodeStatus.State) -> RTSNodeStatus = { event, state in
+            RTSNodeStatus(
+                nodeID: event.id,
+                parentNodeID: event.parentNodeID,
+                nodeName: event.name,
+                nodeType: event.nodeType,
+                state: state,
+                runID: event.runID
+            )
+        }
         nodeInvoker.nodeCreateEventPublisher
-            .map {
+            .map { statusOf($0, .queued) }
+            .sink { [weak self] in self?.nodeStatusSubject.send($0) }
+            .store(in: &subscriptions)
+        nodeInvoker.nodeExecutionEventPublisher
+            .map { event in
                 RTSNodeStatus(
-                    nodeID: $0.id,
-                    nodeName: $0.name,
-                    nodeType: $0.nodeType,
+                    nodeID: event.nodeID,
+                    parentNodeID: event.parentNodeID,
+                    nodeName: event.name,
+                    nodeType: event.nodeType,
                     state: .executing,
-                    runID: $0.runID
+                    runID: event.runID
                 )
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
@@ -180,13 +197,7 @@ public class RTSFlow: @unchecked Sendable {
                 let state: RTSNodeStatus.State = event.error == nil
                     ? .completed
                     : .failed(event.error ?? "unknown")
-                return RTSNodeStatus(
-                    nodeID: event.id,
-                    nodeName: event.name,
-                    nodeType: event.nodeType,
-                    state: state,
-                    runID: event.runID
-                )
+                return statusOf(event, state)
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
             .store(in: &subscriptions)

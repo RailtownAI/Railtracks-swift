@@ -27,7 +27,12 @@ public class RTSNodeInvoker: @unchecked Sendable {
     let edgeCreateEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
     let edgeFinishEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
 
-    /// Serializes the four event `send(...)` calls below. One `RTSNodeInvoker` is shared by every
+    /// Fires when a node's body is about to run — after input guardrails, immediately before
+    /// `execute`. Its only consumer today is `RTSFlow`, which turns it into the executing state of
+    /// `RTSNodeStatus` so a UI can show a node waiting on a slow guardrail.
+    let nodeExecutionEventSubject = PassthroughSubject<RTSNodeExecutionEvent, Never>()
+
+    /// Serializes the event `send(...)` calls below. One `RTSNodeInvoker` is shared by every
     /// agent/tool in a flow, and `PassthroughSubject.send` is NOT safe under concurrent calls — so a
     /// flow that runs agents in parallel would otherwise data-race on event publication. This backs the
     /// `@unchecked Sendable` conformance with real synchronization.
@@ -152,6 +157,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         await publishNodeCreated(
             node,
             nodeID: invocationID,
+            parentNodeID: parentInvocationID,
             nodeType: nodeType,
             provider: provider,
             model: model,
@@ -197,6 +203,17 @@ public class RTSNodeInvoker: @unchecked Sendable {
             input: workingInput,
             hasInputGuardrail: runInputGuardrails != nil,
             hasOutputGuardrail: runOutputGuardrails != nil
+        )
+
+        // Guardrails are done and the body is about to run: the point where a UI flips this node from
+        // queued to executing. Published even when a guardrail already failed above, so a node never
+        // finishes without having been seen to start.
+        await publishNodeExecuting(
+            node,
+            nodeID: invocationID,
+            parentNodeID: parentInvocationID,
+            nodeType: nodeType,
+            runID: runID
         )
 
         var output: RTSOutput = [:]
@@ -285,6 +302,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
     private func publishNodeCreated(
         _ node: some RTSNode,
         nodeID: UUID,
+        parentNodeID: UUID?,
         nodeType: RTSFlowNodeType,
         provider: String,
         model: String,
@@ -297,6 +315,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             nodeCreateEventSubject,
             RTSNodeEvent(
                 nodeID: nodeID,
+                parentNodeID: parentNodeID,
                 name: node.name(),
                 nodeType: nodeType,
                 stamp: stamp,
@@ -304,6 +323,28 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 model: model,
                 hasInputGuardrail: hasInputGuardrail,
                 hasOutputGuardrail: hasOutputGuardrail
+            )
+        )
+    }
+
+    /// Announces that a node's body is starting, after input guardrails have run — the queued →
+    /// executing transition in `RTSNodeStatus`. Takes no stamp: `RTSStampFactory` hands out the
+    /// monotonic indices the trace orders by, and this event has no need to consume one.
+    private func publishNodeExecuting(
+        _ node: some RTSNode,
+        nodeID: UUID,
+        parentNodeID: UUID?,
+        nodeType: RTSFlowNodeType,
+        runID: UUID
+    ) async {
+        lockedSend(
+            nodeExecutionEventSubject,
+            RTSNodeExecutionEvent(
+                nodeID: nodeID,
+                parentNodeID: parentNodeID,
+                name: node.name(),
+                nodeType: nodeType,
+                runID: runID
             )
         )
     }
@@ -411,5 +452,19 @@ extension RTSNodeInvoker: NodeEventPublishers {
     }
     var edgeFinishEventPublisher: AnyPublisher<RTSEdgeEvent, Never> {
         edgeFinishEventSubject.eraseToAnyPublisher()
+    }
+}
+
+extension RTSNodeInvoker {
+    /// Deliberately **not** part of `NodeEventPublishers` — yet.
+    ///
+    /// That protocol is the trace collector's view of the invoker (`RTSFlowGraphCollector` takes it
+    /// and nothing else). The collector has no use for this event today, and putting it on the
+    /// protocol would force every conformer to implement an unused member. Should the trace ever want
+    /// a recorded execution-start — splitting guardrail latency from execution latency — moving it
+    /// onto the protocol is additive and needs no rename. `RTSFlow` holds the concrete
+    /// `RTSNodeInvoker`, so it reads this directly in the meantime.
+    var nodeExecutionEventPublisher: AnyPublisher<RTSNodeExecutionEvent, Never> {
+        nodeExecutionEventSubject.eraseToAnyPublisher()
     }
 }

@@ -85,6 +85,10 @@ class MathVerifyViewModel {
                 .sink { [weak self] status in
                     let label: String
                     switch status.state {
+                    case .queued:
+                        // This view appends one line per event, so emitting a line here would double
+                        // every node's output for a state that is usually momentary.
+                        return
                     case .executing:
                         label = "⏳ \(status.nodeName)"
                     case .completed:

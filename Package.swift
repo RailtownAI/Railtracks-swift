@@ -18,6 +18,12 @@ let package = Package(
             name: "RailtracksSwift",
             targets: ["RailtracksSwift"]
         ),
+        // SwiftUI views for observing a flow. A separate product so the core stays headless and
+        // consumers opt in; it depends only on RailtracksSwift's public API.
+        .library(
+            name: "RailtracksSwiftUI",
+            targets: ["RailtracksSwiftUI"]
+        ),
     ],
     dependencies: [
         .package(
@@ -63,14 +69,16 @@ let package = Package(
                 "RTSMacro"
             ]
         ),
+        .target(
+            name: "RailtracksSwiftUI",
+            dependencies: ["RailtracksSwift"]
+        ),
         .testTarget(
             name: "RailtracksSwiftTests",
-            dependencies: [
-                "RailtracksSwift",
+            dependencies: ["RailtracksSwift", "RailtracksSwiftUI",
                 // GeminiOptionsTests asserts against Conduit's GenerateConfig / GeminiOptions
                 // directly, so the import is declared rather than inherited transitively.
-                .product(name: "Conduit", package: "Conduit"),
-            ]
+                .product(name: "Conduit", package: "Conduit"),]
         ),
     ],
     swiftLanguageModes: [.v6]
