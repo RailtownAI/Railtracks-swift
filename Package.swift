@@ -75,10 +75,13 @@ let package = Package(
         ),
         .testTarget(
             name: "RailtracksSwiftTests",
-            dependencies: ["RailtracksSwift", "RailtracksSwiftUI",
+            dependencies: [
+                "RailtracksSwift",
+                "RailtracksSwiftUI",
                 // GeminiOptionsTests asserts against Conduit's GenerateConfig / GeminiOptions
                 // directly, so the import is declared rather than inherited transitively.
-                .product(name: "Conduit", package: "Conduit"),]
+                .product(name: "Conduit", package: "Conduit"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]

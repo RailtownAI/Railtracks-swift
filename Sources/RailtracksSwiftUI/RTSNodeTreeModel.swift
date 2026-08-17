@@ -29,9 +29,13 @@ public struct RTSNodeTreeRow: Identifiable, Sendable {
     public let id: UUID
     public let item: RTSNodeTreeItem
     public let depth: Int
-    /// For each ancestor level, whether that ancestor has a later sibling — i.e. whether a vertical
-    /// connector should be drawn in that column. Index 0 is the outermost level.
-    public let ancestorHasMoreSiblings: [Bool]
+    /// For each ancestor level, the state of the node that level's vertical connector is travelling
+    /// down to, or `nil` when no line passes through that column. Index 0 is the outermost level.
+    ///
+    /// It carries the destination's state rather than a plain flag so the line can be tinted like the
+    /// branch it belongs to: a connector heading toward a finished sibling is drawn green along its
+    /// whole length, instead of turning green only on the row where that sibling finally appears.
+    public let ancestorLines: [RTSNodeStatus.State?]
     /// Whether this row is the last child of its parent, which turns its own elbow from `├` to `└`.
     public let isLastSibling: Bool
     public let hasChildren: Bool
@@ -157,8 +161,8 @@ public final class RTSNodeTreeModel {
             appendRows(
                 for: rootID,
                 depth: 0,
-                ancestorHasMoreSiblings: [],
-                isLastSibling: true,
+                ancestorLines: [],
+                nextSiblingState: nil,
                 startsNewRun: index > 0,
                 into: &built
             )
@@ -169,11 +173,13 @@ public final class RTSNodeTreeModel {
     private func appendRows(
         for id: UUID,
         depth: Int,
-        ancestorHasMoreSiblings: [Bool],
-        isLastSibling: Bool,
+        ancestorLines: [RTSNodeStatus.State?],
+        /// State of the node this row's trunk continues down to, or `nil` when it is the last child.
+        nextSiblingState: RTSNodeStatus.State?,
         startsNewRun: Bool,
         into built: inout [RTSNodeTreeRow]
     ) {
+        let isLastSibling = nextSiblingState == nil
         guard let item = items[id] else {
             return
         }
@@ -183,7 +189,7 @@ public final class RTSNodeTreeModel {
                 id: id,
                 item: item,
                 depth: depth,
-                ancestorHasMoreSiblings: ancestorHasMoreSiblings,
+                ancestorLines: ancestorLines,
                 isLastSibling: isLastSibling,
                 hasChildren: !item.childIDs.isEmpty,
                 isCollapsed: collapsed,
@@ -193,20 +199,22 @@ public final class RTSNodeTreeModel {
         guard !collapsed else {
             return
         }
-        // A row at depth d draws (d - 1) ancestor columns plus its own elbow, so the root contributes
-        // no column at all — its children sit at depth 1 with an elbow and nothing to their left.
-        // Below the root, this node's column keeps a vertical line only while it has siblings still
-        // to come, so a descendant's line runs past it down to the next sibling.
-        let childAncestors = depth == 0
+        // A row at depth d draws (d - 1) ancestor columns plus its own trunk, so the root contributes
+        // no column at all — its children sit at depth 1 with a trunk and nothing to their left.
+        // Below the root, this node's column keeps a line running past its descendants only while it
+        // still has a sibling to come, and that sibling's state is what tints it.
+        let childAncestorLines: [RTSNodeStatus.State?] = depth == 0
             ? []
-            : ancestorHasMoreSiblings + [!isLastSibling]
+            : ancestorLines + [nextSiblingState]
         for (index, childID) in item.childIDs.enumerated() {
-            let childIsLast = index == item.childIDs.count - 1
+            let followingSibling = index + 1 < item.childIDs.count
+                ? items[item.childIDs[index + 1]]?.state
+                : nil
             appendRows(
                 for: childID,
                 depth: depth + 1,
-                ancestorHasMoreSiblings: childAncestors,
-                isLastSibling: childIsLast,
+                ancestorLines: childAncestorLines,
+                nextSiblingState: followingSibling,
                 startsNewRun: false,
                 into: &built
             )

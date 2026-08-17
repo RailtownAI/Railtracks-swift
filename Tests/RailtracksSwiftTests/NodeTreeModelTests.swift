@@ -28,6 +28,15 @@ private func status(
     )
 }
 
+private extension RTSNodeStatus.State {
+    var isCompleted: Bool {
+        if case .completed = self {
+            return true
+        }
+        return false
+    }
+}
+
 @MainActor
 @Suite("Node tree model")
 struct NodeTreeModelTests {
@@ -148,8 +157,8 @@ struct NodeTreeModelTests {
         #expect(model.rows[1].depth == 1)
     }
 
-    @Test("Connector flags mark the last sibling at each level")
-    func connectorFlagsDescribeTheOutline() {
+    @Test("Connector metadata describes the outline")
+    func connectorMetadataDescribesTheOutline() {
         let model = RTSNodeTreeModel()
         let a = UUID()
         let b = UUID()
@@ -161,10 +170,29 @@ struct NodeTreeModelTests {
         let byName = Dictionary(uniqueKeysWithValues: model.rows.map { ($0.item.name, $0) })
         #expect(byName["B"]?.isLastSibling == false)
         #expect(byName["C"]?.isLastSibling == true)
-        // Depth-1 rows draw only their elbow — the root contributes no column.
-        #expect(byName["B"]?.ancestorHasMoreSiblings == [])
-        // B-child is depth 2, so it draws one ancestor column: B's. B has a later sibling (C), so
-        // that column keeps a vertical line running past B-child down to C.
-        #expect(byName["B-child"]?.ancestorHasMoreSiblings == [true])
+        // Depth-1 rows draw only their own trunk — the root contributes no column.
+        #expect(byName["B"]?.ancestorLines.isEmpty == true)
+        // B-child is depth 2, so it draws one ancestor column: A's. A still has C to come, so a line
+        // passes through that column on its way down to C.
+        #expect(byName["B-child"]?.ancestorLines.count == 1)
+        #expect(byName["B-child"]?.ancestorLines.first??.isCompleted == false)
+    }
+
+    @Test("A pass-through line carries the state of the sibling it leads to")
+    func passThroughLinesCarryDestinationState() {
+        // The line crossing B-child's row is heading down to C, so it is tinted like C — otherwise a
+        // finished sibling would show a green stub with a grey line running up to it.
+        let model = RTSNodeTreeModel()
+        let a = UUID()
+        let b = UUID()
+        let c = UUID()
+        model.apply(status(a, name: "A"))
+        model.apply(status(b, parent: a, name: "B"))
+        model.apply(status(UUID(), parent: b, name: "B-child"))
+        model.apply(status(c, parent: a, name: "C"))
+        model.apply(status(c, parent: a, name: "C", state: .completed))
+
+        let bChild = model.rows.first { $0.item.name == "B-child" }
+        #expect(bChild?.ancestorLines.first??.isCompleted == true)
     }
 }

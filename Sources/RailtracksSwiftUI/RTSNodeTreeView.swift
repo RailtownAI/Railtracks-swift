@@ -83,26 +83,38 @@ struct RTSNodeTreeRowView: View {
     let row: RTSNodeTreeRow
     let onToggleCollapse: () -> Void
 
-    private static let indent: CGFloat = 22
+    /// Width of one tree level. The status circle occupies a column of exactly this width too, so a
+    /// child's elbow lands on its parent's circle centre rather than beside it.
+    static let indent: CGFloat = 24
+    static let rowHeight: CGFloat = 26
 
     var body: some View {
-        HStack(spacing: 6) {
+        // Zero spacing through the connector and circle columns: any gap inserted here would offset
+        // every circle from the column grid its children's connectors are drawn against. Spacing to
+        // the right of the circle is added per-view instead.
+        HStack(spacing: 0) {
             connectors
-            RTSNodeStatusIcon(state: row.item.state)
+            RTSNodeStatusIcon(
+                state: row.item.state,
+                showsChildStem: row.hasChildren && !row.isCollapsed
+            )
             Image(systemName: row.item.nodeType.symbolName)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .padding(.leading, 6)
                 .accessibilityLabel(row.item.nodeType.accessibilityName)
             Text(row.item.name)
                 .font(.callout)
+                .padding(.leading, 6)
             if row.hasChildren {
                 Image(systemName: row.isCollapsed ? "chevron.right" : "chevron.down")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .padding(.leading, 6)
             }
             Spacer(minLength: 0)
         }
-        .frame(height: 26)
+        .frame(height: Self.rowHeight)
         .contentShape(Rectangle())
         .onTapGesture {
             guard row.hasChildren else {
@@ -114,37 +126,62 @@ struct RTSNodeTreeRowView: View {
         .accessibilityLabel("\(row.item.nodeType.accessibilityName) \(row.item.name), \(row.item.state.accessibilityDescription)")
     }
 
-    /// Vertical lines for ancestor levels, then this row's own elbow.
+    /// Ancestor lines plus this row's own branch, drawn in one coordinate space.
+    ///
+    /// Two overlaid shapes so they can be tinted separately: everything belonging to *this* node's
+    /// branch takes its state colour, while lines merely passing through on their way to an
+    /// ancestor's later sibling stay neutral.
     private var connectors: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(row.ancestorHasMoreSiblings.enumerated()), id: \.offset) { _, hasMore in
-                Rectangle()
-                    .fill(hasMore ? Color.secondary.opacity(0.35) : .clear)
-                    .frame(width: 1)
-                    .frame(width: Self.indent, alignment: .leading)
+        ZStack(alignment: .leading) {
+            // Drawn as individual views rather than one stroked path because each carries the tint of
+            // whichever node its line is heading toward, so tints differ within a single row.
+            ForEach(Array(row.ancestorLines.enumerated()), id: \.offset) { level, destination in
+                if let destination {
+                    Rectangle()
+                        .fill(destination.tint)
+                        .frame(width: Self.lineWidth, height: Self.rowHeight)
+                        .offset(x: CGFloat(level) * Self.indent + (Self.indent - Self.lineWidth) / 2)
+                }
             }
-            if row.depth > 0 {
-                RTSTreeElbow(isLastSibling: row.isLastSibling)
-                    .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-                    .frame(width: Self.indent)
-            }
+
+            RTSTreeBranch(
+                depth: row.depth,
+                isLastSibling: row.isLastSibling,
+                indent: Self.indent
+            )
+            .stroke(row.item.state.tint, lineWidth: Self.lineWidth)
         }
-        .frame(height: 26)
+        .frame(width: CGFloat(row.depth) * Self.indent, height: Self.rowHeight)
     }
+
+    /// Matches the connector weight used by the demo's step view, so the two read as one language.
+    static let lineWidth: CGFloat = 2
 }
 
-/// The `├`/`└` joint linking a row to its parent's vertical line.
-struct RTSTreeElbow: Shape {
+/// The trunk down from this node's parent and the arm across to its circle, drawn in the node's state
+/// colour so the whole branch turns green as the node completes.
+///
+/// The trunk sits at `(depth - 1) * indent + indent / 2` — the same x as the parent's status circle,
+/// since a circle occupies a column of `indent` too.
+struct RTSTreeBranch: Shape {
+    let depth: Int
     let isLastSibling: Bool
+    let indent: CGFloat
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let midY = rect.midY
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        // A last child's line stops at the elbow; otherwise it continues to the next sibling.
-        path.addLine(to: CGPoint(x: rect.minX, y: isLastSibling ? midY : rect.maxY))
-        path.move(to: CGPoint(x: rect.minX, y: midY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: midY))
+        guard depth > 0 else {
+            return path
+        }
+        let trunkX = CGFloat(depth - 1) * indent + indent / 2
+        path.move(to: CGPoint(x: trunkX, y: rect.minY))
+        // Stops at this row's centre when it is the last child; otherwise carries on to the row edge,
+        // where the next sibling's own trunk picks it up.
+        path.addLine(to: CGPoint(x: trunkX, y: isLastSibling ? rect.midY : rect.maxY))
+        path.move(to: CGPoint(x: trunkX, y: rect.midY))
+        // Overshoots the prefix by half an indent to reach the centre of this row's circle, which is
+        // laid out immediately to the right and drawn over the line's end.
+        path.addLine(to: CGPoint(x: rect.maxX + indent / 2, y: rect.midY))
         return path
     }
 }
@@ -152,11 +189,19 @@ struct RTSTreeElbow: Shape {
 /// Status circle: colour carries state, and only `.executing` spins.
 struct RTSNodeStatusIcon: View {
     let state: RTSNodeStatus.State
+    /// Draws the stem running from this circle down to the first child's row.
+    var showsChildStem: Bool = false
 
-    private static let diameter: CGFloat = 12
+    private static let diameter: CGFloat = 14
 
     var body: some View {
         ZStack {
+            // Behind the circle, and owned by the circle rather than the row's connector prefix: the
+            // root's prefix is zero-width, so a stem drawn there would never render for it.
+            if showsChildStem {
+                RTSTreeChildStem()
+                    .stroke(state.tint, lineWidth: RTSNodeTreeRowView.lineWidth)
+            }
             Circle()
                 .fill(state.tint)
                 .frame(width: Self.diameter, height: Self.diameter)
@@ -166,7 +211,19 @@ struct RTSNodeStatusIcon: View {
                     .controlSize(.mini)
             }
         }
-        .frame(width: 18, height: 18)
+        // A full indent-width column, so the circle's centre sits exactly where a child's connector
+        // expects to find it, and the full row height so the stem reaches the next row.
+        .frame(width: RTSNodeTreeRowView.indent, height: RTSNodeTreeRowView.rowHeight)
+    }
+}
+
+/// The stem from a node's circle down to the top of its first child's row.
+struct RTSTreeChildStem: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        return path
     }
 }
 
