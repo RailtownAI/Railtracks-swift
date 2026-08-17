@@ -71,7 +71,10 @@ let package = Package(
         ),
         .target(
             name: "RailtracksSwiftUI",
-            dependencies: ["RailtracksSwift"]
+            dependencies: [
+                "RailtracksSwift",
+                .product(name: "Logging", package: "swift-log"),
+            ]
         ),
         .testTarget(
             name: "RailtracksSwiftTests",

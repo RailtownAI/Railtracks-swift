@@ -1,5 +1,5 @@
 //
-//  RTSNodeTreeModel.swift
+//  RTSNodeTreeViewModel.swift
 //  RailtracksSwiftUI
 //
 
@@ -50,7 +50,7 @@ public struct RTSNodeTreeRow: Identifiable, Sendable {
 /// than replacing them. The view only observes — the app still drives `flow.run(...)` itself.
 @MainActor
 @Observable
-public final class RTSNodeTreeModel {
+public final class RTSNodeTreeViewModel {
     /// Flattened depth-first, ready to render. Recomputed whenever the tree or collapse state changes.
     public private(set) var rows: [RTSNodeTreeRow] = []
 
@@ -133,24 +133,26 @@ public final class RTSNodeTreeModel {
         if let parentID, items[parentID] != nil {
             items[parentID]?.childIDs.append(status.nodeID)
         } else if parentID == nil {
+            // Treated as a run root. A node whose invocation-id propagation was lost upstream also
+            // arrives with a nil parent and is indistinguishable from a genuine root here, so it will
+            // render as a spurious extra run. The invoker logs that case itself ("invocation-id
+            // propagation lost"), which is the signal to look for when a run splits unexpectedly.
             rootIDs.append(status.nodeID)
+        } else if let parentID, let fallbackRoot = rootIDs.last {
+            // Named parent we have never seen — reachable after `reset()` clears the tree mid-run.
+            // Attach to the newest root so the node stays visible rather than vanishing.
+            log.debug("🌳 node '\(status.nodeName)' names parent \(parentID) which is not in the tree; attaching to the current run root")
+            items[status.nodeID] = RTSNodeTreeItem(
+                id: status.nodeID,
+                parentID: fallbackRoot,
+                name: status.nodeName,
+                nodeType: status.nodeType,
+                state: status.state,
+                runIndex: items[fallbackRoot]?.runIndex ?? 0
+            )
+            items[fallbackRoot]?.childIDs.append(status.nodeID)
         } else {
-            // Parent unknown: invocation-id propagation was lost upstream (the invoker logs an error
-            // for this). Attach to the newest root so the node stays visible instead of vanishing —
-            // a propagation bug should look wrong, not look like nothing happened.
-            if let fallbackRoot = rootIDs.last {
-                items[status.nodeID] = RTSNodeTreeItem(
-                    id: status.nodeID,
-                    parentID: fallbackRoot,
-                    name: status.nodeName,
-                    nodeType: status.nodeType,
-                    state: status.state,
-                    runIndex: items[fallbackRoot]?.runIndex ?? 0
-                )
-                items[fallbackRoot]?.childIDs.append(status.nodeID)
-            } else {
-                rootIDs.append(status.nodeID)
-            }
+            rootIDs.append(status.nodeID)
         }
         rebuildRows()
     }

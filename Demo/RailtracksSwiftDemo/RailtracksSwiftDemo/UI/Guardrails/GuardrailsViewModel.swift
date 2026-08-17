@@ -54,7 +54,7 @@ class GuardrailsViewModel {
     /// per run — the model outlives them and accumulates each run as its own root. Useful on this
     /// screen in particular: a blocked input guardrail short-circuits before the LLM runs, so the
     /// agent shows as failed with no children beneath it.
-    @MainActor let nodeTree = RTSNodeTreeModel()
+    @MainActor let nodeTree = RTSNodeTreeViewModel()
     
     func isSelected(_ preset: Preset) -> Bool {
         preset.text == prompt

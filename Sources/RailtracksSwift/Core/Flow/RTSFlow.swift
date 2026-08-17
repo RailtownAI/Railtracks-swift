@@ -27,8 +27,13 @@ public class RTSFlow: @unchecked Sendable {
     }
 
     private let nodeStatusSubject = PassthroughSubject<RTSNodeStatus, Never>()
-    /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions state.
-    /// Emits `.executing` when a node starts, `.completed` or `.failed` when it finishes.
+    /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions
+    /// state: `.queued` when it is created, `.executing` once its input guardrails have run and its
+    /// body starts, and `.completed` or `.failed` when it finishes.
+    ///
+    /// Each status carries `parentNodeID` — the invocation that triggered it, `nil` at the flow root —
+    /// so consumers can reconstruct the call tree. Ids are per-invocation, so a node invoked N times
+    /// reports N distinct ids.
     public var nodeStatusPublisher: AnyPublisher<RTSNodeStatus, Never> {
         nodeStatusSubject.eraseToAnyPublisher()
     }

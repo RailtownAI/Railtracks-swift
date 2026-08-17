@@ -31,7 +31,7 @@ class MathViewModel {
     ]
     /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
     /// per run — the model outlives them and accumulates each run as its own root.
-    @MainActor let nodeTree = RTSNodeTreeModel()
+    @MainActor let nodeTree = RTSNodeTreeViewModel()
 
     private var cancellables = Set<AnyCancellable>()
 

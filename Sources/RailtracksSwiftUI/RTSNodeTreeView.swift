@@ -8,64 +8,74 @@ import RailtracksSwift
 
 /// A live call tree of a flow's node invocations.
 ///
+/// The parent owns both halves — the view model alongside its own, the view alongside its own:
+///
 /// ```swift
-/// RTSNodeTreeView(flow: flow)
+/// @Observable final class MyViewModel {
+///     @MainActor let nodeTree = RTSNodeTreeViewModel()
+///
+///     func run() {
+///         let flow = RTSFlow(title: "My Flow")
+///         nodeTree.attach(to: flow)
+///         // …flow.run(…)
+///     }
+/// }
+///
+/// RTSNodeTreeView(viewModel: myViewModel.nodeTree)
 /// ```
+///
+/// Attaching at flow creation rather than passing the flow to the view is deliberate: apps typically
+/// build a fresh `RTSFlow` per run, often inside a `Task`, where it never reaches view-visible state
+/// for SwiftUI to notice. `attach(to:)` also begins observing at the moment of creation rather than
+/// at the next render pass, so nothing is missed.
 ///
 /// The view only observes; the app still calls `flow.run(...)`. Rows appear as nodes are invoked and
 /// nest under whichever invocation triggered them, so a node invoked twice produces two rows.
 public struct RTSNodeTreeView: View {
-    @State private var model: RTSNodeTreeModel
-    /// Cleared once the user scrolls, so the view stops yanking the viewport away from them.
+    /// A plain `let`: the caller owns the view model's lifetime, and the view must pick up a
+    /// different one if handed one. `@State` would latch the first value and ignore the rest.
+    private let viewModel: RTSNodeTreeViewModel
+
+    /// Follows new rows until the reader scrolls away, and resumes once they return to the bottom.
     @State private var followsTail = true
     @State private var scrollPosition = ScrollPosition(edge: .top)
 
-    public init(flow: RTSFlow) {
-        _model = State(initialValue: RTSNodeTreeModel(flow: flow))
-    }
-
-    /// For previews and tests, where statuses are fed to the model by hand.
-    public init(model: RTSNodeTreeModel) {
-        _model = State(initialValue: model)
+    public init(viewModel: RTSNodeTreeViewModel) {
+        self.viewModel = viewModel
     }
 
     public var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(model.rows) { row in
+                ForEach(viewModel.rows) { row in
                     if row.startsNewRun {
                         Divider()
                             .padding(.vertical, 8)
                     }
                     RTSNodeTreeRowView(row: row) {
-                        model.toggleCollapse(row.id)
+                        viewModel.toggleCollapse(row.id)
                     }
                     .id(row.id)
                 }
-                // Anchor for tail-following: scrolling to the bottom of the content rather than to
-                // the newest row is what keeps this from bouncing between distant nodes when
-                // parallel branches grow at once.
-                Color.clear
-                    .frame(height: 1)
-                    .id(Self.tailAnchor)
             }
             .padding(12)
         }
         .scrollPosition($scrollPosition)
-        .onScrollPhaseChange { _, phase in
-            // Any hands-on scroll takes over; returning to the bottom hands control back.
-            switch phase {
-            case .interacting:
-                followsTail = false
-            case .idle:
-                if scrollPosition.isPositionedByUser == false {
-                    followsTail = true
-                }
-            default:
-                break
-            }
+        // Derived from where the viewport actually sits, not from whether a scroll ever happened:
+        // `ScrollPosition.isPositionedByUser` latches true after the first touch, which would leave
+        // auto-follow dead for the rest of the view's life after a single nudge.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let distanceFromBottom = geometry.contentSize.height
+                - geometry.contentOffset.y
+                - geometry.containerSize.height
+            return distanceFromBottom <= Self.tailThreshold
+        } action: { _, isAtBottom in
+            followsTail = isAtBottom
         }
-        .onChange(of: model.rows.count) {
+        // Scrolls to the bottom of the content rather than to the newest row: new rows can be
+        // inserted mid-tree, and chasing them would bounce the viewport between distant branches.
+        // The content bottom only ever moves downward, so following it cannot oscillate.
+        .onChange(of: viewModel.rows.count) {
             guard followsTail else {
                 return
             }
@@ -75,7 +85,9 @@ public struct RTSNodeTreeView: View {
         }
     }
 
-    private static let tailAnchor = "rts-node-tree-tail"
+    /// Slack for "at the bottom", so sub-pixel rounding or a hair of overscroll does not read as the
+    /// reader having deliberately scrolled away.
+    private static let tailThreshold: CGFloat = 8
 }
 
 /// One row: status circle, node-type glyph, name — with the connector lines for its depth.

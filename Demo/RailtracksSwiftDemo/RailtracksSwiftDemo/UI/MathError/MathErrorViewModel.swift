@@ -24,7 +24,7 @@ class MathErrorViewModel {
     /// per run — the model outlives them and accumulates each run as its own root. Both buttons on
     /// this screen therefore stack into one history, which is the point: the failing run's tree sits
     /// alongside the others with its node marked red.
-    @MainActor let nodeTree = RTSNodeTreeModel()
+    @MainActor let nodeTree = RTSNodeTreeViewModel()
 
     private var cancellables = Set<AnyCancellable>()
 

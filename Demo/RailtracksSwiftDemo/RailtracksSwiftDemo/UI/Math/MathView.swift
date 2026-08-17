@@ -46,7 +46,7 @@ struct MathView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Call tree:")
-                RTSNodeTreeView(model: viewModel.nodeTree)
+                RTSNodeTreeView(viewModel: viewModel.nodeTree)
                     .frame(minHeight: 160)
             }
         }

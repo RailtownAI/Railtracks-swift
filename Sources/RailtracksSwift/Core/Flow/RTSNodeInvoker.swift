@@ -274,6 +274,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         await publishNodeFinished(
             node,
             nodeID: invocationID,
+            parentNodeID: parentInvocationID,
             nodeType: nodeType,
             stamp: completionStamp,
             runID: runID,
@@ -352,6 +353,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
     private func publishNodeFinished(
         _ node: some RTSNode,
         nodeID: UUID,
+        parentNodeID: UUID?,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         runID: UUID,
@@ -367,6 +369,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
             nodeInvokeEventSubject,
             RTSNodeEvent(
                 nodeID: nodeID,
+                parentNodeID: parentNodeID,
                 name: node.name(),
                 nodeType: nodeType,
                 stamp: stamp,

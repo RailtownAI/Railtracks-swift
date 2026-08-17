@@ -43,7 +43,7 @@ struct NodeTreeModelTests {
 
     @Test("Children nest under the invocation that triggered them")
     func childrenNestUnderParent() {
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let a = UUID()
         let b = UUID()
         model.apply(status(a, name: "Node A"))
@@ -57,7 +57,7 @@ struct NodeTreeModelTests {
     func repeatInvocationsAreDistinctRows() {
         // Per-invocation ids are what make this work — the same tool called twice arrives as two
         // different nodeIDs sharing a name.
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let root = UUID()
         model.apply(status(root, name: "Node A"))
         model.apply(status(UUID(), parent: root, name: "Node D"))
@@ -70,7 +70,7 @@ struct NodeTreeModelTests {
     func lateChildInsertsWithinItsSubtree() {
         // The ordering rule from the design: F's new child goes below F's existing children and
         // above C, rather than appending to the bottom of the whole tree.
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let a = UUID()
         let f = UUID()
         let c = UUID()
@@ -85,7 +85,7 @@ struct NodeTreeModelTests {
 
     @Test("State transitions update the existing row rather than adding one")
     func stateTransitionsMutateInPlace() {
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let a = UUID()
         model.apply(status(a, name: "A", state: .queued))
         model.apply(status(a, name: "A", state: .executing))
@@ -101,7 +101,7 @@ struct NodeTreeModelTests {
     @Test("A second run starts a new root and is marked as a run boundary")
     func secondRunStartsNewRoot() {
         // Run separation is derived, not signalled: only a run's root has no parent.
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let first = UUID()
         let second = UUID()
         model.apply(status(first, name: "Run 1 root"))
@@ -114,7 +114,7 @@ struct NodeTreeModelTests {
 
     @Test("Collapsing hides descendants but keeps the row itself")
     func collapseHidesSubtree() {
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let a = UUID()
         let b = UUID()
         model.apply(status(a, name: "A"))
@@ -133,7 +133,7 @@ struct NodeTreeModelTests {
     func collapseSurvivesNewChildren() {
         // Growth must not force-expand: the parent is still executing, and its spinner already says
         // work is happening. Yanking the subtree open would fight the user.
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let a = UUID()
         let b = UUID()
         model.apply(status(a, name: "A"))
@@ -144,22 +144,39 @@ struct NodeTreeModelTests {
         #expect(model.rows.map(\.item.name) == ["A", "B"])
     }
 
-    @Test("A node whose parent is unknown is kept, not dropped")
-    func orphansAttachToTheRunRoot() {
-        // Invocation-id propagation can be lost (the invoker logs an error for it). Losing the node
-        // entirely would make that bug look like nothing happened.
-        let model = RTSNodeTreeModel()
+    @Test("A node naming an unknown parent is kept, not dropped")
+    func unknownParentAttachesToTheRunRoot() {
+        // Reachable after `reset()` clears the tree mid-run: children still arrive naming parents
+        // that are no longer recorded. Dropping them would make the tree silently incomplete.
+        let model = RTSNodeTreeViewModel()
         let root = UUID()
         model.apply(status(root, name: "Root"))
-        model.apply(status(UUID(), parent: UUID(), name: "Orphan"))
+        model.apply(status(UUID(), parent: UUID(), name: "Stranded"))
 
-        #expect(model.rows.map(\.item.name) == ["Root", "Orphan"])
+        #expect(model.rows.map(\.item.name) == ["Root", "Stranded"])
         #expect(model.rows[1].depth == 1)
+    }
+
+    @Test("Reset clears the tree and later children still land somewhere visible")
+    func resetKeepsSubsequentChildrenVisible() {
+        let model = RTSNodeTreeViewModel()
+        let root = UUID()
+        let child = UUID()
+        model.apply(status(root, name: "Root"))
+        model.apply(status(child, parent: root, name: "Child"))
+        #expect(model.rows.count == 2)
+
+        model.reset()
+        #expect(model.rows.isEmpty)
+
+        // The run continues: a grandchild arrives naming a parent the tree no longer knows.
+        model.apply(status(UUID(), parent: child, name: "Grandchild"))
+        #expect(model.rows.map(\.item.name) == ["Grandchild"])
     }
 
     @Test("Connector metadata describes the outline")
     func connectorMetadataDescribesTheOutline() {
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let a = UUID()
         let b = UUID()
         model.apply(status(a, name: "A"))
@@ -182,7 +199,7 @@ struct NodeTreeModelTests {
     func passThroughLinesCarryDestinationState() {
         // The line crossing B-child's row is heading down to C, so it is tinted like C — otherwise a
         // finished sibling would show a green stub with a grey line running up to it.
-        let model = RTSNodeTreeModel()
+        let model = RTSNodeTreeViewModel()
         let a = UUID()
         let b = UUID()
         let c = UUID()
