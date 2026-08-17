@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import RailtracksSwiftUI
 import Logging
 
 struct MathErrorView: View {
@@ -40,6 +41,12 @@ struct MathErrorView: View {
                     Text(viewModel.traceStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Call tree:").font(.caption).foregroundStyle(.secondary)
+                    RTSNodeTreeView(viewModel: viewModel.nodeTree)
+                        .frame(minHeight: 180)
                 }
             }
         }

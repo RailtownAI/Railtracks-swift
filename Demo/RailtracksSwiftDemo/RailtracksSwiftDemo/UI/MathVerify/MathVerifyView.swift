@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import RailtracksSwiftUI
 import Logging
 
 struct MathVerifyView: View {
@@ -32,6 +33,12 @@ struct MathVerifyView: View {
                 }
             }
             Text("Result: " + (viewModel.promptResult ?? ""))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Call tree:").font(.caption).foregroundStyle(.secondary)
+                RTSNodeTreeView(viewModel: viewModel.nodeTree)
+                    .frame(minHeight: 200)
+            }
         }
         .padding()
         .sheet(isPresented: $viewModel.isShowingKeyPrompt) {

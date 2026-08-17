@@ -10,6 +10,12 @@ import Foundation
 /// Node snapshot
 struct RTSNodeEvent {
     let id: UUID
+    /// The invocation that triggered this one; `nil` at the flow root. Read from the
+    /// `currentInvocationID` task-local, the same source as the edge's `source`.
+    ///
+    /// Carried for `RTSNodeStatus` (the UI projection) — the trace derives parentage from edges, not
+    /// from this field.
+    let parentNodeID: UUID?
     let name: String
     let nodeType: RTSFlowNodeType
     let stamp: RTSStamp
@@ -33,6 +39,7 @@ struct RTSNodeEvent {
 
     init(
         nodeID: UUID,
+        parentNodeID: UUID? = nil,
         name: String,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
@@ -49,6 +56,7 @@ struct RTSNodeEvent {
         hasOutputGuardrail: Bool = false
     ) {
         self.id = nodeID
+        self.parentNodeID = parentNodeID
         self.name = name
         self.nodeType = nodeType
         self.stamp = stamp

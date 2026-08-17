@@ -27,8 +27,13 @@ public class RTSFlow: @unchecked Sendable {
     }
 
     private let nodeStatusSubject = PassthroughSubject<RTSNodeStatus, Never>()
-    /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions state.
-    /// Emits `.executing` when a node starts, `.completed` or `.failed` when it finishes.
+    /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions
+    /// state: `.queued` when it is created, `.executing` once its input guardrails have run and its
+    /// body starts, and `.completed` or `.failed` when it finishes.
+    ///
+    /// Each status carries `parentNodeID` — the invocation that triggered it, `nil` at the flow root —
+    /// so consumers can reconstruct the call tree. Ids are per-invocation, so a node invoked N times
+    /// reports N distinct ids.
     public var nodeStatusPublisher: AnyPublisher<RTSNodeStatus, Never> {
         nodeStatusSubject.eraseToAnyPublisher()
     }
@@ -163,14 +168,31 @@ public class RTSFlow: @unchecked Sendable {
         )
 
         var subscriptions = Set<AnyCancellable>()
+        // Three lifecycle signals, one per state transition. `.queued` covers the window where input
+        // guardrails run — brief for most nodes, but a model-backed guardrail makes it visible.
+        let statusOf: @Sendable (RTSNodeEvent, RTSNodeStatus.State) -> RTSNodeStatus = { event, state in
+            RTSNodeStatus(
+                nodeID: event.id,
+                parentNodeID: event.parentNodeID,
+                nodeName: event.name,
+                nodeType: event.nodeType,
+                state: state,
+                runID: event.runID
+            )
+        }
         nodeInvoker.nodeCreateEventPublisher
-            .map {
+            .map { statusOf($0, .queued) }
+            .sink { [weak self] in self?.nodeStatusSubject.send($0) }
+            .store(in: &subscriptions)
+        nodeInvoker.nodeExecutionEventPublisher
+            .map { event in
                 RTSNodeStatus(
-                    nodeID: $0.id,
-                    nodeName: $0.name,
-                    nodeType: $0.nodeType,
+                    nodeID: event.nodeID,
+                    parentNodeID: event.parentNodeID,
+                    nodeName: event.name,
+                    nodeType: event.nodeType,
                     state: .executing,
-                    runID: $0.runID
+                    runID: event.runID
                 )
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
@@ -180,13 +202,7 @@ public class RTSFlow: @unchecked Sendable {
                 let state: RTSNodeStatus.State = event.error == nil
                     ? .completed
                     : .failed(event.error ?? "unknown")
-                return RTSNodeStatus(
-                    nodeID: event.id,
-                    nodeName: event.name,
-                    nodeType: event.nodeType,
-                    state: state,
-                    runID: event.runID
-                )
+                return statusOf(event, state)
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
             .store(in: &subscriptions)
