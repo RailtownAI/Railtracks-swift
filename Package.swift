@@ -22,7 +22,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/RailtownAI/Conduit",
-            exact: "0.3.22",
+            exact: "0.3.23",
             traits: [
                 .trait(name: "OpenAI"),
                 .trait(name: "OpenRouter"),
@@ -65,7 +65,12 @@ let package = Package(
         ),
         .testTarget(
             name: "RailtracksSwiftTests",
-            dependencies: ["RailtracksSwift"]
+            dependencies: [
+                "RailtracksSwift",
+                // GeminiOptionsTests asserts against Conduit's GenerateConfig / GeminiOptions
+                // directly, so the import is declared rather than inherited transitively.
+                .product(name: "Conduit", package: "Conduit"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]

@@ -84,7 +84,10 @@ public struct RTSLLMGateway: Sendable {
                 apiKeys: apiKeys,
                 invoker: invoker,
                 agentNode: agentNode,
-                onNewSession: onNewSession
+                onNewSession: onNewSession,
+                // No provider-specific settings on this path. Passed explicitly rather than defaulted
+                // so a new provider case cannot silently skip forwarding its own.
+                applyProviderOptions: { _, _ in }
             )
 
         case .anthropic(modelIDString: let modelIDString):
@@ -97,10 +100,13 @@ public struct RTSLLMGateway: Sendable {
                 apiKeys: apiKeys,
                 invoker: invoker,
                 agentNode: agentNode,
-                onNewSession: onNewSession
+                onNewSession: onNewSession,
+                // No provider-specific settings on this path. Passed explicitly rather than defaulted
+                // so a new provider case cannot silently skip forwarding its own.
+                applyProviderOptions: { _, _ in }
             )
 
-        case .gemini(modelIDString: let modelIDString):
+        case .gemini(modelIDString: let modelIDString, options: let options):
             guard let apiKey = apiKeys[provider.kind] else {
                 throw RTSError.missingAPIKey("No API key provided for \(provider.providerName)")
             }
@@ -110,7 +116,8 @@ public struct RTSLLMGateway: Sendable {
                 apiKeys: apiKeys,
                 invoker: invoker,
                 agentNode: agentNode,
-                onNewSession: onNewSession
+                onNewSession: onNewSession,
+                applyProviderOptions: options.applyToConduitConfig
             )
         }
     }
@@ -123,7 +130,8 @@ public struct RTSLLMGateway: Sendable {
         apiKeys: [RTSLLMProviderKind: String],
         invoker: RTSNodeInvoker,
         agentNode: any RTSAgentNode,
-        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
+        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
+        applyProviderOptions: @escaping @Sendable (inout GenerateConfig, RTSRequestModalities) -> Void
     ) throws -> RTSLLMSession where Provider.ModelID == ModelIdentifier {
         let conduitTools: [any Tool] = agentNode.tools.map { tool in
             if let agentTool = tool as? RTSAgentTool {
@@ -162,7 +170,13 @@ public struct RTSLLMGateway: Sendable {
                 return tool.asConduitTool(invoker: invoker, createdBy: agentNode)
             }
         }
-        return try RTSLLMSession.build(provider: provider, model: model, agentNode: agentNode, conduitTools: conduitTools)
+        return try RTSLLMSession.build(
+            provider: provider,
+            model: model,
+            agentNode: agentNode,
+            conduitTools: conduitTools,
+            applyProviderOptions: applyProviderOptions
+        )
     }
 }
 
