@@ -11,6 +11,7 @@
 		44106E4E2FA27C5E003BAF6C /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 44106E4D2FA27C5E003BAF6C /* RailtracksSwift */; };
 		443F84F12FA27E2700B3DEEF /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 443F84F02FA27E2700B3DEEF /* RailtracksSwift */; };
 		444B11DA2F9FDE4D009CAC9A /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 444B11D92F9FDE4D009CAC9A /* RailtracksSwift */; };
+		44A1B0012FB00001003BAF6C /* RailtracksSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 44A1B0022FB00002003BAF6C /* RailtracksSwiftUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +64,7 @@
 				44106E352FA27A21003BAF6C /* RailtracksSwift in Frameworks */,
 				44106E4E2FA27C5E003BAF6C /* RailtracksSwift in Frameworks */,
 				444B11DA2F9FDE4D009CAC9A /* RailtracksSwift in Frameworks */,
+				44A1B0012FB00001003BAF6C /* RailtracksSwiftUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +129,7 @@
 				44106E342FA27A21003BAF6C /* RailtracksSwift */,
 				44106E4D2FA27C5E003BAF6C /* RailtracksSwift */,
 				443F84F02FA27E2700B3DEEF /* RailtracksSwift */,
+				44A1B0022FB00002003BAF6C /* RailtracksSwiftUI */,
 			);
 			productName = RailtracksSwiftDemo;
 			productReference = 44EAA7FA2F9FC9CE0069A845 /* RailtracksSwiftDemo.app */;
@@ -667,6 +670,10 @@
 		444B11D92F9FDE4D009CAC9A /* RailtracksSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RailtracksSwift;
+		};
+		44A1B0022FB00002003BAF6C /* RailtracksSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RailtracksSwiftUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

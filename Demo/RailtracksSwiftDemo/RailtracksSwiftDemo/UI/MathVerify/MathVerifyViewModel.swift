@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import RailtracksSwift
+import RailtracksSwiftUI
 import Logging
 
 /// Demonstrates agent-as-tool: a solver agent uses math tools to calculate,
@@ -19,6 +20,9 @@ class MathVerifyViewModel {
     var nodeStatusLines: [String] = []
     var isRunning = false
     var isShowingKeyPrompt = false
+    /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
+    /// per run — the model outlives them and accumulates each run as its own root.
+    @MainActor let nodeTree = RTSNodeTreeModel()
 
     func startPrompt() {
         guard let apiKey = KeychainHelper.readOpenAIKey() else {
@@ -79,6 +83,7 @@ class MathVerifyViewModel {
             )
 
             let flow = RTSFlow(title: "Math Verify flow")
+            await self?.nodeTree.attach(to: flow)
             var cancellables = Set<AnyCancellable>()
             flow.nodeStatusPublisher
                 .receive(on: DispatchQueue.main)

@@ -7,6 +7,7 @@
 
 import Foundation
 import RailtracksSwift
+import RailtracksSwiftUI
 import Combine
 import Logging
 
@@ -28,6 +29,9 @@ class MathViewModel {
     var parallelSteps: [RTSStepState] = [
         RTSStepState(id: "C", title: "Math Agent C", status: .pending, subtitle: "50 − 17", chips: []),
     ]
+    /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
+    /// per run — the model outlives them and accumulates each run as its own root.
+    @MainActor let nodeTree = RTSNodeTreeModel()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -42,6 +46,7 @@ class MathViewModel {
         let gateway = RTSLLMGateway(apiKeys: [.gemini: apiKey])
         let flow = RTSFlow(title: "Math Workflow")
         subscribe(to: flow)
+        nodeTree.attach(to: flow)
 
         let workflow = MathWorkflow(
             agentA: Self.mathAgent(named: "Math Agent A"),

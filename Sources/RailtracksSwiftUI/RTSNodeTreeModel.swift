@@ -57,6 +57,20 @@ public final class RTSNodeTreeModel {
     private var cancellable: AnyCancellable?
 
     public init(flow: RTSFlow) {
+        attach(to: flow)
+    }
+
+    /// A model with nothing attached — for previews and tests, or for a view that outlives the flows
+    /// it observes and calls `attach(to:)` as each one is created.
+    public init() {
+    }
+
+    /// Observes `flow`, replacing any previous subscription but **keeping** the accumulated tree.
+    ///
+    /// Apps that build a fresh `RTSFlow` per run (rather than re-running one instance) can call this
+    /// each time and still get the run-over-run history: every flow contributes its own parentless
+    /// root, which is what the divider keys off.
+    public func attach(to flow: RTSFlow) {
         cancellable = flow.nodeStatusPublisher
             // Combine delivers on whichever task published; the tree feeds SwiftUI.
             .receive(on: DispatchQueue.main)
@@ -65,8 +79,12 @@ public final class RTSNodeTreeModel {
             }
     }
 
-    /// For previews and tests: a model fed by hand rather than by a flow.
-    public init() {
+    /// Drops every row and run recorded so far. The current subscription is left in place.
+    public func reset() {
+        items.removeAll()
+        rootIDs.removeAll()
+        collapsedIDs.removeAll()
+        rows = []
     }
 
     public func toggleCollapse(_ id: UUID) {

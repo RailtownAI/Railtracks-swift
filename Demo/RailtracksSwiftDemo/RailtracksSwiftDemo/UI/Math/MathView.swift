@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import RailtracksSwiftUI
 import Logging
 
 struct MathView: View {
@@ -41,6 +42,12 @@ struct MathView: View {
                 )
                 .textFieldStyle(.roundedBorder)
                 .padding()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Call tree:")
+                RTSNodeTreeView(model: viewModel.nodeTree)
+                    .frame(minHeight: 160)
             }
         }
         .padding()
