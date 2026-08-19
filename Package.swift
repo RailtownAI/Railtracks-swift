@@ -49,6 +49,8 @@ let package = Package(
             url: "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
             exact: "1.0.0"
         ),
+        // SSH URL because the repository is private.
+        .package(url: "git@github.com:RailtownAI/RailtownLogger.git", exact: "0.1.0"),
     ],
     targets: [
         .macro(
@@ -66,6 +68,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Conduit", package: "Conduit"),
                 .product(name: "RailtracksInstrumentationKit", package: "railtracks-swift-instrumentation-kit"),
+                .product(name: "RailtownLogger", package: "RailtownLogger"),
                 "RTSMacro"
             ]
         ),
