@@ -50,7 +50,7 @@ let package = Package(
             exact: "1.0.0"
         ),
         // SSH URL because the repository is private.
-        .package(url: "git@github.com:RailtownAI/RailtownLogger.git", exact: "0.1.0"),
+        .package(url: "git@github.com:RailtownAI/RailtownLogger.git", exact: "0.2.0"),
     ],
     targets: [
         .macro(
