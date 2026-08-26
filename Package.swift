@@ -49,8 +49,9 @@ let package = Package(
             url: "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
             exact: "1.0.0"
         ),
-        // SSH URL because the repository is private.
-        .package(url: "git@github.com:RailtownAI/RailtownLogger.git", exact: "0.2.0"),
+        // Private repo: Xcode resolves it once a GitHub account is added in
+        // Settings > Accounts; the CLI needs a credential helper (gh auth setup-git).
+        .package(url: "https://github.com/RailtownAI/RailtownLogger", exact: "0.2.0"),
     ],
     targets: [
         .macro(

@@ -227,7 +227,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				196F7A9E3035111400E089B9 /* XCLocalSwiftPackageReference "../../../Railtracks-swift" */,
-				196F7AA33035113D00E089B9 /* XCLocalSwiftPackageReference "../../../railtown-rca-swift-sdk" */,
+				196F7AA33035113D00E089B9 /* XCRemoteSwiftPackageReference "RailtownLogger" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 44EAA7FB2F9FC9CE0069A845 /* Products */;
@@ -665,15 +665,23 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../../../Railtracks-swift";
 		};
-		196F7AA33035113D00E089B9 /* XCLocalSwiftPackageReference "../../../railtown-rca-swift-sdk" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../../railtown-rca-swift-sdk";
-		};
 /* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		196F7AA33035113D00E089B9 /* XCRemoteSwiftPackageReference "RailtownLogger" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RailtownAI/RailtownLogger";
+			requirement = {
+				kind = exactVersion;
+				version = 0.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		196F7A973035109B00E089B9 /* RailtownLogger */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 196F7AA33035113D00E089B9 /* XCRemoteSwiftPackageReference "RailtownLogger" */;
 			productName = RailtownLogger;
 		};
 		196F7A9F3035111400E089B9 /* RailtracksSwift */ = {
@@ -686,6 +694,7 @@
 		};
 		196F7AA43035113D00E089B9 /* RailtownLogger */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 196F7AA33035113D00E089B9 /* XCRemoteSwiftPackageReference "RailtownLogger" */;
 			productName = RailtownLogger;
 		};
 		44106E342FA27A21003BAF6C /* RailtracksSwift */ = {
