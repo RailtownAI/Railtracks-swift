@@ -1,5 +1,5 @@
 {
-  "originHash" : "17b461fb9f47171341776e6a0f4cb90196e544ca2f4a53f4c7c982b62d137ee8",
+  "originHash" : "3972a367b039fdfe8978ee3f65ec47eb3b2725b24620e49a65ea4db1ab363588",
   "pins" : [
     {
       "identity" : "conduit",
@@ -22,10 +22,10 @@
     {
       "identity" : "railtownlogger",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:RailtownAI/RailtownLogger.git",
+      "location" : "https://github.com/RailtownAI/RailtownLogger",
       "state" : {
-        "branch" : "main",
-        "revision" : "80a781d72786deb50ca23d7e38547df702d14547"
+        "revision" : "dcd775d704e76c60993e6ac3ba5999ea3ceb6ea8",
+        "version" : "0.2.0"
       }
     },
     {
