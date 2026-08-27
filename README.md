@@ -373,8 +373,9 @@ A blocked run is surfaced to the caller via the thrown error:
 ```swift
 do {
     let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
-} catch let RTSError.guardrailBlocked(name, stage, reason) {
+} catch let RTSError.guardrailBlocked(name, stage, reason, context) {
     print("Blocked by \(name) at \(stage): \(reason)")
+    print("  raised at \(context.file):\(context.line)")
 }
 ```
 
@@ -406,18 +407,105 @@ Use `.modelIDString` to get the raw string for `RTSLLMProvider`.
 
 ```swift
 public enum RTSError: Error {
-    case missingInput(String)
-    case missingOutput(String)
-    case encodingFailed(String?)
-    case decodingFailed(String?)
-    case writeFileFailed(String?)
-    case invalidInvocation(String)
-    case invalidSchema(String)
-    case missingAPIKey(String)
-    case providerUnavailable(String)                                   // e.g. AppleAI below macOS/iOS 26
-    case guardrailBlocked(guardrailName: String, stage: RTSGuardrailStage, reason: String)
+    case missingInput(String, context: RTSErrorContext)
+    case missingOutput(String, context: RTSErrorContext)
+    case encodingFailed(String?, context: RTSErrorContext)
+    case decodingFailed(String?, context: RTSErrorContext)
+    case writeFileFailed(String?, context: RTSErrorContext)
+    case invalidInvocation(String, context: RTSErrorContext)
+    case invalidSchema(String, context: RTSErrorContext)
+    case missingAPIKey(String, context: RTSErrorContext)
+    case providerUnavailable(String, context: RTSErrorContext)          // e.g. AppleAI below macOS/iOS 26
+    case guardrailBlocked(
+        guardrailName: String,
+        stage: RTSGuardrailStage,
+        reason: String,
+        context: RTSErrorContext
+    )
 }
 ```
+
+### Call-site context
+
+Every case carries an `RTSErrorContext` describing where the error was raised. You never construct
+it — write the case name as usual and it is filled in from the call site:
+
+```swift
+throw RTSError.missingInput("a")     // context = this file, this line, this function
+```
+
+```swift
+public struct RTSErrorContext: Sendable, Equatable {
+    public let file: String          // #fileID form, e.g. "MyApp/PaymentTool.swift"
+    public let line: UInt
+    public let function: String
+}
+```
+
+Read it back with the `context` property:
+
+```swift
+do {
+    let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+} catch let error as RTSError {
+    let context = error.context
+    print("\(error) — thrown at \(context.file):\(context.line) in \(context.function)")
+}
+```
+
+Two things to be aware of:
+
+- **`RTSError`'s own string form omits the context**, so that the exported JSON trace keeps a stable
+  format. Anything that needs the file and line must read `context` explicitly, as above.
+- **`RTSError` already conforms to `CustomStringConvertible`.** To render errors differently, write
+  your own helper function rather than an extension adding that conformance.
+
+If you build an error-reporting helper of your own, forward the literals so the context still points
+at your caller rather than at the helper:
+
+```swift
+func reportFailure(
+    _ detail: String,
+    file: String = #fileID,
+    line: UInt = #line,
+    function: String = #function
+) -> RTSError {
+    .missingInput(detail, file: file, line: line, function: function)
+}
+```
+
+### Using your own error type
+
+Tools, agents, and orchestrators may throw any `Error`. It propagates out of `RTSFlow.run` unchanged
+and is still recorded in the JSON trace, so you are not required to adopt `RTSError`.
+
+Your own type will not carry call-site context unless you build it in. `RTSErrorContext` is public so
+you can reuse it — give each case a labelled `context:` parameter, then add a same-named static
+factory that defaults the literals:
+
+```swift
+enum PaymentError: Error {
+    case declined(String, context: RTSErrorContext)
+
+    // The `context:` label on the case is what lets this factory shadow it, so
+    // `PaymentError.declined("card expired")` resolves here and captures the call site.
+    static func declined(
+        _ reason: String,
+        file: String = #fileID,
+        line: UInt = #line,
+        function: String = #function
+    ) -> PaymentError {
+        let context = RTSErrorContext(file: file, line: line, function: function)
+        return .declined(reason, context: context)
+    }
+}
+
+throw PaymentError.declined("card expired")
+```
+
+Call the factories directly. An unapplied reference such as
+`let make: (String) -> PaymentError = PaymentError.declined` binds to the case, not the factory, and
+will not compile.
 
 ## Flow Graph Tracing
 
