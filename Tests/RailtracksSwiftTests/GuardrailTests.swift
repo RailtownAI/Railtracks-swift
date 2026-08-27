@@ -61,7 +61,7 @@ extension RailtracksSwiftTestSuite {
             #expect(traces[0].action == "block")
             #expect(traces[0].reason == "nope")
 
-            guard case let .guardrailBlocked(name, stage, reason)? = error as? RTSError else {
+            guard case let .guardrailBlocked(name, stage, reason, _)? = error as? RTSError else {
                 Issue.record("expected RTSError.guardrailBlocked, got \(String(describing: error))")
                 return
             }
@@ -98,7 +98,7 @@ extension RailtracksSwiftTestSuite {
             #expect(traces[0].action == "block")
             #expect(traces[0].phase == "llm_output")
 
-            guard case let .guardrailBlocked(_, stage, _)? = error as? RTSError else {
+            guard case let .guardrailBlocked(_, stage, _, _)? = error as? RTSError else {
                 Issue.record("expected RTSError.guardrailBlocked")
                 return
             }

@@ -107,7 +107,7 @@ class GuardrailsViewModel {
                 Log.debug("guardrails demo: starting run...")
                 let result = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
                 self?.promptResult = result
-            } catch let RTSError.guardrailBlocked(name, stage, reason) {
+            } catch let RTSError.guardrailBlocked(name, stage, reason, _) {
                 self?.promptResult = "⛔ Blocked by \(name) [\(stage)]: \(reason)"
             } catch {
                 self?.promptResult = "Error: \(error)"

@@ -61,7 +61,7 @@ class MathErrorViewModel {
                 _ = try await flow.run(ThrowingWorkflow(), input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
                 self?.promptResult = "n/a — expected a failure"
             } catch {
-                self?.promptResult = "Failed as expected: \(error)"
+                self?.promptResult = "Failed as expected:\n" + (self?.displayText(for: error) ?? "\(error)")
                 Log.debug("force-throw flow failed as expected: \(error)")
             }
         }
@@ -70,6 +70,20 @@ class MathErrorViewModel {
     private func resetOutput() {
         promptResult = ""
         traceStatus = ""
+    }
+
+    /// Renders a caught error for the UI, appending the call site the library captured.
+    ///
+    /// `RTSError.description` deliberately omits its context so the exported JSON trace keeps
+    /// the string format other verticals depend on — so anything that wants the file, line, and
+    /// function has to read `RTSError.context` explicitly, as this does. Errors from outside the
+    /// library carry no context and are rendered as-is.
+    private func displayText(for error: Error) -> String {
+        guard let railtracksError = error as? RTSError else {
+            return "\(error)"
+        }
+        let context = railtracksError.context
+        return "\(railtracksError)\nthrown at \(context.file):\(context.line) in \(context.function)"
     }
 
     func startPrompt() {
@@ -108,7 +122,7 @@ class MathErrorViewModel {
             do {
                 self?.promptResult = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
             } catch {
-                self?.promptResult = "Flow failed: \(error)"
+                self?.promptResult = "Flow failed:\n" + (self?.displayText(for: error) ?? "\(error)")
                 Log.debug("math error flow failed: \(error)")
             }
             Log.debug("math error prompt done")
