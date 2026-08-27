@@ -62,11 +62,20 @@ public enum RTSError: Error {
 ///
 /// The `context:` label on every case is what makes this unambiguous: the labelled
 /// parameter means a call such as `RTSError.missingInput("prompt")` cannot match the
-/// case constructor, so it resolves to the factory below. Existing call sites keep
-/// compiling unchanged and gain the context for free.
+/// case constructor, so it resolves to the factory below. Existing **construction**
+/// sites therefore compile unchanged and gain the context for free.
 ///
-/// One caveat: an *unapplied* reference (`let make = RTSError.missingInput`) binds to
-/// the case, not the factory, and will fail to typecheck. Always call these directly.
+/// **Pattern matches are not covered by that.** The `context:` payload has no default, so every
+/// `catch`/`case` that binds a payload gained an element — `case .missingInput(let detail)` must
+/// become `case .missingInput(let detail, _)`. Adopting this required fixing three such matches
+/// (two in `GuardrailTests`, one in the demo's `GuardrailsViewModel`). A match that omits the
+/// payload pattern entirely (`case .missingAPIKey:`) still compiles untouched.
+///
+/// Adding a case, or another payload, carries the same cost — worth knowing before the library
+/// is published and the enum's shape becomes an external commitment.
+///
+/// One further caveat: an *unapplied* reference (`let make = RTSError.missingInput`) binds
+/// to the case, not the factory, and will fail to typecheck. Always call these directly.
 extension RTSError {
     public static func missingInput(
         _ detail: String,

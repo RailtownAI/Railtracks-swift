@@ -373,9 +373,8 @@ A blocked run is surfaced to the caller via the thrown error:
 ```swift
 do {
     let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
-} catch let RTSError.guardrailBlocked(name, stage, reason, context) {
+} catch let RTSError.guardrailBlocked(name, stage, reason, _) {
     print("Blocked by \(name) at \(stage): \(reason)")
-    print("  raised at \(context.file):\(context.line)")
 }
 ```
 
@@ -453,12 +452,16 @@ do {
 }
 ```
 
-Two things to be aware of:
+Three things to be aware of:
 
 - **`RTSError`'s own string form omits the context**, so that the exported JSON trace keeps a stable
   format. Anything that needs the file and line must read `context` explicitly, as above.
 - **`RTSError` already conforms to `CustomStringConvertible`.** To render errors differently, write
   your own helper function rather than an extension adding that conformance.
+- **Errors raised inside the library report a location inside the library.** `guardrailBlocked`, for
+  example, is always constructed at the same point in the guardrail runner, so its context is a fixed
+  library location — the useful identifiers there are `guardrailName` and `stage`. The context is most
+  informative for errors your own code raises.
 
 If you build an error-reporting helper of your own, forward the literals so the context still points
 at your caller rather than at the helper:
