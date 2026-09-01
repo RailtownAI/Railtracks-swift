@@ -49,9 +49,11 @@ let package = Package(
             url: "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
             exact: "1.0.0"
         ),
-        // Private repo: Xcode resolves it once a GitHub account is added in
-        // Settings > Accounts; the CLI needs a credential helper (gh auth setup-git).
-        .package(url: "https://github.com/RailtownAI/RailtownLogger", exact: "0.2.0"),
+        .package(
+            url: "https://github.com/RailtownAI/railtown-swift-logger.git",
+            branch: "5975-port-json-uploader"
+//            exact: "0.2.0"
+        ),
     ],
     targets: [
         .macro(
@@ -69,7 +71,8 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Conduit", package: "Conduit"),
                 .product(name: "RailtracksInstrumentationKit", package: "railtracks-swift-instrumentation-kit"),
-                .product(name: "RailtownLogger", package: "RailtownLogger"),
+                // `package:` is SPM's URL-derived identity (repo name), not the module name.
+                .product(name: "RailtownLogger", package: "railtown-swift-logger"),
                 "RTSMacro"
             ]
         ),
