@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import RailtownLogger
 
 /// Representation of Agent node in Railtracks pipeline
 public class RTSFlow: @unchecked Sendable {
@@ -80,11 +81,24 @@ public class RTSFlow: @unchecked Sendable {
             Task { await collector.subscribeMessage(session) }
         }
 
-        let session = try gateway.session(
-            invoker: nodeInvoker,
-            agentNode: agent,
-            onNewSession: onNewSession
-        )
+        let session: RTSLLMSession
+        do {
+            session = try gateway.session(
+                invoker: nodeInvoker,
+                agentNode: agent,
+                onNewSession: onNewSession
+            )
+        } catch {
+            // Session build failures (e.g. missingAPIKey) never reach the invocation
+            // catch below, so report them here; control flow is unchanged — the error
+            // still propagates immediately, before any node runs.
+            RailtownLogger.captureRailtracks(
+                error,
+                flowTitle: title,
+                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version]
+            )
+            throw error
+        }
         onNewSession(session)   // subscribe the root agent's own session
 
         var input = agent.inputs
@@ -105,6 +119,13 @@ public class RTSFlow: @unchecked Sendable {
             outcome = .success(result)
         } catch {
             outcome = .failure(error)
+            // Fire-and-forget upload to Conductr; no-op unless the app configured
+            // RailtownLogger with auto-capture enabled. The error rethrows unchanged below.
+            RailtownLogger.captureRailtracks(
+                error,
+                flowTitle: title,
+                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version]
+            )
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
@@ -144,6 +165,13 @@ public class RTSFlow: @unchecked Sendable {
             outcome = .success(try await nodeInvoker.invokeFunction(node, input: input, context: context))
         } catch {
             outcome = .failure(error)
+            // Fire-and-forget upload to Conductr; no-op unless the app configured
+            // RailtownLogger with auto-capture enabled. The error rethrows unchanged below.
+            RailtownLogger.captureRailtracks(
+                error,
+                flowTitle: title,
+                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version]
+            )
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes

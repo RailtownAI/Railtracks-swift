@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		196F7A983035109B00E089B9 /* RailtownLogger in Frameworks */ = {isa = PBXBuildFile; productRef = 196F7A973035109B00E089B9 /* RailtownLogger */; };
+		196F7AA03035111400E089B9 /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 196F7A9F3035111400E089B9 /* RailtracksSwift */; };
+		196F7AA23035111400E089B9 /* RailtracksSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 196F7AA13035111400E089B9 /* RailtracksSwiftUI */; };
 		44106E352FA27A21003BAF6C /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 44106E342FA27A21003BAF6C /* RailtracksSwift */; };
 		44106E4E2FA27C5E003BAF6C /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 44106E4D2FA27C5E003BAF6C /* RailtracksSwift */; };
 		443F84F12FA27E2700B3DEEF /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 443F84F02FA27E2700B3DEEF /* RailtracksSwift */; };
@@ -64,7 +67,10 @@
 				44106E352FA27A21003BAF6C /* RailtracksSwift in Frameworks */,
 				44106E4E2FA27C5E003BAF6C /* RailtracksSwift in Frameworks */,
 				444B11DA2F9FDE4D009CAC9A /* RailtracksSwift in Frameworks */,
+				196F7AA23035111400E089B9 /* RailtracksSwiftUI in Frameworks */,
+				196F7A983035109B00E089B9 /* RailtownLogger in Frameworks */,
 				44A1B0012FB00001003BAF6C /* RailtracksSwiftUI in Frameworks */,
+				196F7AA03035111400E089B9 /* RailtracksSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -130,6 +136,9 @@
 				44106E4D2FA27C5E003BAF6C /* RailtracksSwift */,
 				443F84F02FA27E2700B3DEEF /* RailtracksSwift */,
 				44A1B0022FB00002003BAF6C /* RailtracksSwiftUI */,
+				196F7A973035109B00E089B9 /* RailtownLogger */,
+				196F7A9F3035111400E089B9 /* RailtracksSwift */,
+				196F7AA13035111400E089B9 /* RailtracksSwiftUI */,
 			);
 			productName = RailtracksSwiftDemo;
 			productReference = 44EAA7FA2F9FC9CE0069A845 /* RailtracksSwiftDemo.app */;
@@ -214,7 +223,8 @@
 			mainGroup = 44EAA7F12F9FC9CE0069A845;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				443F84EF2FA27E2700B3DEEF /* XCLocalSwiftPackageReference "../../../Railtracks-swift" */,
+				196F7A9E3035111400E089B9 /* XCLocalSwiftPackageReference "../../../Railtracks-swift" */,
+				196F7AA33035113D00E089B9 /* XCRemoteSwiftPackageReference "RailtownLogger" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 44EAA7FB2F9FC9CE0069A845 /* Products */;
@@ -648,13 +658,37 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		443F84EF2FA27E2700B3DEEF /* XCLocalSwiftPackageReference "../../../Railtracks-swift" */ = {
+		196F7A9E3035111400E089B9 /* XCLocalSwiftPackageReference "../../../Railtracks-swift" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../../../Railtracks-swift";
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		196F7AA33035113D00E089B9 /* XCRemoteSwiftPackageReference "RailtownLogger" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RailtownAI/RailtownLogger";
+			requirement = {
+				kind = exactVersion;
+				version = 0.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		196F7A973035109B00E089B9 /* RailtownLogger */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 196F7AA33035113D00E089B9 /* XCRemoteSwiftPackageReference "RailtownLogger" */;
+			productName = RailtownLogger;
+		};
+		196F7A9F3035111400E089B9 /* RailtracksSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RailtracksSwift;
+		};
+		196F7AA13035111400E089B9 /* RailtracksSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RailtracksSwiftUI;
+		};
 		44106E342FA27A21003BAF6C /* RailtracksSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RailtracksSwift;
