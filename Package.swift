@@ -51,8 +51,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/RailtownAI/railtown-swift-logger.git",
-            branch: "5975-port-json-uploader"
-//            exact: "0.2.0"
+            exact: "0.3.0"
         ),
     ],
     targets: [

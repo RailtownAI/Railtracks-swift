@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/railtown-swift-logger.git",
       "state" : {
-        "branch" : "5975-port-json-uploader",
-        "revision" : "21c54f7ac9c7a43c1857ddbbf6bafd2ebabfa015"
+        "revision" : "0b7aae4f9c6c92bfe053d5be7133c420de784e0a",
+        "version" : "0.3.0"
       }
     },
     {
