@@ -166,6 +166,101 @@ extension RailtracksSwiftTestSuite {
             #expect(payload.keys.contains("message_input"))
         }
 
+        // MARK: - Non-text message content
+
+        // Python's `Message.encode()` returns `{"role": role.value, "content": content}` with
+        // `content` passed through raw, so it recurses into whatever the content object is:
+        // `ToolCall`/`ToolResponse` are pydantic models dumped by field name, and `ToolCalls`
+        // is a `list` subclass dumped as an array. These assert Swift produces the same
+        // shapes through the event path, not just for plain strings.
+
+        @Test("An assistant tool-call message encodes as Python's ToolCall array")
+        func toolCallMessageShape() {
+            let call = RTSToolCall(
+                id: "call-1",
+                toolName: "Photo_Search",
+                arguments: RTSGeneratedContent(kind: .structure([
+                    "query": RTSGeneratedContent(kind: .string("cats")),
+                ]))
+            )
+            let assistant = RTSMessage(
+                id: UUID(),
+                role: .assistant,
+                content: .text("I'll look that up."),
+                timestamp: Self.stamp,
+                metadata: RTSMessageMetadata(
+                    tokenCount: nil,
+                    inputTokenCount: nil,
+                    generationTime: nil,
+                    model: nil,
+                    providerName: nil,
+                    tokensPerSecond: nil,
+                    providerExtra: nil,
+                    custom: nil,
+                    toolCalls: [call]
+                ),
+                runID: nil
+            )
+            let event = RTSLLMInvocationEvent(
+                parent: .llm(llmTypeID: "model-1", llmInvokeID: "call-1"),
+                spatialParent: .node(nodeID: "node-1"),
+                messageInput: [assistant]
+            )
+            // Field names are ToolCall's pydantic fields: identifier / name / arguments.
+            let expected: RTSValue = .array([
+                .object([
+                    "role": .string("assistant"),
+                    "content": .array([
+                        .object([
+                            "identifier": .string("call-1"),
+                            "name": .string("Photo_Search"),
+                            "arguments": .object(["query": .string("cats")]),
+                        ]),
+                    ]),
+                ]),
+            ])
+            #expect(event.encodePayload()["message_input"] == expected)
+        }
+
+        @Test("A tool-response message encodes as Python's ToolResponse object")
+        func toolResponseMessageShape() {
+            let toolMessage = RTSMessage(
+                id: UUID(),
+                role: .tool,
+                content: .text("12 photos"),
+                timestamp: Self.stamp,
+                metadata: RTSMessageMetadata(
+                    tokenCount: nil,
+                    inputTokenCount: nil,
+                    generationTime: nil,
+                    model: nil,
+                    providerName: nil,
+                    tokensPerSecond: nil,
+                    providerExtra: nil,
+                    custom: ["tool_call_id": "call-1", "tool_name": "Photo_Search"],
+                    toolCalls: nil
+                ),
+                runID: nil
+            )
+            let event = RTSLLMInvocationEvent(
+                parent: .llm(llmTypeID: "model-1", llmInvokeID: "call-1"),
+                spatialParent: .node(nodeID: "node-1"),
+                messageInput: [toolMessage]
+            )
+            // Field names are ToolResponse's pydantic fields: identifier / name / result.
+            let expected: RTSValue = .array([
+                .object([
+                    "role": .string("tool"),
+                    "content": .object([
+                        "identifier": .string("call-1"),
+                        "name": .string("Photo_Search"),
+                        "result": .string("12 photos"),
+                    ]),
+                ]),
+            ])
+            #expect(event.encodePayload()["message_input"] == expected)
+        }
+
         // MARK: - Golden fixture
 
         @Test("llm.response matches the Python wire shape end to end")
