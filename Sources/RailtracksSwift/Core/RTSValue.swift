@@ -12,7 +12,7 @@ public typealias RTSInput  = [String: RTSValue]
 /// Named dictionary of keyed outputs returned by a node after invocation.
 public typealias RTSOutput = [String: RTSValue]
 
-public enum RTSValue: Codable, Sendable {
+public enum RTSValue: Codable, Sendable, Equatable {
     case null
     case bool(Bool)
     case number(Double)

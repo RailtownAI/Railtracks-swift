@@ -45,7 +45,7 @@ extension RailtracksSwiftTestSuite {
                 thrown = error
             }
 
-            guard case .missingInput(let detail)? = thrown as? RTSError else {
+            guard case .missingInput(let detail, _)? = thrown as? RTSError else {
                 Issue.record("Expected RTSError.missingInput, got \(String(describing: thrown))")
                 return
             }
