@@ -132,10 +132,9 @@ public struct RTSNodeResponseEvent: RTSParentedEvent {
 
 /// The node body threw.
 ///
-/// Mirrors the Python engine's `NodeFailure` (`events/node.py`). Python composes this from
-/// `FailureMixin`; Swift has no stored-property mixins, so the two fields are declared here
-/// and ``from(error:parent:spatialParent:timestamp:)`` stands in for `from_exception`.
-public struct RTSNodeFailureEvent: RTSParentedEvent {
+/// Mirrors the Python engine's `NodeFailure` (`events/node.py`), which composes
+/// `FailureMixin` — ``RTSFailureReporting`` here.
+public struct RTSNodeFailureEvent: RTSParentedEvent, RTSFailureReporting {
     public var eventType: String {
         "node.failure"
     }
@@ -161,30 +160,24 @@ public struct RTSNodeFailureEvent: RTSParentedEvent {
     }
 
     /// Builds the event from a thrown error, mirroring Python's `FailureMixin.from_exception`.
-    ///
-    /// The message uses string interpolation deliberately: `RTSError`'s
-    /// `CustomStringConvertible` omits call-site context so error strings stay byte-stable
-    /// across the trace, and `RTSNodeInvoker` already stringifies errors the same way.
     public static func from(
         error: Error,
         parent: RTSEventParent,
         spatialParent: RTSEventSpatialParent,
         timestamp: Date = RTSEventTimestamp.now()
     ) -> RTSNodeFailureEvent {
-        RTSNodeFailureEvent(
+        let failure = RTSEventFailure.fields(from: error)
+        return RTSNodeFailureEvent(
             parent: parent,
             spatialParent: spatialParent,
-            exceptionName: String(describing: type(of: error)),
-            exceptionMessage: "\(error)",
+            exceptionName: failure.name,
+            exceptionMessage: failure.message,
             timestamp: timestamp
         )
     }
 
     public func encodePayload() -> [String: RTSValue] {
-        var payload = parentedBasePayload()
-        payload["exception_name"] = .string(exceptionName)
-        payload["exception_message"] = .string(exceptionMessage)
-        return payload
+        parentedBasePayload().merging(failurePayloadFields()) { _, new in new }
     }
 }
 

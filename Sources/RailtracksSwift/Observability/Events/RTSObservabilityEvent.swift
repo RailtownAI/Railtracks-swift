@@ -64,6 +64,44 @@ extension RTSParentedEvent {
     }
 }
 
+// MARK: - RTSFailureReporting
+
+/// The two fields every `*.failure` event carries.
+///
+/// Mirrors the Python engine's `FailureMixin` (`events/_base.py`). Python composes it in
+/// as a dataclass mixin; Swift has no stored-property mixins, so conformers declare the
+/// two fields themselves and pick up the payload contribution from the extension below.
+public protocol RTSFailureReporting {
+    var exceptionName: String { get }
+    var exceptionMessage: String { get }
+}
+
+extension RTSFailureReporting {
+    /// The `exception_name` / `exception_message` payload pair.
+    public func failurePayloadFields() -> [String: RTSValue] {
+        [
+            "exception_name": .string(exceptionName),
+            "exception_message": .string(exceptionMessage),
+        ]
+    }
+}
+
+// MARK: - RTSEventFailure
+
+/// Derives failure fields from a thrown error.
+///
+/// Mirrors the Python engine's `FailureMixin.from_exception`.
+public enum RTSEventFailure {
+    /// The `(exception_name, exception_message)` pair for `error`.
+    ///
+    /// The message uses string interpolation deliberately: `RTSError`'s
+    /// `CustomStringConvertible` omits call-site context so error strings stay byte-stable
+    /// across the trace, and `RTSNodeInvoker` already stringifies errors the same way.
+    public static func fields(from error: Error) -> (name: String, message: String) {
+        (name: String(describing: type(of: error)), message: "\(error)")
+    }
+}
+
 // MARK: - RTSValue nullable helpers
 
 extension RTSValue {
@@ -79,6 +117,14 @@ extension RTSValue {
     }
 
     /// `.null` for a missing value. See ``nullable(_:)-(String?)``.
+    static func nullable(_ value: Int?) -> RTSValue {
+        guard let value else {
+            return .null
+        }
+        return .number(Double(value))
+    }
+
+    /// `.null` for a missing value. See ``nullable(_:)-(String?)``.
     static func nullable(_ value: Double?) -> RTSValue {
         guard let value else {
             return .null
@@ -89,5 +135,23 @@ extension RTSValue {
     /// `.null` for a missing value. See ``nullable(_:)-(String?)``.
     static func nullable(_ value: RTSValue?) -> RTSValue {
         value ?? .null
+    }
+
+    /// Lifts any `Encodable` into an `RTSValue` by round-tripping it through JSON.
+    ///
+    /// The event payload's harder-typed fields — `message_history`, `tools`, `schema`,
+    /// `response`, `decision`, `args`, `kwargs` — are all `JSON` columns in the Python
+    /// engine's `events/registry.py`, so this is the general lift for all of them.
+    ///
+    /// Returns `.null` if the value cannot be encoded, matching the Python writer's
+    /// encoder, which degrades rather than failing the event.
+    static func encoding(_ value: some Encodable) -> RTSValue {
+        do {
+            let data = try JSONEncoder().encode(value)
+            return try JSONDecoder().decode(RTSValue.self, from: data)
+        } catch {
+            log.warning("⚠️ observability: could not encode payload value: \(error)")
+            return .null
+        }
     }
 }
