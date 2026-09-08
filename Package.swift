@@ -51,7 +51,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/RailtownAI/railtown-swift-logger.git",
-            branch: "main"   // TEMPORARY until the release carrying callSite: is tagged
+            .upToNextMinor(from: "0.3.1")
         ),
     ],
     targets: [

@@ -669,8 +669,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/RailtownAI/railtown-swift-logger.git";
 			requirement = {
-				kind = exactVersion;
-				version = 0.3.0;
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.3.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
