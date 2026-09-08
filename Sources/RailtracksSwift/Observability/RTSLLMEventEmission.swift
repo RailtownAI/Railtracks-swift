@@ -44,6 +44,12 @@ enum RTSLLMEventEmission {
         nodeID: UUID,
         error: Error?
     ) async {
+        // Checked here, not left to `emit`. Reconstruction awaits `RTSCostCalculator` per
+        // assistant message, so the *arguments* to the events cost more than the events do —
+        // and a flow built with `emitsEvents: false` is entitled to pay neither.
+        guard emitter.isEnabled else {
+            return
+        }
         let spatialParent = RTSEventSpatialParent.node(nodeID: nodeID.uuidString)
 
         for roundTrip in await RTSLLMRoundTrip.reconstruct(from: messages) {
@@ -88,7 +94,17 @@ enum RTSLLMEventEmission {
             )
         }
 
-        guard let error else {
+        // An empty log means the session was never used, so whatever went wrong did not go
+        // wrong in the model. An agent throws before `session.run` for its own reasons —
+        // `RTSError.missingInput` when the prompt key is absent, for one — and reporting that
+        // as an `llm.failure` would misattribute a node-level fault to the provider and
+        // corrupt any error rate computed from this stream. Python cannot make this mistake:
+        // its `LLMFailureEvent` comes only from inside the model call.
+        //
+        // Safe as a proxy because Conduit appends the user message *before* contacting the
+        // provider, and `RTSLLMSession` publishes what accumulated when a send throws — so a
+        // real model failure always leaves at least one message behind.
+        guard let error, !messages.isEmpty else {
             return
         }
         // One failure for the whole send. The round trip that actually threw left no

@@ -298,13 +298,56 @@ extension RailtracksSwiftTestSuite {
             #expect(failure.payload["message_input"] != .null)
         }
 
-        @Test("A failure with no messages at all still reports")
-        func failureWithNoMessages() async throws {
+        @Test("An error with no messages is not reported as an LLM failure")
+        func errorWithoutMessagesIsNotAnLLMFailure() async throws {
             let recorder = LLMEventRecorder()
+            // An empty log means the session was never used, so the fault was not the
+            // model's. An agent throws before `session.run` for its own reasons — a missing
+            // prompt key, say — and calling that an `llm.failure` would misattribute a
+            // node-level fault to the provider and corrupt any error rate built from this
+            // stream. Python's `LLMFailureEvent` comes only from inside the model call.
             await emit([], error: StubLLMError(), into: recorder)
+
+            #expect(recorder.events.isEmpty)
+        }
+
+        @Test("An error is reported once the session has been used")
+        func errorWithMessagesIsAnLLMFailure() async throws {
+            let recorder = LLMEventRecorder()
+            // Conduit appends the user message before contacting the provider, so a genuine
+            // model failure always leaves at least this much behind — which is what separates
+            // it from the case above.
+            await emit([message(.user, "hi")], error: StubLLMError(), into: recorder)
 
             #expect(recorder.eventTypes == ["llm.failure"])
         }
+
+        // MARK: - Cost when disabled
+
+        @Test("A disabled emitter publishes nothing, from messages that otherwise would")
+        func disabledEmitterIsSilent() async {
+            let disabled = RTSEventEmitter(sessionID: "session-1", isEnabled: false)
+            let recorder = LLMEventRecorder()
+
+            await RTSLLMEventEmission.emit(
+                into: disabled,
+                messages: [message(.user, "hi"), message(.assistant, "hello", latency: 1)],
+                llmID: "llm-1",
+                modelProvider: "OpenAI",
+                modelName: "gpt-4o",
+                nodeID: UUID(),
+                error: nil
+            )
+
+            #expect(recorder.events.isEmpty)
+        }
+
+        // NOTE: `emit` also guards on `isEnabled` *before* reconstructing, so a disabled flow
+        // skips the cost lookups too — the reason the guard is there rather than left to
+        // `emit`. That property is **not asserted here**: the work it avoids is an `await` on
+        // `RTSCostCalculator.shared`, a singleton actor with no injection seam, so there is
+        // nothing to observe. A test asserting "no events published" passes either way, which
+        // is exactly how this shipped once with the work still running.
 
         // MARK: - Through the invoker
 
