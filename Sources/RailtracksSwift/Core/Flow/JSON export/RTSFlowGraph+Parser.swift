@@ -158,31 +158,26 @@ extension RTSFlowGraph {
 
     // Each assistant message marks the end of one LLM call round.
     // Input for each round is all messages accumulated up to that point.
+    /// Reconstructs one `llm_details` entry per provider round trip.
+    ///
+    /// The walk itself lives on `RTSLLMRoundTrip`, shared with the `llm.*` observability
+    /// events so the two cannot drift. The defaults applied here are this stream's alone —
+    /// note `modelProvider` falls back to `"unknown"` while the *pricing* check treats an
+    /// absent provider as `""`, a distinction preserved from before the walk was factored out.
     private static func makeLLMDetails(from messages: [RTSMessage]) async -> [RTSFlowGraphLLMDetail] {
-        var details: [RTSFlowGraphLLMDetail] = []
-        for (index, message) in messages.enumerated() {
-            guard message.role == .assistant else { continue }
-            let inputTokens = message.metadata?.inputTokenCount ?? 0
-            let outputTokens = message.metadata?.tokenCount ?? 0
-            let modelName = message.metadata?.model ?? "unknown"
-            let providerName = message.metadata?.providerName ?? ""
-            let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
-            let cost = RTSLLMProvider.isLocal(providerName: providerName)
-                ? nil
-                : try? await RTSCostCalculator.shared.calculateCost(model: modelName, usage: usage)
-            details.append(RTSFlowGraphLLMDetail(
-                modelName: modelName,
-                modelProvider: message.metadata?.providerName ?? "unknown",
-                input: Array(messages[0..<index]).map { $0.toFlowGraphMessage() },
-                output: message.toFlowGraphMessage(),
-                inputTokens: inputTokens,
-                outputTokens: outputTokens,
-                totalCost: cost?.totalCost,
-                systemFingerprint: message.metadata?.providerExtra?["system_fingerprint"],
-                latency: message.metadata?.generationTime ?? 0
-            ))
+        await RTSLLMRoundTrip.reconstruct(from: messages).map { roundTrip in
+            RTSFlowGraphLLMDetail(
+                modelName: roundTrip.modelName ?? "unknown",
+                modelProvider: roundTrip.modelProvider ?? "unknown",
+                input: roundTrip.messageInput.map { $0.toFlowGraphMessage() },
+                output: roundTrip.output.toFlowGraphMessage(),
+                inputTokens: roundTrip.inputTokens ?? 0,
+                outputTokens: roundTrip.outputTokens ?? 0,
+                totalCost: roundTrip.totalCost,
+                systemFingerprint: roundTrip.systemFingerprint,
+                latency: roundTrip.latency ?? 0
+            )
         }
-        return details
     }
 }
 

@@ -21,6 +21,10 @@ public class RTSNodeInvoker: @unchecked Sendable {
     typealias InvocationID = UUID
     typealias RunInputGuardrail = (RTSInput, InvocationID) async -> RTSGuardrailInputOutcome
     typealias RunOutputGuardrail = (RTSOutput, InvocationID) async -> RTSGuardrailOutputOutcome
+    /// Called once the node body has finished, with the ids minted inside `invokeCore` and
+    /// the error if it threw. Only agents supply one — it is where `llm.*` is reconstructed
+    /// from the session's messages, which `invokeCore` cannot reach.
+    typealias EmitLLMEvents = (InvocationID, UUID, Error?) async -> Void
     
     let stampFactory: RTSStampFactory
     let sessionID: UUID
@@ -75,6 +79,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         let outputGuardrails = node.outputGuardrails
         // Scopes each rail's middleware type id to the agent that owns it.
         let agentName = node.agentName
+        let provider = node.llmProvider
         return try await invokeCore(
             node,
             nodeType: .agent,
@@ -102,6 +107,21 @@ public class RTSNodeInvoker: @unchecked Sendable {
                         nodeID: nodeID,
                         agentName: agentName
                     )
+                )
+            },
+            emitLLMEvents: { [eventEmitter] nodeID, runID, error in
+                guard let eventEmitter else {
+                    return
+                }
+                await RTSLLMEventEmission.emit(
+                    into: eventEmitter,
+                    // The session accumulates across invocations, so filter to this one.
+                    messages: session.messages().filter { $0.runID == runID },
+                    llmID: RTSLLMEventEmission.modelIdentifier(for: provider),
+                    modelProvider: provider.providerName,
+                    modelName: provider.modelID,
+                    nodeID: nodeID,
+                    error: error
                 )
             }
         ) { runID, guardedInput in
@@ -163,6 +183,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         // the guardrail runner needs it as the spatial parent of its `middleware.guard.*` events.
         runInputGuardrails: RunInputGuardrail? = nil,
         runOutputGuardrails: RunOutputGuardrail? = nil,
+        emitLLMEvents: EmitLLMEvents? = nil,
         execute: (UUID, RTSInput) async throws -> RTSOutput
     ) async throws -> RTSOutput {
         let event: RTSStamp.Event
@@ -293,6 +314,13 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 log.error("☠️ [\(node.name())] invocation failed: \(error)")
             }
             runtime = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
+            // `llm.*` is reconstructed from the messages the body left behind — see
+            // `RTSLLMEventEmission`. Placed here so it lands inside the node's own lifecycle,
+            // as Python's does: after the body, before the output guardrails and before the
+            // terminal node event. Runs on failure too, since a partial exchange still
+            // produced messages worth reporting. Deliberately outside the measured window, so
+            // reconstruction never inflates the node's reported runtime.
+            await emitLLMEvents?(invocationID, runID, invokeError)
             // Output guardrails only run when the agent itself produced a result. They run after the
             // measured window (not counted as node runtime), matching Python measuring only invoke().
             if invokeError == nil, let runOutputGuardrails {
