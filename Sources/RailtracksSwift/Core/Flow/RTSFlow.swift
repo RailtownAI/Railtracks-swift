@@ -95,7 +95,8 @@ public class RTSFlow: @unchecked Sendable {
             RailtownLogger.captureRailtracks(
                 error,
                 flowTitle: title,
-                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version]
+                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
+                callSite: (error as? RTSError)?.railtownCallSite
             )
             throw error
         }
@@ -124,7 +125,8 @@ public class RTSFlow: @unchecked Sendable {
             RailtownLogger.captureRailtracks(
                 error,
                 flowTitle: title,
-                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version]
+                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
+                callSite: (error as? RTSError)?.railtownCallSite
             )
         }
         await collector.awaitCompletion()
@@ -170,7 +172,8 @@ public class RTSFlow: @unchecked Sendable {
             RailtownLogger.captureRailtracks(
                 error,
                 flowTitle: title,
-                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version]
+                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
+                callSite: (error as? RTSError)?.railtownCallSite
             )
         }
         await collector.awaitCompletion()
