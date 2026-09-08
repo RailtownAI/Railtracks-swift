@@ -32,12 +32,13 @@ extension RailtracksSwiftTestSuite {
                 return .allow("looks fine")
             }
 
-            let (value, traces, error) = await RTSGuardrailRunner.runInput(
+            let outcome = await RTSGuardrailRunner.runInput(
                 [upper, observe], input: ["prompt": .string("hello")]
             )
+            let traces = outcome.traces
 
-            #expect(error == nil)
-            #expect(str(value["prompt"]) == "HELLO")
+            #expect(outcome.error == nil)
+            #expect(str(outcome.value["prompt"]) == "HELLO")
             #expect(traces.count == 2)
             #expect(traces[0].railName == "upper")
             #expect(traces[0].action == "transform")
@@ -53,9 +54,11 @@ extension RailtracksSwiftTestSuite {
                 return .allow()
             }
 
-            let (_, traces, error) = await RTSGuardrailRunner.runInput(
+            let outcome = await RTSGuardrailRunner.runInput(
                 [blocker, never], input: ["prompt": .string("x")]
             )
+            let traces = outcome.traces
+            let error = outcome.error
 
             #expect(traces.count == 1)
             #expect(traces[0].action == "block")
@@ -75,7 +78,9 @@ extension RailtracksSwiftTestSuite {
             struct Boom: Error {}
             let crash = RTSClosureInputGuardrail(name: "crash") { _ in throw Boom() }
 
-            let (_, traces, error) = await RTSGuardrailRunner.runInput([crash], input: [:])
+            let outcome = await RTSGuardrailRunner.runInput([crash], input: [:])
+            let traces = outcome.traces
+            let error = outcome.error
 
             #expect(traces.count == 1)
             #expect(traces[0].action == "error")
@@ -90,9 +95,11 @@ extension RailtracksSwiftTestSuite {
         func outputBlock() async {
             let blocker = RTSClosureOutputGuardrail(name: "out-blocker") { _ in .block("unsafe output") }
 
-            let (_, traces, error) = await RTSGuardrailRunner.runOutput(
+            let outcome = await RTSGuardrailRunner.runOutput(
                 [blocker], output: ["result": .string("secret")]
             )
+            let traces = outcome.traces
+            let error = outcome.error
 
             #expect(traces.count == 1)
             #expect(traces[0].action == "block")

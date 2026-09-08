@@ -19,11 +19,16 @@ import Foundation
 enum RTSGuardrailRunner {
     static func runInput(
         _ guardrails: [any RTSAgentInputGuardrail],
-        input: RTSInput
-    ) async -> (value: RTSInput, traces: [RTSGuardrailTrace], error: Error?) {
+        input: RTSInput,
+        eventContext: RTSGuardrailEventContext? = nil
+    ) async -> RTSGuardrailInputOutcome {
         var current = input
         var traces: [RTSGuardrailTrace] = []
-        for rail in guardrails {
+        for (index, rail) in guardrails.enumerated() {
+            let railEvents = eventContext?.beginRail(stage: .input, index: index, name: rail.name)
+            // Carries `current`, not the original input: each rail sees the previous rail's
+            // transformed value, and the event should record what this rail actually saw.
+            railEvents?.emitInputInvocation(current)
             let result: RTSInputGuardrailResult
             do {
                 result = try await rail.check(current)
@@ -32,8 +37,16 @@ enum RTSGuardrailRunner {
                 traces.append(
                     .error(railName: rail.name, stage: .input, error: error)
                 )
-                return (current, traces, error)
+                railEvents?.emitInputFailure(error)
+                return RTSGuardrailInputOutcome(value: current, traces: traces, error: error)
             }
+            // Emitted for every verdict including a block — see `RTSGuardrailRailEvents`.
+            // The decision is built inside the optional chain, so it costs nothing when
+            // there is no event context.
+            railEvents?.emitInputResponse(
+                unchanged: current,
+                decision: RTSGuardrailDecision(result)
+            )
             switch result {
             case .allowed(let reason, let metadata):
                 log.debug("🛡️ [\(rail.name)] llm_input → allow: \(reason)")
@@ -69,10 +82,10 @@ enum RTSGuardrailRunner {
                         metadata: metadata
                     )
                 )
-                return (
-                    current,
-                    traces,
-                    RTSError.guardrailBlocked(
+                return RTSGuardrailInputOutcome(
+                    value: current,
+                    traces: traces,
+                    error: RTSError.guardrailBlocked(
                         guardrailName: rail.name,
                         stage: .input,
                         reason: reason
@@ -80,16 +93,19 @@ enum RTSGuardrailRunner {
                 )
             }
         }
-        return (current, traces, nil)
+        return RTSGuardrailInputOutcome(value: current, traces: traces, error: nil)
     }
 
     static func runOutput(
         _ guardrails: [any RTSAgentOutputGuardrail],
-        output: RTSOutput
-    ) async -> (value: RTSOutput, traces: [RTSGuardrailTrace], error: Error?) {
+        output: RTSOutput,
+        eventContext: RTSGuardrailEventContext? = nil
+    ) async -> RTSGuardrailOutputOutcome {
         var current = output
         var traces: [RTSGuardrailTrace] = []
-        for rail in guardrails {
+        for (index, rail) in guardrails.enumerated() {
+            let railEvents = eventContext?.beginRail(stage: .output, index: index, name: rail.name)
+            railEvents?.emitOutputInvocation(current)
             let result: RTSOutputGuardrailResult
             do {
                 result = try await rail.check(current)
@@ -98,8 +114,13 @@ enum RTSGuardrailRunner {
                 traces.append(
                     .error(railName: rail.name, stage: .output, error: error)
                 )
-                return (current, traces, error)
+                railEvents?.emitOutputFailure(error)
+                return RTSGuardrailOutputOutcome(value: current, traces: traces, error: error)
             }
+            railEvents?.emitOutputResponse(
+                unchanged: current,
+                decision: RTSGuardrailDecision(result)
+            )
             switch result {
             case .allowed(let reason, let metadata):
                 log.debug("🛡️ [\(rail.name)] llm_output → allow: \(reason)")
@@ -135,10 +156,10 @@ enum RTSGuardrailRunner {
                         metadata: metadata
                     )
                 )
-                return (
-                    current,
-                    traces,
-                    RTSError.guardrailBlocked(
+                return RTSGuardrailOutputOutcome(
+                    value: current,
+                    traces: traces,
+                    error: RTSError.guardrailBlocked(
                         guardrailName: rail.name,
                         stage: .output,
                         reason: reason
@@ -146,6 +167,6 @@ enum RTSGuardrailRunner {
                 )
             }
         }
-        return (current, traces, nil)
+        return RTSGuardrailOutputOutcome(value: current, traces: traces, error: nil)
     }
 }
