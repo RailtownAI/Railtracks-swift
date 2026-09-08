@@ -29,5 +29,5 @@ struct RTSNodeExecutionEvent: Sendable {
     let parentNodeID: UUID?
     let name: String
     let nodeType: RTSFlowNodeType
-    let runID: UUID
+    let runID: RTSRunID
 }

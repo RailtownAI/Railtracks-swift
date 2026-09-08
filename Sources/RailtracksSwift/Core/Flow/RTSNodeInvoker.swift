@@ -18,13 +18,16 @@ protocol NodeEventPublishers {
 /// An operator that facilitate with node invoking, and publish node invoke event
 /// All node invoking should go through this, otherwise will have even record inconsistency
 public class RTSNodeInvoker: @unchecked Sendable {
-    typealias InvocationID = UUID
-    typealias RunInputGuardrail = (RTSInput, InvocationID) async -> RTSGuardrailInputOutcome
-    typealias RunOutputGuardrail = (RTSOutput, InvocationID) async -> RTSGuardrailOutputOutcome
+    typealias RunInputGuardrail = (RTSInput, RTSInvocationID) async -> RTSGuardrailInputOutcome
+    typealias RunOutputGuardrail = (RTSOutput, RTSInvocationID) async -> RTSGuardrailOutputOutcome
     /// Called once the node body has finished, with the ids minted inside `invokeCore` and
     /// the error if it threw. Only agents supply one — it is where `llm.*` is reconstructed
     /// from the session's messages, which `invokeCore` cannot reach.
-    typealias EmitLLMEvents = (InvocationID, UUID, Error?) async -> Void
+    typealias EmitLLMEvents = (
+        _ invocationID: RTSInvocationID,
+        _ runID: RTSRunID,
+        _ error: Error?
+    ) async -> Void
     
     let stampFactory: RTSStampFactory
     let sessionID: UUID
@@ -50,7 +53,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
     /// as its parent (the edge `source`). It is bound around `execute` so it flows down the async
     /// call tree — including Conduit's tool `TaskGroup` and Apple's `LanguageModelSession.respond`,
     /// both verified to inherit task-locals. `nil` at the flow root. See docs/duplicate-node-id.md.
-    @TaskLocal static var currentInvocationID: InvocationID?
+    @TaskLocal static var currentInvocationID: RTSInvocationID?
 
     /// Publishes the structured observability event stream. Optional so tests can build an
     /// invoker without one; `nil` means node and guardrail events are simply not emitted.
@@ -196,7 +199,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
         // Per-invocation graph node id (matches Python): a node invoked N times yields N distinct
         // ids. The node *instance* id (`node.id`) is no longer used for tracing identity.
-        let invocationID = InvocationID()
+        let invocationID = RTSInvocationID()
         // The parent invocation's id, propagated down the task tree; nil at the flow root.
         let parentInvocationID = RTSNodeInvoker.currentInvocationID
         #if DEBUG
@@ -465,7 +468,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         nodeID: UUID,
         parentNodeID: UUID?,
         nodeType: RTSFlowNodeType,
-        runID: UUID
+        runID: RTSRunID
     ) async {
         lockedSend(
             nodeExecutionEventSubject,
@@ -485,7 +488,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         parentNodeID: UUID?,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
-        runID: UUID,
+        runID: RTSRunID,
         input: RTSInput,
         output: RTSOutput,
         error: Error?,
@@ -516,7 +519,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishEdgeCreated(
         edgeID: UUID,
-        runID: UUID,
+        runID: RTSRunID,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         sourceNodeID: UUID?,

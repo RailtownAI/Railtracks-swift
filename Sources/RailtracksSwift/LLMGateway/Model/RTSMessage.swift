@@ -16,7 +16,7 @@ public struct RTSMessage: Sendable, Codable {
     public let content: Content
     public let timestamp: Date
     public let metadata: RTSMessageMetadata?
-    public let runID: UUID?
+    public let runID: RTSRunID?
 }
 
 // MARK: - RTSMessage.Role
@@ -193,7 +193,7 @@ public struct RTSToolCall: Sendable, Codable {
 // MARK: - Conduit → RTS Mappings
 
 public extension Message {
-    func toRTSMessage(runID: UUID? = nil, providerName: String? = nil) -> RTSMessage {
+    func toRTSMessage(runID: RTSRunID? = nil, providerName: String? = nil) -> RTSMessage {
         RTSMessage(
             id: id,
             role: role.toRTSRole,

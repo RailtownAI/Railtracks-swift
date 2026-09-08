@@ -18,7 +18,7 @@ import RailtracksInstrumentationKit
 final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
 
     private let lock = NSLock()
-    private var handles: [UUID: AgentRunHandle] = [:]
+    private var handles: [RTSRunID: AgentRunHandle] = [:]
 
     // MARK: - Interval
 
@@ -28,7 +28,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         nodeType: RTSFlowNodeType,
         sessionID: UUID,
         parentName: String,
-        runID: UUID,
+        runID: RTSRunID,
         input: RTSInput,
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
@@ -56,7 +56,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         nodeType: RTSFlowNodeType,
         sessionID: UUID,
         parentName: String,
-        runID: UUID,
+        runID: RTSRunID,
         output: RTSOutput?,
         error: Error?
     ) {

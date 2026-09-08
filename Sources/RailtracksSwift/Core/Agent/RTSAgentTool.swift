@@ -91,7 +91,7 @@ extension RTSAgentTool: RTSToolNode {
      
      AgentTool should never go through regular tool path or be called directly
      */
-    public func invoke(runID: UUID) async throws -> RTSOutput {
+    public func invoke(runID: RTSRunID) async throws -> RTSOutput {
         throw RTSError.invalidInvocation("RTSAgentTool must be invoked via RTSConduitAgentToolBridge, not directly through RTSToolNode")
     }
 }

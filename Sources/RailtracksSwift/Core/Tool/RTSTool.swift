@@ -23,7 +23,7 @@ public protocol RTSToolNode: RTSFunctionNode {
     /// (e.g. schema conversion failure) throws an error instead of silently dropping the tool.
     var isRequired: Bool { get }
 
-    func invoke(runID: UUID) async throws -> RTSOutput
+    func invoke(runID: RTSRunID) async throws -> RTSOutput
 }
                 
 public extension RTSToolNode {
@@ -36,7 +36,7 @@ public extension RTSToolNode {
     func invoke() async throws -> RTSOutput {
         try await callableRoutine.closure(inputs)
     }
-    func invoke(runID: UUID) async throws -> RTSOutput {
+    func invoke(runID: RTSRunID) async throws -> RTSOutput {
         try await invoke()
     }
     func run(with inputs: RTSInput) async throws -> RTSOutput {
