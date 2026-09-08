@@ -5,6 +5,7 @@
 
 import Testing
 import Foundation
+import RailtownLogger
 @testable import RailtracksSwift
 
 /// Minimal orchestrator whose body is supplied as a closure.
@@ -45,11 +46,62 @@ extension RailtracksSwiftTestSuite {
                 thrown = error
             }
 
-            guard case .missingInput(let detail)? = thrown as? RTSError else {
+            guard case .missingInput(let detail, _)? = thrown as? RTSError else {
                 Issue.record("Expected RTSError.missingInput, got \(String(describing: thrown))")
                 return
             }
             #expect(detail == "intentional test failure")
+        }
+
+        /// End to end through the public API: a flow throws an `RTSError`, and the
+        /// payload RailtownLogger would upload carries the *raise* site — the line
+        /// inside this test, not `RTSFlow`'s catch block.
+        ///
+        /// Uses the SDK's `entryMirrorDirectory` debug option, which writes each staged
+        /// entry to disk in exactly the shape that goes on the wire, so no network and no
+        /// real key are needed. Configuring the logger is process-global and there is no
+        /// public reset; the other tests here only assert the rethrow, which holds either way.
+        @Test("a flow error's raise site reaches the upload payload")
+        func raiseSiteReachesTheUploadPayload() async throws {
+            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            let mirror = FileManager.default.temporaryDirectory
+                .appendingPathComponent("railtown-mirror-\(UUID().uuidString)", isDirectory: true)
+
+            // Syntactically valid key; the host is a reserved name that never resolves.
+            let key = Data(#"{"u":"example.invalid","o":"o","p":"p","h":"h==","e":"e"}"#.utf8)
+                .base64EncodedString()
+            try RailtownLogger.configure(
+                apiKey: key,
+                options: RailtownOptions(
+                    flushInterval: 3600,            // never upload during the test
+                    observesAppLifecycle: false,
+                    entryMirrorDirectory: mirror
+                )
+            )
+
+            let throwLine = #line + 2
+            let root = StubOrchestrator(nodeName: "Boom") { _, _ in
+                throw RTSError.missingInput("intentional test failure")
+            }
+            _ = try? await RTSFlow(title: "CallSiteFlow")
+                .run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            // The mirror write is fire-and-forget on a detached task.
+            let deadline = Date().addingTimeInterval(3)
+            var payload: String?
+            while payload == nil, Date() < deadline {
+                if let file = try? FileManager.default.contentsOfDirectory(at: mirror, includingPropertiesForKeys: nil).first {
+                    payload = try? String(contentsOf: file, encoding: .utf8)
+                }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            let text = try #require(payload, "no mirrored entry was written")
+
+            #expect(text.contains("FlowTitle: CallSiteFlow"))
+            #expect(text.contains("SourceFile: RailtracksSwiftTests/ErrorReportingTests.swift"))
+            #expect(text.contains("SourceFunction: raiseSiteReachesTheUploadPayload()"))
+            #expect(text.contains("SourceLine: \(throwLine)"))
+            #expect(!text.contains("RTSFlow.swift"), "must not point at the reporting code")
         }
 
         /// Session-build failures (e.g. no API key) throw before any node runs and are
