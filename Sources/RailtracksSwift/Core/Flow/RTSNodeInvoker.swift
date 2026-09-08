@@ -209,6 +209,19 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 nodeType: nodeType
             )
         )
+        // Emitted *before* the guardrails, so a blocked input guardrail still leaves the node
+        // with a complete lifecycle rather than a creation and a destruction with nothing
+        // between them. It also puts `kwargs` at the pre-transform value, which is what
+        // Python records — its input guards are model middleware and never see the node's
+        // kwargs. (The flow-graph edge below deliberately records post-transform instead; the
+        // two streams differ here on purpose.)
+        eventEmitter?.emit(
+            RTSNodeInvocationEvent(
+                parent: eventParent,
+                spatialParent: eventSpatialParent,
+                kwargs: input
+            )
+        )
 
         // Input guardrails run before the edge is recorded so the edge's input
         // reflects what the agent actually received (post-transform).
@@ -268,37 +281,16 @@ public class RTSNodeInvoker: @unchecked Sendable {
             // Python's `tracked_invoke`. The parser reads this instead of subtracting create/finish
             // stamps, which is exact and avoids stamp-pairing ambiguity.
             let started = DispatchTime.now()
-            eventEmitter?.emit(
-                RTSNodeInvocationEvent(
-                    parent: eventParent,
-                    spatialParent: eventSpatialParent,
-                    kwargs: workingInput
-                )
-            )
             do {
                 // Bind this node's invocation id for the dynamic extent of `execute`, so any child
                 // node invoked within it reads this as its parent (edge source) via the task-local.
                 output = try await RTSNodeInvoker.$currentInvocationID.withValue(invocationID) {
                     try await execute(runID, workingInput)
                 }
-                eventEmitter?.emit(
-                    RTSNodeResponseEvent(
-                        parent: eventParent,
-                        spatialParent: eventSpatialParent,
-                        response: .object(output)
-                    )
-                )
             } catch {
                 invokeError = error
                 output = [:]
                 log.error("☠️ [\(node.name())] invocation failed: \(error)")
-                eventEmitter?.emit(
-                    RTSNodeFailureEvent.from(
-                        error: error,
-                        parent: eventParent,
-                        spatialParent: eventSpatialParent
-                    )
-                )
             }
             runtime = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
             // Output guardrails only run when the agent itself produced a result. They run after the
@@ -309,6 +301,40 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 guardTraces.append(contentsOf: result.traces)
                 invokeError = result.error
             }
+        }
+
+        // The node's single terminal event. Both arms live here, outside the block above,
+        // because `invokeError` is only final at this point:
+        //
+        // - A node can fail three ways — an input guardrail blocking or throwing (set before
+        //   `execute` even runs), the body throwing, or an output guardrail blocking or
+        //   throwing — and only the middle one passes through the `catch` above. Emitting here
+        //   covers all three, matching Python, which reports a blocked guard as a
+        //   `node.failure` because the block raises through the node body.
+        // - `node.response` cannot be emitted next to `execute`, because an output guardrail
+        //   can fail *after* the body succeeded. Doing so emitted both a response and a
+        //   failure for one invocation. Emitting it here also means `output` has already been
+        //   through the output guardrails, so a redacting rail's result is what reaches the
+        //   stream rather than the raw value.
+        //
+        // Note `.transformed` and `.allowed` never reach the failure arm: the guardrail runner
+        // returns a nil error for both.
+        if let invokeError {
+            eventEmitter?.emit(
+                RTSNodeFailureEvent.from(
+                    error: invokeError,
+                    parent: eventParent,
+                    spatialParent: eventSpatialParent
+                )
+            )
+        } else {
+            eventEmitter?.emit(
+                RTSNodeResponseEvent(
+                    parent: eventParent,
+                    spatialParent: eventSpatialParent,
+                    response: .object(output)
+                )
+            )
         }
 
         signpostEmitter?.emitNodeEnd(

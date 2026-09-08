@@ -338,8 +338,10 @@ public struct RTSGuardOutputFailureEvent: RTSMiddlewareEvent, RTSFailureReportin
 /// **every** middleware — in addition to whatever specialised events that middleware's own
 /// decorator emits. Band-agnostic: the spatial parent may be either node- or model-side.
 ///
-/// No Swift emit site: Swift has no middleware chain. Synthesizing this today would invent
-/// structure that does not exist.
+/// Swift has no middleware chain — `RTSGuardrailRunner` iterates rails rather than composing
+/// them — so this is synthesized per rail, to give consumers the same uniform
+/// invocation → response-or-failure pair per middleware that Python provides. Two payload
+/// fields cannot mean quite what Python's do; see `RTSGuardrailRailEvents` for which and why.
 public struct RTSMiddlewareInvocationEvent: RTSMiddlewareEvent {
     public var eventType: String {
         "middleware.invocation"
@@ -374,7 +376,7 @@ public struct RTSMiddlewareInvocationEvent: RTSMiddlewareEvent {
 }
 
 /// Any middleware invocation's result. Mirrors Python's `MiddlewareResponseEvent`
-/// (`middleware/chain.py`). No Swift emit site — see ``RTSMiddlewareInvocationEvent``.
+/// (`middleware/chain.py`). Emitted per guardrail — see ``RTSMiddlewareInvocationEvent``.
 public struct RTSMiddlewareResponseEvent: RTSMiddlewareEvent {
     public var eventType: String {
         "middleware.response"
@@ -404,9 +406,13 @@ public struct RTSMiddlewareResponseEvent: RTSMiddlewareEvent {
     }
 }
 
-/// Any middleware invocation that threw. Mirrors Python's `MiddlewareFailureEvent`
-/// (`middleware/chain.py`). This is also where a guardrail **block** surfaces in Python,
-/// as the resulting error unwinds through the chain. No Swift emit site.
+/// Any middleware invocation that stopped the call. Mirrors Python's `MiddlewareFailureEvent`
+/// (`middleware/chain.py`).
+///
+/// This is where a guardrail **block** surfaces as well as a throw — in Python because the
+/// block's error unwinds through the chain, and in Swift because the runner emits it
+/// explicitly for both. So a block appears twice: as a `block` decision on the guard's
+/// response event, and as a failure here.
 public struct RTSMiddlewareFailureEvent: RTSMiddlewareEvent, RTSFailureReporting {
     public var eventType: String {
         "middleware.failure"
@@ -430,6 +436,24 @@ public struct RTSMiddlewareFailureEvent: RTSMiddlewareEvent, RTSFailureReporting
         self.exceptionName = exceptionName
         self.exceptionMessage = exceptionMessage
         self.timestamp = timestamp
+    }
+
+    /// Builds the event from the error that stopped the middleware, mirroring Python's
+    /// `FailureMixin.from_exception`.
+    public static func from(
+        error: Error,
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) -> RTSMiddlewareFailureEvent {
+        let failure = RTSEventFailure.fields(from: error)
+        return RTSMiddlewareFailureEvent(
+            parent: parent,
+            spatialParent: spatialParent,
+            exceptionName: failure.name,
+            exceptionMessage: failure.message,
+            timestamp: timestamp
+        )
     }
 
     public func encodePayload() -> [String: RTSValue] {

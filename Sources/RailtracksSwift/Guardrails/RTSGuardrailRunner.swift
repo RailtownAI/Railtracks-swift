@@ -26,6 +26,9 @@ enum RTSGuardrailRunner {
         var traces: [RTSGuardrailTrace] = []
         for (index, rail) in guardrails.enumerated() {
             let railEvents = eventContext?.beginRail(stage: .input, index: index, name: rail.name)
+            // The chain-level pair brackets the guard-specific one, as Python's chain wraps the
+            // middleware it runs.
+            railEvents?.emitChainInvocation(value: current)
             // Carries `current`, not the original input: each rail sees the previous rail's
             // transformed value, and the event should record what this rail actually saw.
             railEvents?.emitInputInvocation(current)
@@ -38,6 +41,7 @@ enum RTSGuardrailRunner {
                     .error(railName: rail.name, stage: .input, error: error)
                 )
                 railEvents?.emitInputFailure(error)
+                railEvents?.emitChainFailure(error)
                 return RTSGuardrailInputOutcome(value: current, traces: traces, error: error)
             }
             // Emitted for every verdict including a block — see `RTSGuardrailRailEvents`.
@@ -59,6 +63,7 @@ enum RTSGuardrailRunner {
                         metadata: metadata
                     )
                 )
+                railEvents?.emitChainResponse(value: current)
             case .transformed(let newInput, let reason, let metadata):
                 log.debug("🛡️ [\(rail.name)] llm_input → transform: \(reason)")
                 current = newInput
@@ -71,6 +76,7 @@ enum RTSGuardrailRunner {
                         metadata: metadata
                     )
                 )
+                railEvents?.emitChainResponse(value: newInput)
             case .blocked(let reason, let metadata):
                 log.debug("🛡️ [\(rail.name)] llm_input → block: \(reason)")
                 traces.append(
@@ -82,14 +88,18 @@ enum RTSGuardrailRunner {
                         metadata: metadata
                     )
                 )
+                let blocked = RTSError.guardrailBlocked(
+                    guardrailName: rail.name,
+                    stage: .input,
+                    reason: reason
+                )
+                // A block stops the call, so at the chain level it is a failure — the same
+                // shape Python produces when `_raise_if_blocked` raises through the chain.
+                railEvents?.emitChainFailure(blocked)
                 return RTSGuardrailInputOutcome(
                     value: current,
                     traces: traces,
-                    error: RTSError.guardrailBlocked(
-                        guardrailName: rail.name,
-                        stage: .input,
-                        reason: reason
-                    )
+                    error: blocked
                 )
             }
         }
@@ -105,6 +115,7 @@ enum RTSGuardrailRunner {
         var traces: [RTSGuardrailTrace] = []
         for (index, rail) in guardrails.enumerated() {
             let railEvents = eventContext?.beginRail(stage: .output, index: index, name: rail.name)
+            railEvents?.emitChainInvocation(value: current)
             railEvents?.emitOutputInvocation(current)
             let result: RTSOutputGuardrailResult
             do {
@@ -115,6 +126,7 @@ enum RTSGuardrailRunner {
                     .error(railName: rail.name, stage: .output, error: error)
                 )
                 railEvents?.emitOutputFailure(error)
+                railEvents?.emitChainFailure(error)
                 return RTSGuardrailOutputOutcome(value: current, traces: traces, error: error)
             }
             railEvents?.emitOutputResponse(
@@ -133,6 +145,7 @@ enum RTSGuardrailRunner {
                         metadata: metadata
                     )
                 )
+                railEvents?.emitChainResponse(value: current)
             case .transformed(let newOutput, let reason, let metadata):
                 log.debug("🛡️ [\(rail.name)] llm_output → transform: \(reason)")
                 current = newOutput
@@ -145,6 +158,7 @@ enum RTSGuardrailRunner {
                         metadata: metadata
                     )
                 )
+                railEvents?.emitChainResponse(value: newOutput)
             case .blocked(let reason, let metadata):
                 log.debug("🛡️ [\(rail.name)] llm_output → block: \(reason)")
                 traces.append(
@@ -156,14 +170,16 @@ enum RTSGuardrailRunner {
                         metadata: metadata
                     )
                 )
+                let blocked = RTSError.guardrailBlocked(
+                    guardrailName: rail.name,
+                    stage: .output,
+                    reason: reason
+                )
+                railEvents?.emitChainFailure(blocked)
                 return RTSGuardrailOutputOutcome(
                     value: current,
                     traces: traces,
-                    error: RTSError.guardrailBlocked(
-                        guardrailName: rail.name,
-                        stage: .output,
-                        reason: reason
-                    )
+                    error: blocked
                 )
             }
         }

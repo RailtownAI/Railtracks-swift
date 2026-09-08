@@ -85,11 +85,15 @@ extension RailtracksSwiftTestSuite {
                 eventContext: recorder.context()
             )
 
+            // The chain-level pair brackets the guard-specific one, as Python's chain wraps
+            // every middleware it runs.
             #expect(
                 recorder.eventTypes == [
                     "middleware.creation",
+                    "middleware.invocation",
                     "middleware.guard.input.invocation",
                     "middleware.guard.input.response",
+                    "middleware.response",
                 ]
             )
         }
@@ -110,8 +114,10 @@ extension RailtracksSwiftTestSuite {
             #expect(
                 recorder.eventTypes == [
                     "middleware.creation",
+                    "middleware.invocation",
                     "middleware.guard.output.invocation",
                     "middleware.guard.output.response",
+                    "middleware.response",
                 ]
             )
         }
@@ -207,13 +213,20 @@ extension RailtracksSwiftTestSuite {
 
             let creations = recorder.events.filter { $0.eventType == "middleware.creation" }
             #expect(creations.count == 1)
-            // The invocation/response pair still fires on both runs.
-            #expect(recorder.events.filter { $0.eventType.hasSuffix(".invocation") }.count == 2)
+            // The invocation/response pairs still fire on both runs — one guard-level and one
+            // chain-level per run.
+            let guardInvocations = recorder.events.filter {
+                $0.eventType == "middleware.guard.input.invocation"
+            }
+            #expect(guardInvocations.count == 2)
+            #expect(
+                recorder.events.filter { $0.eventType == "middleware.invocation" }.count == 2
+            )
         }
 
         // MARK: - Block and failure
 
-        @Test("A block is reported as a decision on the response, not as a failure")
+        @Test("A block is a guard-level decision and a chain-level failure")
         func blockIsAResponse() async throws {
             let recorder = GuardrailEventRecorder()
             let block = RTSClosureInputGuardrail(name: "block") { _ in
@@ -228,10 +241,22 @@ extension RailtracksSwiftTestSuite {
 
             // The run still fails...
             #expect(outcome.error != nil)
-            // ...but the event stream reports it as a verdict, matching Python, where
-            // `_raise_if_blocked` runs after the response event is emitted.
-            #expect(recorder.eventTypes.contains("middleware.guard.input.response"))
+            // ...and the two levels report it differently, exactly as Python does: the guard
+            // records a verdict (`_raise_if_blocked` runs *after* its response event), while
+            // the chain sees the resulting throw and records a failure.
+            #expect(
+                recorder.eventTypes == [
+                    "middleware.creation",
+                    "middleware.invocation",
+                    "middleware.guard.input.invocation",
+                    "middleware.guard.input.response",
+                    "middleware.failure",
+                ]
+            )
+            // Not a *guard* failure — those cover only the rail's `check` throwing.
             #expect(!recorder.eventTypes.contains("middleware.guard.input.failure"))
+            let chainFailure = try #require(recorder.first(ofType: "middleware.failure"))
+            #expect(chainFailure.payload["exception_name"] == .string("RTSError"))
 
             let response = try #require(recorder.first(ofType: "middleware.guard.input.response"))
             guard case .object(let decision)? = response.payload["decision"] else {
@@ -258,12 +283,17 @@ extension RailtracksSwiftTestSuite {
             #expect(
                 recorder.eventTypes == [
                     "middleware.creation",
+                    "middleware.invocation",
                     "middleware.guard.input.invocation",
                     "middleware.guard.input.failure",
+                    "middleware.failure",
                 ]
             )
             let failure = try #require(recorder.first(ofType: "middleware.guard.input.failure"))
             #expect(failure.payload["exception_name"] == .string("StubGuardrailError"))
+            // A throw is a failure at both levels, as in Python.
+            let chainFailure = try #require(recorder.first(ofType: "middleware.failure"))
+            #expect(chainFailure.payload["exception_name"] == .string("StubGuardrailError"))
         }
 
         @Test("A rail after a block never runs, and emits nothing")
@@ -284,6 +314,122 @@ extension RailtracksSwiftTestSuite {
             )
 
             #expect(recorder.events.filter { $0.eventType == "middleware.creation" }.count == 1)
+        }
+
+        // MARK: - Node lifecycle around guardrails
+
+        // These drive `RTSNodeInvoker.invokeAgent` directly with a stub session, because a
+        // guardrail only reaches the invoker through an agent, and a real `RTSFlow` run would
+        // need a working gateway. What they cover is the node events *around* the guardrails,
+        // which the guard events themselves cannot show.
+
+        /// An `RTSLLMSession` that answers without touching a provider.
+        private func stubSession(_ reply: String = "ok") -> RTSLLMSession {
+            RTSLLMSession(
+                run: { _, _, _ in reply },
+                setSystemPrompt: { _, _ in },
+                message: { [] },
+                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
+                agentName: "Stub"
+            )
+        }
+
+        private func invoker(_ emitter: RTSEventEmitter) -> RTSNodeInvoker {
+            RTSNodeInvoker(
+                stampFactory: RTSStampFactory(),
+                sessionID: UUID(),
+                eventEmitter: emitter
+            )
+        }
+
+        @Test("A blocked input guardrail still leaves the node a complete lifecycle")
+        func blockedInputStillCompletesNodeLifecycle() async {
+            let recorder = GuardrailEventRecorder()
+            let block = RTSClosureInputGuardrail(name: "block") { _ in
+                .block("nope")
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                inputGuardrails: [block]
+            )
+
+            _ = try? await invoker(recorder.emitter).invokeAgent(
+                agent,
+                input: ["prompt": .string("hi")],
+                session: stubSession()
+            )
+
+            // `node.invocation` is emitted before the guardrails, so a block cannot leave the
+            // node with a creation and a destruction and nothing in between. `node.failure` is
+            // emitted even though the body never ran and nothing passed through the invoker's
+            // `catch` — matching Python, where a blocked guard raises through the node body.
+            let nodeEvents = recorder.eventTypes.filter { $0.hasPrefix("node.") }
+            #expect(
+                nodeEvents == [
+                    "node.creation",
+                    "node.invocation",
+                    "node.failure",
+                    "node.destruction",
+                ]
+            )
+        }
+
+        @Test("A blocked output guardrail yields a failure and no response")
+        func blockedOutputYieldsFailureNotResponse() async {
+            let recorder = GuardrailEventRecorder()
+            let block = RTSClosureOutputGuardrail(name: "block") { _ in
+                .block("unsafe")
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                outputGuardrails: [block]
+            )
+
+            _ = try? await invoker(recorder.emitter).invokeAgent(
+                agent,
+                input: ["prompt": .string("hi")],
+                session: stubSession()
+            )
+
+            // The body *succeeded* here — only the output guardrail failed. Emitting
+            // `node.response` next to `execute` would report both a response and a failure for
+            // one invocation; the terminal event is singular instead.
+            let nodeEvents = recorder.eventTypes.filter { $0.hasPrefix("node.") }
+            #expect(
+                nodeEvents == [
+                    "node.creation",
+                    "node.invocation",
+                    "node.failure",
+                    "node.destruction",
+                ]
+            )
+            #expect(!nodeEvents.contains("node.response"))
+        }
+
+        @Test("A transforming output guardrail's result is what node.response carries")
+        func nodeResponseCarriesGuardedOutput() async throws {
+            let recorder = GuardrailEventRecorder()
+            let redact = RTSClosureOutputGuardrail(name: "redact") { _ in
+                .transform(["result": .string("[redacted]")], reason: "sensitive")
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                outputGuardrails: [redact]
+            )
+
+            _ = try? await invoker(recorder.emitter).invokeAgent(
+                agent,
+                input: ["prompt": .string("hi")],
+                session: stubSession("my secret")
+            )
+
+            // The point of emitting at the terminal site: a redacting rail's result reaches the
+            // stream, not the raw body output.
+            let response = try #require(recorder.first(ofType: "node.response"))
+            #expect(response.payload["response"] == .object(["result": .string("[redacted]")]))
         }
 
         // MARK: - Opt-out and default

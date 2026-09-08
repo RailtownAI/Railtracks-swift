@@ -101,6 +101,63 @@ struct RTSGuardrailRailEvents {
     fileprivate let parent: RTSEventParent
     fileprivate let spatialParent: RTSEventSpatialParent
 
+    // MARK: Chain-level events
+
+    // Python's `MiddlewareChain` emits this triple for *every* middleware it runs, in addition
+    // to whatever that middleware emits for itself, so a consumer gets a uniform
+    // invocation → response-or-failure pair per middleware regardless of kind. Swift has no
+    // chain — the runner iterates rails rather than composing them — so these are synthesized
+    // per rail, to keep the namespace complete for consumers.
+    //
+    // Two payload fields cannot mean quite what Python's do:
+    //
+    // - `args` holds one element, the value the rail received. Python's model middleware is
+    //   invoked with three positional arguments — `(message_history, schema, tools)` — so its
+    //   `args` has three. Swift's guardrail protocol takes a single value and there is nothing
+    //   truthful to put in the other slots.
+    // - `response` holds the value the rail yielded. Python's is the *wrapped callable's*
+    //   return — the `Response` the middleware passed inward — because a Python middleware
+    //   delegates. A Swift guardrail inspects and reports rather than delegating, so there is
+    //   no inner result to report; the value it produced is the nearest true analogue.
+
+    /// Emitted before the rail runs, wrapping its guard-specific invocation event.
+    func emitChainInvocation(value: [String: RTSValue]) {
+        emitter.emit(
+            RTSMiddlewareInvocationEvent(
+                parent: parent,
+                spatialParent: spatialParent,
+                args: [.object(value)],
+                kwargs: [:]
+            )
+        )
+    }
+
+    /// Emitted after the rail allowed or transformed, wrapping its guard-specific response.
+    func emitChainResponse(value: [String: RTSValue]) {
+        emitter.emit(
+            RTSMiddlewareResponseEvent(
+                parent: parent,
+                spatialParent: spatialParent,
+                response: .object(value)
+            )
+        )
+    }
+
+    /// Emitted when the rail stopped the call — by blocking *or* by throwing.
+    ///
+    /// Both count here, matching Python, where a block raises through the chain after the
+    /// guard's own response event. A block therefore appears twice, as a `block` decision on
+    /// the guard event and as a failure at the chain level.
+    func emitChainFailure(_ error: Error) {
+        emitter.emit(
+            RTSMiddlewareFailureEvent.from(
+                error: error,
+                parent: parent,
+                spatialParent: spatialParent
+            )
+        )
+    }
+
     // MARK: Input rails
 
     func emitInputInvocation(_ messageHistory: RTSInput) {
