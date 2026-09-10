@@ -39,21 +39,41 @@ public class RTSFlow: @unchecked Sendable {
         nodeStatusSubject.eraseToAnyPublisher()
     }
 
+    let eventEmitter: RTSEventEmitter
+    /// Publishes the structured observability event stream — the Swift port of the Python
+    /// engine's event pipeline. Each value is a session-scoped ``RTSEvent`` envelope whose
+    /// `payload` carries one typed event (`node.*`, `session.*`, `middleware.guard.*`).
+    ///
+    /// Independent of the JSON trace: the two are produced side by side and neither feeds
+    /// the other. Silent when the flow was built with `emitsEvents: false`.
+    public var eventPublisher: AnyPublisher<RTSEvent, Never> {
+        eventEmitter.eventPublisher
+    }
+
     /// - Parameters:
     ///   - title: Display name for the flow, included in the trace file name.
     ///   - savesTrace: When true (default), the run writes its JSON trace to
     ///     `flowGraphOutputDirectory`. Set false to run without persisting a trace (mirrors Python's
     ///     `rt.Flow(save_state=False)`) — used for internal sub-flows like the evaluation judge, whose
     ///     runs should not spill trace files. The completion lifecycle is unaffected.
+    ///   - emitsEvents: When true (default), the run publishes observability events on
+    ///     `eventPublisher`, matching the Python engine, which emits unless
+    ///     `RAILTRACKS_DISABLE_EVENTS` is set. Set false to skip it entirely — payloads are
+    ///     never built, so a flow with no event consumer pays no encoding cost.
     ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
     public init(
         title: String,
         savesTrace: Bool = true,
+        emitsEvents: Bool = true,
         signpostEmitter: (any RTSSignpostEmitting)? = nil
     ) {
         self.title = title
         self.savesTrace = savesTrace
         self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
+        self.eventEmitter = RTSEventEmitter(
+            sessionID: id.uuidString,
+            isEnabled: emitsEvents
+        )
     }
 
     /// Runs the pipeline from the given root agent and returns its text result.
@@ -76,6 +96,7 @@ public class RTSFlow: @unchecked Sendable {
         systemMessage: String? = nil,
         images: [RTSImage] = []
     ) async throws -> String {
+        let startedAt = emitSessionStarted(entryPointName: agent.agentName)
         let (nodeInvoker, collector, subscriptions) = await startCollecting()
         let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
             Task { await collector.subscribeMessage(session) }
@@ -98,6 +119,9 @@ public class RTSFlow: @unchecked Sendable {
                 properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
                 callSite: (error as? RTSError)?.railtownCallSite
             )
+            // This path exits before `awaitCompletion()`, so it needs its own completion
+            // event — otherwise a failed session build would leave the run unbracketed.
+            emitSessionCompleted(startedAt: startedAt, error: error)
             throw error
         }
         onNewSession(session)   // subscribe the root agent's own session
@@ -131,6 +155,7 @@ public class RTSFlow: @unchecked Sendable {
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
+        emitSessionCompleted(startedAt: startedAt, error: outcome.eventError)
         return try outcome.get()
     }
 
@@ -144,6 +169,7 @@ public class RTSFlow: @unchecked Sendable {
         input: RTSInput,
         gateway: RTSLLMGateway
     ) async throws -> RTSOutput {
+        let startedAt = emitSessionStarted(entryPointName: node.name())
         let (nodeInvoker, collector, subscriptions) = await startCollecting()
         let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
             Task { await collector.subscribeMessage(session) }
@@ -178,7 +204,64 @@ public class RTSFlow: @unchecked Sendable {
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
+        emitSessionCompleted(startedAt: startedAt, error: outcome.eventError)
         return try outcome.get()
+    }
+
+    // MARK: - Session events
+
+    /// Emits `session.started` and returns the instant it was stamped with.
+    ///
+    /// The return value is what makes the pair self-consistent: `session.completed`
+    /// measures its duration from *exactly* this event's `timestamp`, so
+    /// `completed.timestamp - started.timestamp == duration_seconds` holds precisely
+    /// rather than approximately. Taking a separate `Date()` at the call site would leave
+    /// the two a hair apart.
+    ///
+    /// Mirrors the Python engine, which emits one `SessionStarted` per **top-level run**
+    /// (`interaction/_call.py`) and starts its clock immediately after, while the session id
+    /// itself stays constant for the life of the session object. So two runs on one
+    /// `RTSFlow` legitimately share a `scope_id` and are told apart by `entry_point_name`
+    /// and their timestamps.
+    private func emitSessionStarted(entryPointName: String) -> Date {
+        let startedAt = RTSEventTimestamp.now()
+        eventEmitter.emit(
+            RTSSessionStartedEvent(
+                sessionID: id.uuidString,
+                flowName: title,
+                flowID: RailtracksSwift.equalityHash(title),
+                sessionName: nil,
+                entryPointName: entryPointName,
+                // Swift has no flow-level timeout or end-on-error setting; Python's
+                // equivalents come from its executor config.
+                timeout: nil,
+                endOnError: false,
+                saveState: savesTrace,
+                timestamp: startedAt
+            )
+        )
+        return startedAt
+    }
+
+    /// Emits `session.completed`, deriving status from whether the run produced an error.
+    ///
+    /// One instant serves as both the event's `timestamp` and the end of the measured
+    /// window, for the same reason ``emitSessionStarted(entryPointName:)`` returns its own.
+    private func emitSessionCompleted(
+        startedAt: Date,
+        error: Error?
+    ) {
+        let completedAt = RTSEventTimestamp.now()
+        eventEmitter.emit(
+            RTSSessionCompletedEvent(
+                sessionID: id.uuidString,
+                status: error == nil ? .success : .failure,
+                // ANSI-stripped, mirroring Python's `format_error`.
+                error: error.map(RTSSessionCompletedEvent.formatError),
+                durationSeconds: completedAt.timeIntervalSince(startedAt),
+                timestamp: completedAt
+            )
+        )
     }
 
     /// Builds the per-run node invoker + graph collector and wires the
@@ -195,7 +278,8 @@ public class RTSFlow: @unchecked Sendable {
         let nodeInvoker = RTSNodeInvoker(
             stampFactory: stampFactory,
             sessionID: id,
-            signpostEmitter: signpostEmitter
+            signpostEmitter: signpostEmitter,
+            eventEmitter: eventEmitter
         )
 
         var subscriptions = Set<AnyCancellable>()
@@ -251,4 +335,17 @@ public class RTSFlow: @unchecked Sendable {
         return (nodeInvoker, collector, subscriptions)
     }
 
+}
+
+// MARK: - Result
+
+private extension Result {
+    /// The failure value, or `nil` on success — for handing a run's outcome to
+    /// `session.completed` without unwrapping the success value.
+    var eventError: Error? {
+        guard case .failure(let error) = self else {
+            return nil
+        }
+        return error
+    }
 }

@@ -50,15 +50,15 @@ public final class RTSLLMSession: Sendable {
         try await run(prompt, images: [], runID: nil)
     }
 
-    func run(_ prompt: String, runID: UUID) async throws -> String {
+    func run(_ prompt: String, runID: RTSRunID) async throws -> String {
         try await run(prompt, images: [], runID: Optional(runID))
     }
 
-    func run(_ prompt: String, images: [RTSImage], runID: UUID) async throws -> String {
+    func run(_ prompt: String, images: [RTSImage], runID: RTSRunID) async throws -> String {
         try await run(prompt, images: images, runID: Optional(runID))
     }
 
-    private func run(_ prompt: String, images: [RTSImage], runID: UUID?) async throws -> String {
+    private func run(_ prompt: String, images: [RTSImage], runID: RTSRunID?) async throws -> String {
         let response = try await _run(prompt, images, runID)
         #if DEBUG
         guard RailtracksSwift.debugMessageFileEnabled else {
@@ -86,7 +86,7 @@ public final class RTSLLMSession: Sendable {
         _setSystemPrompt(message, nil)
     }
 
-    func setSystemPrompt(_ message: String, runID: UUID) {
+    func setSystemPrompt(_ message: String, runID: RTSRunID) {
         _setSystemPrompt(message, runID)
     }
     
@@ -261,7 +261,7 @@ extension RTSLLMSession {
 }
 
 private extension RTSMessage {
-    func stamped(runID: UUID?) -> RTSMessage {
+    func stamped(runID: RTSRunID?) -> RTSMessage {
         RTSMessage(
             id: id,
             role: role,
@@ -305,14 +305,14 @@ private extension RTSMessage {
 
 private final class RunIDMap: @unchecked Sendable {
     /// [messageID: runID]
-    private var storage: [UUID: UUID] = [:]
+    private var storage: [UUID: RTSRunID] = [:]
     private let lock = NSLock()
 
-    func set(_ runID: UUID, for messageID: UUID) {
+    func set(_ runID: RTSRunID, for messageID: UUID) {
         lock.withLock { storage[messageID] = runID }
     }
 
-    subscript(_ messageID: UUID) -> UUID? {
+    subscript(_ messageID: UUID) -> RTSRunID? {
         lock.withLock { storage[messageID] }
     }
 }

@@ -116,23 +116,6 @@ public struct RTSSessionCompletedEvent: RTSObservabilityEvent {
         self.timestamp = timestamp
     }
 
-    /// Builds a failed-session event from a thrown error, stringifying it the way Python's
-    /// `format_error` does.
-    public static func failed(
-        sessionID: String,
-        error: Error,
-        durationSeconds: TimeInterval,
-        timestamp: Date = RTSEventTimestamp.now()
-    ) -> RTSSessionCompletedEvent {
-        RTSSessionCompletedEvent(
-            sessionID: sessionID,
-            status: .failure,
-            error: RTSSessionCompletedEvent.formatError(error),
-            durationSeconds: durationSeconds,
-            timestamp: timestamp
-        )
-    }
-
     /// Stringifies an error for an event payload, stripping ANSI colour escapes.
     ///
     /// Mirrors Python's `format_error` (`events/session.py`). String interpolation is used

@@ -69,7 +69,7 @@ extension RTSOrchestratorTool: RTSToolNode {
 
     /// Orchestrator tools are dispatched through an orchestrator-tool bridge, never
     /// directly through the plain `RTSToolNode` path.
-    public func invoke(runID: UUID) async throws -> RTSOutput {
+    public func invoke(runID: RTSRunID) async throws -> RTSOutput {
         throw RTSError.invalidInvocation(
             "RTSOrchestratorTool must be invoked via an orchestrator-tool bridge, not directly through RTSToolNode"
         )

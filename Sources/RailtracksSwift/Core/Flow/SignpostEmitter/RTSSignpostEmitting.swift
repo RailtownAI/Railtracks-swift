@@ -26,7 +26,7 @@ public protocol RTSSignpostEmitting: Sendable {
         nodeType: RTSFlowNodeType,
         sessionID: UUID,
         parentName: String,
-        runID: UUID,
+        runID: RTSRunID,
         input: RTSInput,
         hasInputGuardrail: Bool,
         hasOutputGuardrail: Bool
@@ -38,7 +38,7 @@ public protocol RTSSignpostEmitting: Sendable {
         nodeType: RTSFlowNodeType,
         sessionID: UUID,
         parentName: String,
-        runID: UUID,
+        runID: RTSRunID,
         output: RTSOutput?,
         error: Error?
     )

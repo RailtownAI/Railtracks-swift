@@ -18,6 +18,17 @@ protocol NodeEventPublishers {
 /// An operator that facilitate with node invoking, and publish node invoke event
 /// All node invoking should go through this, otherwise will have even record inconsistency
 public class RTSNodeInvoker: @unchecked Sendable {
+    typealias RunInputGuardrail = (RTSInput, RTSInvocationID) async -> RTSGuardrailInputOutcome
+    typealias RunOutputGuardrail = (RTSOutput, RTSInvocationID) async -> RTSGuardrailOutputOutcome
+    /// Called once the node body has finished, with the ids minted inside `invokeCore` and
+    /// the error if it threw. Only agents supply one — it is where `llm.*` is reconstructed
+    /// from the session's messages, which `invokeCore` cannot reach.
+    typealias EmitLLMEvents = (
+        _ invocationID: RTSInvocationID,
+        _ runID: RTSRunID,
+        _ error: Error?
+    ) async -> Void
+    
     let stampFactory: RTSStampFactory
     let sessionID: UUID
     let signpostEmitter: (any RTSSignpostEmitting)?
@@ -42,16 +53,22 @@ public class RTSNodeInvoker: @unchecked Sendable {
     /// as its parent (the edge `source`). It is bound around `execute` so it flows down the async
     /// call tree — including Conduit's tool `TaskGroup` and Apple's `LanguageModelSession.respond`,
     /// both verified to inherit task-locals. `nil` at the flow root. See docs/duplicate-node-id.md.
-    @TaskLocal static var currentInvocationID: UUID?
+    @TaskLocal static var currentInvocationID: RTSInvocationID?
+
+    /// Publishes the structured observability event stream. Optional so tests can build an
+    /// invoker without one; `nil` means node and guardrail events are simply not emitted.
+    let eventEmitter: RTSEventEmitter?
 
     init(
         stampFactory: RTSStampFactory,
         sessionID: UUID,
-        signpostEmitter: (any RTSSignpostEmitting)? = nil
+        signpostEmitter: (any RTSSignpostEmitting)? = nil,
+        eventEmitter: RTSEventEmitter? = nil
     ) {
         self.stampFactory = stampFactory
         self.sessionID = sessionID
         self.signpostEmitter = signpostEmitter
+        self.eventEmitter = eventEmitter
     }
     
     func invokeAgent(
@@ -63,6 +80,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
         var mutableNode = node
         let inputGuardrails = node.inputGuardrails
         let outputGuardrails = node.outputGuardrails
+        // Scopes each rail's middleware type id to the agent that owns it.
+        let agentName = node.agentName
+        let provider = node.llmProvider
         return try await invokeCore(
             node,
             nodeType: .agent,
@@ -70,11 +90,42 @@ public class RTSNodeInvoker: @unchecked Sendable {
             model: node.llmProvider.modelID,
             input: input,
             createdBy: createdBy,
-            runInputGuardrails: inputGuardrails.isEmpty ? nil : { input in
-                await RTSGuardrailRunner.runInput(inputGuardrails, input: input)
+            runInputGuardrails: inputGuardrails.isEmpty ? nil : { [eventEmitter] input, nodeID in
+                await RTSGuardrailRunner.runInput(
+                    inputGuardrails,
+                    input: input,
+                    eventContext: RTSGuardrailEventContext(
+                        emitter: eventEmitter,
+                        nodeID: nodeID,
+                        agentName: agentName
+                    )
+                )
             },
-            runOutputGuardrails: outputGuardrails.isEmpty ? nil : { output in
-                await RTSGuardrailRunner.runOutput(outputGuardrails, output: output)
+            runOutputGuardrails: outputGuardrails.isEmpty ? nil : { [eventEmitter] output, nodeID in
+                await RTSGuardrailRunner.runOutput(
+                    outputGuardrails,
+                    output: output,
+                    eventContext: RTSGuardrailEventContext(
+                        emitter: eventEmitter,
+                        nodeID: nodeID,
+                        agentName: agentName
+                    )
+                )
+            },
+            emitLLMEvents: { [eventEmitter] nodeID, runID, error in
+                guard let eventEmitter else {
+                    return
+                }
+                await RTSLLMEventEmission.emit(
+                    into: eventEmitter,
+                    // The session accumulates across invocations, so filter to this one.
+                    messages: session.messages().filter { $0.runID == runID },
+                    llmID: RTSLLMEventEmission.modelIdentifier(for: provider),
+                    modelProvider: provider.providerName,
+                    modelName: provider.modelID,
+                    nodeID: nodeID,
+                    error: error
+                )
             }
         ) { runID, guardedInput in
             mutableNode.inputs = guardedInput
@@ -131,8 +182,11 @@ public class RTSNodeInvoker: @unchecked Sendable {
         model: String,
         input: RTSInput,
         createdBy: (any RTSNode)? = nil,
-        runInputGuardrails: ((RTSInput) async -> (value: RTSInput, traces: [RTSGuardrailTrace], error: Error?))? = nil,
-        runOutputGuardrails: ((RTSOutput) async -> (value: RTSOutput, traces: [RTSGuardrailTrace], error: Error?))? = nil,
+        // The `UUID` is the node's per-invocation id, which only exists inside this function —
+        // the guardrail runner needs it as the spatial parent of its `middleware.guard.*` events.
+        runInputGuardrails: RunInputGuardrail? = nil,
+        runOutputGuardrails: RunOutputGuardrail? = nil,
+        emitLLMEvents: EmitLLMEvents? = nil,
         execute: (UUID, RTSInput) async throws -> RTSOutput
     ) async throws -> RTSOutput {
         let event: RTSStamp.Event
@@ -145,7 +199,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
         // Per-invocation graph node id (matches Python): a node invoked N times yields N distinct
         // ids. The node *instance* id (`node.id`) is no longer used for tracing identity.
-        let invocationID = UUID()
+        let invocationID = RTSInvocationID()
         // The parent invocation's id, propagated down the task tree; nil at the flow root.
         let parentInvocationID = RTSNodeInvoker.currentInvocationID
         #if DEBUG
@@ -167,13 +221,39 @@ public class RTSNodeInvoker: @unchecked Sendable {
             hasOutputGuardrail: runOutputGuardrails != nil
         )
 
+        // Observability stream (independent of the trace above). `node.creation` is a
+        // creation event: it precedes the node entering its own scope, so it carries no
+        // parent — matching Python's `CreationEventBase`.
+        let eventParent = RTSEventParent.node(nodeID: invocationID.uuidString)
+        let eventSpatialParent = RTSEventSpatialParent.node(nodeID: parentInvocationID?.uuidString)
+        eventEmitter?.emit(
+            RTSNodeCreationEvent(
+                nodeID: invocationID.uuidString,
+                name: node.name(),
+                nodeType: nodeType
+            )
+        )
+        // Emitted *before* the guardrails, so a blocked input guardrail still leaves the node
+        // with a complete lifecycle rather than a creation and a destruction with nothing
+        // between them. It also puts `kwargs` at the pre-transform value, which is what
+        // Python records — its input guards are model middleware and never see the node's
+        // kwargs. (The flow-graph edge below deliberately records post-transform instead; the
+        // two streams differ here on purpose.)
+        eventEmitter?.emit(
+            RTSNodeInvocationEvent(
+                parent: eventParent,
+                spatialParent: eventSpatialParent,
+                kwargs: input
+            )
+        )
+
         // Input guardrails run before the edge is recorded so the edge's input
         // reflects what the agent actually received (post-transform).
         var guardTraces: [RTSGuardrailTrace] = []
         var workingInput = input
         var guardError: Error?
         if let runInputGuardrails {
-            let result = await runInputGuardrails(input)
+            let result = await runInputGuardrails(input, invocationID)
             workingInput = result.value
             guardTraces.append(contentsOf: result.traces)
             guardError = result.error
@@ -237,14 +317,55 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 log.error("☠️ [\(node.name())] invocation failed: \(error)")
             }
             runtime = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
+            // `llm.*` is reconstructed from the messages the body left behind — see
+            // `RTSLLMEventEmission`. Placed here so it lands inside the node's own lifecycle,
+            // as Python's does: after the body, before the output guardrails and before the
+            // terminal node event. Runs on failure too, since a partial exchange still
+            // produced messages worth reporting. Deliberately outside the measured window, so
+            // reconstruction never inflates the node's reported runtime.
+            await emitLLMEvents?(invocationID, runID, invokeError)
             // Output guardrails only run when the agent itself produced a result. They run after the
             // measured window (not counted as node runtime), matching Python measuring only invoke().
             if invokeError == nil, let runOutputGuardrails {
-                let result = await runOutputGuardrails(output)
+                let result = await runOutputGuardrails(output, invocationID)
                 output = result.value
                 guardTraces.append(contentsOf: result.traces)
                 invokeError = result.error
             }
+        }
+
+        // The node's single terminal event. Both arms live here, outside the block above,
+        // because `invokeError` is only final at this point:
+        //
+        // - A node can fail three ways — an input guardrail blocking or throwing (set before
+        //   `execute` even runs), the body throwing, or an output guardrail blocking or
+        //   throwing — and only the middle one passes through the `catch` above. Emitting here
+        //   covers all three, matching Python, which reports a blocked guard as a
+        //   `node.failure` because the block raises through the node body.
+        // - `node.response` cannot be emitted next to `execute`, because an output guardrail
+        //   can fail *after* the body succeeded. Doing so emitted both a response and a
+        //   failure for one invocation. Emitting it here also means `output` has already been
+        //   through the output guardrails, so a redacting rail's result is what reaches the
+        //   stream rather than the raw value.
+        //
+        // Note `.transformed` and `.allowed` never reach the failure arm: the guardrail runner
+        // returns a nil error for both.
+        if let invokeError {
+            eventEmitter?.emit(
+                RTSNodeFailureEvent.from(
+                    error: invokeError,
+                    parent: eventParent,
+                    spatialParent: eventSpatialParent
+                )
+            )
+        } else {
+            eventEmitter?.emit(
+                RTSNodeResponseEvent(
+                    parent: eventParent,
+                    spatialParent: eventSpatialParent,
+                    response: .object(output)
+                )
+            )
         }
 
         signpostEmitter?.emitNodeEnd(
@@ -285,6 +406,17 @@ public class RTSNodeInvoker: @unchecked Sendable {
             guardTraces: guardTraces,
             hasInputGuardrail: runInputGuardrails != nil,
             hasOutputGuardrail: runOutputGuardrails != nil
+        )
+
+        // The final response, and the event Python's `node_internals` fold reads for latency.
+        // `runtime` is the monotonic measurement taken above, never a stamp delta.
+        eventEmitter?.emit(
+            RTSNodeDestructionEvent(
+                parent: eventParent,
+                spatialParent: eventSpatialParent,
+                response: invokeError == nil ? .object(output) : nil,
+                durationSeconds: runtime
+            )
         )
 
         if let invokeError { throw invokeError }
@@ -336,7 +468,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         nodeID: UUID,
         parentNodeID: UUID?,
         nodeType: RTSFlowNodeType,
-        runID: UUID
+        runID: RTSRunID
     ) async {
         lockedSend(
             nodeExecutionEventSubject,
@@ -356,7 +488,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         parentNodeID: UUID?,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
-        runID: UUID,
+        runID: RTSRunID,
         input: RTSInput,
         output: RTSOutput,
         error: Error?,
@@ -387,7 +519,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
     private func publishEdgeCreated(
         edgeID: UUID,
-        runID: UUID,
+        runID: RTSRunID,
         nodeType: RTSFlowNodeType,
         stamp: RTSStamp,
         sourceNodeID: UUID?,

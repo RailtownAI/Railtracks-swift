@@ -15,11 +15,13 @@ import Foundation
 // `Timeout`, `Lock`, `MaxCalls`, `ContextInjection`, and the pre/post verifiers.
 //
 // Swift has **no middleware layer**. Guardrails run directly in `RTSNodeInvoker.invokeAgent`
-// via `RTSGuardrailRunner`, so only ``RTSMiddlewareCreationEvent`` and the six
-// `middleware.guard.*` events have a Swift emit site today. The other fourteen are defined
-// anyway: an incomplete union is a latent breaking change, and every field they need is a
-// `JSON` column in the Python registry, so nothing has to be invented to declare them. Each
-// one names its Python emitter below.
+// via `RTSGuardrailRunner`, so ten of these have a Swift emit site today:
+// ``RTSMiddlewareCreationEvent``, the six `middleware.guard.*` events, and the bare
+// `middleware.invocation` / `.response` / `.failure` triple, which `RTSGuardrailEventContext`
+// synthesizes per rail. The other eleven — the model bands and the node-band `@post_node`
+// triple — are defined anyway: an incomplete union is a latent breaking change, and every
+// field they need is a `JSON` column in the Python registry, so nothing has to be invented to
+// declare them. Each one names its Python emitter below.
 //
 // A note on granularity that applies to every guard event here: Python's guardrails are
 // *model* middleware and run once per provider round trip, so an agent making three round
@@ -323,14 +325,11 @@ public struct RTSGuardOutputFailureEvent: RTSMiddlewareEvent, RTSFailureReportin
     }
 }
 
-// MARK: - Events with no Swift emit site
+// MARK: - Bare middleware triple
 //
-// Everything below is structure only. Swift has no middleware chain, no `@post_node`, and
-// no `@pre_llm` / `@post_llm`, so nothing constructs these yet. They are declared so the
-// family is complete and so adding Swift's middleware layer later is additive rather than
-// a reshaping of what shipped.
-
-// MARK: Bare middleware triple
+// Emitted, despite Swift having no middleware chain: `RTSGuardrailEventContext` synthesizes
+// the triple per rail so consumers get the same uniform invocation → response-or-failure pair
+// per middleware that Python provides.
 
 /// Any middleware invocation, whole.
 ///
@@ -338,8 +337,10 @@ public struct RTSGuardOutputFailureEvent: RTSMiddlewareEvent, RTSFailureReportin
 /// **every** middleware — in addition to whatever specialised events that middleware's own
 /// decorator emits. Band-agnostic: the spatial parent may be either node- or model-side.
 ///
-/// No Swift emit site: Swift has no middleware chain. Synthesizing this today would invent
-/// structure that does not exist.
+/// Swift has no middleware chain — `RTSGuardrailRunner` iterates rails rather than composing
+/// them — so this is synthesized per rail, to give consumers the same uniform
+/// invocation → response-or-failure pair per middleware that Python provides. Two payload
+/// fields cannot mean quite what Python's do; see `RTSGuardrailRailEvents` for which and why.
 public struct RTSMiddlewareInvocationEvent: RTSMiddlewareEvent {
     public var eventType: String {
         "middleware.invocation"
@@ -374,7 +375,7 @@ public struct RTSMiddlewareInvocationEvent: RTSMiddlewareEvent {
 }
 
 /// Any middleware invocation's result. Mirrors Python's `MiddlewareResponseEvent`
-/// (`middleware/chain.py`). No Swift emit site — see ``RTSMiddlewareInvocationEvent``.
+/// (`middleware/chain.py`). Emitted per guardrail — see ``RTSMiddlewareInvocationEvent``.
 public struct RTSMiddlewareResponseEvent: RTSMiddlewareEvent {
     public var eventType: String {
         "middleware.response"
@@ -404,9 +405,13 @@ public struct RTSMiddlewareResponseEvent: RTSMiddlewareEvent {
     }
 }
 
-/// Any middleware invocation that threw. Mirrors Python's `MiddlewareFailureEvent`
-/// (`middleware/chain.py`). This is also where a guardrail **block** surfaces in Python,
-/// as the resulting error unwinds through the chain. No Swift emit site.
+/// Any middleware invocation that stopped the call. Mirrors Python's `MiddlewareFailureEvent`
+/// (`middleware/chain.py`).
+///
+/// This is where a guardrail **block** surfaces as well as a throw — in Python because the
+/// block's error unwinds through the chain, and in Swift because the runner emits it
+/// explicitly for both. So a block appears twice: as a `block` decision on the guard's
+/// response event, and as a failure here.
 public struct RTSMiddlewareFailureEvent: RTSMiddlewareEvent, RTSFailureReporting {
     public var eventType: String {
         "middleware.failure"
@@ -432,10 +437,36 @@ public struct RTSMiddlewareFailureEvent: RTSMiddlewareEvent, RTSFailureReporting
         self.timestamp = timestamp
     }
 
+    /// Builds the event from the error that stopped the middleware, mirroring Python's
+    /// `FailureMixin.from_exception`.
+    public static func from(
+        error: Error,
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) -> RTSMiddlewareFailureEvent {
+        let failure = RTSEventFailure.fields(from: error)
+        return RTSMiddlewareFailureEvent(
+            parent: parent,
+            spatialParent: spatialParent,
+            exceptionName: failure.name,
+            exceptionMessage: failure.message,
+            timestamp: timestamp
+        )
+    }
+
     public func encodePayload() -> [String: RTSValue] {
         parentedBasePayload().merging(failurePayloadFields()) { _, new in new }
     }
 }
+
+// MARK: - Events with no Swift emit site
+//
+// Everything below is structure only. Swift has no middleware chain, no `@post_node`, and
+// no `@pre_llm` / `@post_llm`, so nothing in `Sources/` constructs these yet (the tests in
+// `ObservabilityMiddlewareEventTests` do, to pin the wire shape). They are declared so the
+// family is complete and so adding Swift's middleware layer later is additive rather than
+// a reshaping of what shipped.
 
 // MARK: Model band — `@wrap_llm`
 

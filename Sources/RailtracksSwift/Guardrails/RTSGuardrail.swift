@@ -138,6 +138,43 @@ public extension RTSOutputGuardrailResult {
     }
 }
 
+// MARK: - Chain outcomes
+
+/// What running an agent's input guardrail chain produced.
+///
+/// Returned by `RTSGuardrailRunner.runInput`. A struct rather than a tuple so each field
+/// can document itself — `error` in particular, whose semantics are not obvious from a
+/// label alone.
+struct RTSGuardrailInputOutcome {
+    /// The input after the last rail that ran: transformed if any rail transformed it,
+    /// otherwise what was passed in. On a block or a throw this is the last transformed
+    /// value, not the original.
+    let value: RTSInput
+    /// One trace per rail that ran, in execution order. Ends early on a block or a throw,
+    /// so it is shorter than the chain when either happened.
+    let traces: [RTSGuardrailTrace]
+    /// Why the chain stopped, or `nil` when every rail passed.
+    ///
+    /// Deliberately *returned* rather than thrown, so the caller still gets `value` and
+    /// `traces` alongside it. Two things land here: `RTSError.guardrailBlocked` when a rail
+    /// returned `.blocked`, or the rail's own error when its `check` threw. The node
+    /// invoker re-throws it so the run fails.
+    let error: Error?
+}
+
+/// What running an agent's output guardrail chain produced.
+///
+/// Mirrors ``RTSGuardrailInputOutcome`` field for field, over an `RTSOutput` value.
+struct RTSGuardrailOutputOutcome {
+    /// The output after the last rail that ran. See ``RTSGuardrailInputOutcome/value``.
+    let value: RTSOutput
+    /// One trace per rail that ran, in execution order.
+    let traces: [RTSGuardrailTrace]
+    /// Why the chain stopped, or `nil` when every rail passed. See
+    /// ``RTSGuardrailInputOutcome/error``.
+    let error: Error?
+}
+
 // MARK: - Protocols
 
 /// A guardrail that runs before an agent's input reaches the LLM.

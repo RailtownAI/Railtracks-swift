@@ -52,6 +52,16 @@ public struct RTSGuardrailDecision: Sendable, Equatable {
         self.metadata = metadata
     }
 
+    /// ``transformedValue`` as an `RTSInput` / `RTSOutput`, or `nil` unless this is a
+    /// transform. Lets a caller recover the replacement value without re-matching the
+    /// originating result.
+    var transformedDictionary: [String: RTSValue]? {
+        guard case .object(let dictionary)? = transformedValue else {
+            return nil
+        }
+        return dictionary
+    }
+
     /// The `decision` payload value.
     ///
     /// Every key is written, `null` included, matching Python's encoding.

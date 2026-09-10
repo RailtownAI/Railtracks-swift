@@ -30,7 +30,7 @@ public struct RTSNodeStatus: Sendable {
     public let nodeName: String
     public let nodeType: RTSFlowNodeType
     public let state: State
-    public let runID: UUID?
+    public let runID: RTSRunID?
 
     /// Public so consumers can construct statuses for SwiftUI previews and tests without driving a
     /// real flow. The library itself only ever builds these in `RTSFlow.startCollecting()`.
@@ -40,7 +40,7 @@ public struct RTSNodeStatus: Sendable {
         nodeName: String,
         nodeType: RTSFlowNodeType,
         state: State,
-        runID: UUID?
+        runID: RTSRunID?
     ) {
         self.nodeID = nodeID
         self.parentNodeID = parentNodeID

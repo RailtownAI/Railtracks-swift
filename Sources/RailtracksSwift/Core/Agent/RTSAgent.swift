@@ -42,7 +42,7 @@ public extension RTSAgentNode {
 
     func invoke() async throws -> RTSOutput { [:] }
 
-    func invoke(runID: UUID, session: RTSLLMSession) async throws -> RTSOutput {
+    func invoke(runID: RTSRunID, session: RTSLLMSession) async throws -> RTSOutput {
         guard case let .string(prompt) = inputs[inputKeyPrompt] else {
             throw RTSError.missingInput("Agent \(agentName) missing prompt")
         }
