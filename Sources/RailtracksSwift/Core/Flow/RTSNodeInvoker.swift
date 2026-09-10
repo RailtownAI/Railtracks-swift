@@ -426,6 +426,14 @@ public class RTSNodeInvoker: @unchecked Sendable {
     /// Serialized `send` — the invoker is shared across a flow's agents and `PassthroughSubject.send`
     /// isn't concurrency-safe, so parallel agents would otherwise race on event publication. This is
     /// synchronous (no suspension), so locking here is safe and legal from the async publish methods.
+    ///
+    /// - Important: subscribers' sinks run **inside this lock**, so a slow one does not merely
+    ///   delay its own node — it blocks every other node in the flow from publishing. These
+    ///   publishers are therefore `internal`, and every in-library subscriber must do only
+    ///   bounded work here: `RTSFlowGraphCollector` yields into an `AsyncStream`, and `RTSFlow`
+    ///   hands node statuses to a delivery queue (`nodeStatusPublisher` is `receive(on:)`-isolated
+    ///   precisely so app sinks never reach this lock). Keep that invariant when adding a
+    ///   subscriber; if these ever become public, they need the isolation `RTSEventEmitter` uses.
     private func lockedSend<Event>(_ subject: PassthroughSubject<Event, Never>, _ event: Event) {
         publishLock.lock()
         defer { publishLock.unlock() }

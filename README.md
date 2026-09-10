@@ -546,6 +546,17 @@ let cancellable = flow.eventPublisher.sink { event in
 Pass `RTSFlow(title:emitsEvents: false)` to turn the stream off; payloads are then never built,
 so a flow with no consumer pays no encoding cost.
 
+**Observation cannot slow a run down.** Events are delivered on a private serial queue, not on
+the thread running your agents, so a slow subscriber can never stall node execution — add
+`.receive(on:)` for your own queue on top if you like (`.main` for UI work is safe). Order is
+preserved either way.
+
+The trade-off is that delivery is asynchronous. `run` waits for the backlog before returning,
+so the stream is complete once a run ends; if you need that guarantee at any other moment —
+say, tearing a subscriber down mid-flow — call `await flow.flushEvents()` first. Note it
+covers the library's queue only: a subscriber that adds its own `receive(on:)` must drain that
+hop itself.
+
 ### Writing events to a file
 
 `RTSEventWriter` is a ready-made receiver that appends the stream to a JSONL file — one JSON

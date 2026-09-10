@@ -44,7 +44,18 @@ private final class GuardrailEventRecorder: @unchecked Sendable {
         RTSGuardrailEventContext(emitter: emitter, nodeID: nodeID, agentName: agentName)
     }
 
+    /// Flushes first: the emitter delivers asynchronously so that a subscriber cannot slow a
+    /// run down, which means events published moments ago may still be in flight. Folding the
+    /// flush into the accessor makes it impossible for a test to read a half-delivered stream.
     var events: [RTSEvent] {
+        get async {
+            await emitter.flushDelivery()
+            return delivered
+        }
+    }
+
+    /// The synchronous read. Split out because `NSLock` is unavailable from an async context.
+    private var delivered: [RTSEvent] {
         lock.lock()
         defer {
             lock.unlock()
@@ -53,11 +64,13 @@ private final class GuardrailEventRecorder: @unchecked Sendable {
     }
 
     var eventTypes: [String] {
-        events.map { $0.eventType }
+        get async {
+            await events.map { $0.eventType }
+        }
     }
 
-    func first(ofType eventType: String) -> RTSEvent? {
-        events.first { $0.eventType == eventType }
+    func first(ofType eventType: String) async -> RTSEvent? {
+        await events.first { $0.eventType == eventType }
     }
 }
 
@@ -88,7 +101,7 @@ extension RailtracksSwiftTestSuite {
             // The chain-level pair brackets the guard-specific one, as Python's chain wraps
             // every middleware it runs.
             #expect(
-                recorder.eventTypes == [
+                await recorder.eventTypes == [
                     "middleware.creation",
                     "middleware.invocation",
                     "middleware.guard.input.invocation",
@@ -112,7 +125,7 @@ extension RailtracksSwiftTestSuite {
             )
 
             #expect(
-                recorder.eventTypes == [
+                await recorder.eventTypes == [
                     "middleware.creation",
                     "middleware.invocation",
                     "middleware.guard.output.invocation",
@@ -137,7 +150,7 @@ extension RailtracksSwiftTestSuite {
             )
 
             let invocationType = "middleware.guard.input.invocation"
-            let invocation = try #require(recorder.first(ofType: invocationType))
+            let invocation = try #require(await recorder.first(ofType: invocationType))
             #expect(invocation.payload["spatial_parent_type"] == .string("node_and_middleware"))
             #expect(invocation.payload["spatial_parent_node_id"] == .string(nodeID.uuidString))
             // Swift has no nested middleware, so there is never an intervening one.
@@ -166,7 +179,7 @@ extension RailtracksSwiftTestSuite {
                 eventContext: recorder.context()
             )
 
-            let invocations = recorder.events.filter {
+            let invocations = await recorder.events.filter {
                 $0.eventType == "middleware.guard.input.invocation"
             }
             #expect(invocations.count == 2)
@@ -194,7 +207,7 @@ extension RailtracksSwiftTestSuite {
                 eventContext: recorder.context()
             )
 
-            let creations = recorder.events.filter { $0.eventType == "middleware.creation" }
+            let creations = await recorder.events.filter { $0.eventType == "middleware.creation" }
             #expect(creations.count == 2)
             let typeIDs = creations.compactMap { str($0.payload["middleware_type_id"]) }
             #expect(Set(typeIDs).count == 2)
@@ -211,16 +224,16 @@ extension RailtracksSwiftTestSuite {
             _ = await RTSGuardrailRunner.runInput([allow], input: [:], eventContext: context)
             _ = await RTSGuardrailRunner.runInput([allow], input: [:], eventContext: context)
 
-            let creations = recorder.events.filter { $0.eventType == "middleware.creation" }
+            let creations = await recorder.events.filter { $0.eventType == "middleware.creation" }
             #expect(creations.count == 1)
             // The invocation/response pairs still fire on both runs — one guard-level and one
             // chain-level per run.
-            let guardInvocations = recorder.events.filter {
+            let guardInvocations = await recorder.events.filter {
                 $0.eventType == "middleware.guard.input.invocation"
             }
             #expect(guardInvocations.count == 2)
             #expect(
-                recorder.events.filter { $0.eventType == "middleware.invocation" }.count == 2
+                await recorder.events.filter { $0.eventType == "middleware.invocation" }.count == 2
             )
         }
 
@@ -245,7 +258,7 @@ extension RailtracksSwiftTestSuite {
             // records a verdict (`_raise_if_blocked` runs *after* its response event), while
             // the chain sees the resulting throw and records a failure.
             #expect(
-                recorder.eventTypes == [
+                await recorder.eventTypes == [
                     "middleware.creation",
                     "middleware.invocation",
                     "middleware.guard.input.invocation",
@@ -254,11 +267,12 @@ extension RailtracksSwiftTestSuite {
                 ]
             )
             // Not a *guard* failure — those cover only the rail's `check` throwing.
-            #expect(!recorder.eventTypes.contains("middleware.guard.input.failure"))
-            let chainFailure = try #require(recorder.first(ofType: "middleware.failure"))
+            let emitted = await recorder.eventTypes
+            #expect(!emitted.contains("middleware.guard.input.failure"))
+            let chainFailure = try #require(await recorder.first(ofType: "middleware.failure"))
             #expect(chainFailure.payload["exception_name"] == .string("RTSError"))
 
-            let response = try #require(recorder.first(ofType: "middleware.guard.input.response"))
+            let response = try #require(await recorder.first(ofType: "middleware.guard.input.response"))
             guard case .object(let decision)? = response.payload["decision"] else {
                 Issue.record("decision should encode as an object")
                 return
@@ -281,7 +295,7 @@ extension RailtracksSwiftTestSuite {
             )
 
             #expect(
-                recorder.eventTypes == [
+                await recorder.eventTypes == [
                     "middleware.creation",
                     "middleware.invocation",
                     "middleware.guard.input.invocation",
@@ -289,10 +303,10 @@ extension RailtracksSwiftTestSuite {
                     "middleware.failure",
                 ]
             )
-            let failure = try #require(recorder.first(ofType: "middleware.guard.input.failure"))
+            let failure = try #require(await recorder.first(ofType: "middleware.guard.input.failure"))
             #expect(failure.payload["exception_name"] == .string("StubGuardrailError"))
             // A throw is a failure at both levels, as in Python.
-            let chainFailure = try #require(recorder.first(ofType: "middleware.failure"))
+            let chainFailure = try #require(await recorder.first(ofType: "middleware.failure"))
             #expect(chainFailure.payload["exception_name"] == .string("StubGuardrailError"))
         }
 
@@ -313,7 +327,7 @@ extension RailtracksSwiftTestSuite {
                 eventContext: recorder.context()
             )
 
-            #expect(recorder.events.filter { $0.eventType == "middleware.creation" }.count == 1)
+            #expect(await recorder.events.filter { $0.eventType == "middleware.creation" }.count == 1)
         }
 
         // MARK: - Node lifecycle around guardrails
@@ -364,7 +378,7 @@ extension RailtracksSwiftTestSuite {
             // node with a creation and a destruction and nothing in between. `node.failure` is
             // emitted even though the body never ran and nothing passed through the invoker's
             // `catch` — matching Python, where a blocked guard raises through the node body.
-            let nodeEvents = recorder.eventTypes.filter { $0.hasPrefix("node.") }
+            let nodeEvents = await recorder.eventTypes.filter { $0.hasPrefix("node.") }
             #expect(
                 nodeEvents == [
                     "node.creation",
@@ -396,7 +410,7 @@ extension RailtracksSwiftTestSuite {
             // The body *succeeded* here — only the output guardrail failed. Emitting
             // `node.response` next to `execute` would report both a response and a failure for
             // one invocation; the terminal event is singular instead.
-            let nodeEvents = recorder.eventTypes.filter { $0.hasPrefix("node.") }
+            let nodeEvents = await recorder.eventTypes.filter { $0.hasPrefix("node.") }
             #expect(
                 nodeEvents == [
                     "node.creation",
@@ -428,7 +442,7 @@ extension RailtracksSwiftTestSuite {
 
             // The point of emitting at the terminal site: a redacting rail's result reaches the
             // stream, not the raw body output.
-            let response = try #require(recorder.first(ofType: "node.response"))
+            let response = try #require(await recorder.first(ofType: "node.response"))
             #expect(response.payload["response"] == .object(["result": .string("[redacted]")]))
         }
 
@@ -449,7 +463,7 @@ extension RailtracksSwiftTestSuite {
                 input: ["prompt": .string("hello")]
             )
 
-            #expect(recorder.events.isEmpty)
+            #expect(await recorder.events.isEmpty)
             #expect(outcome.error == nil)
             #expect(str(outcome.value["prompt"]) == "HELLO")
             #expect(outcome.traces.count == 1)
@@ -492,7 +506,7 @@ extension RailtracksSwiftTestSuite {
                 eventContext: recorder.context()
             )
 
-            #expect(recorder.events.isEmpty)
+            #expect(await recorder.events.isEmpty)
         }
     }
 }

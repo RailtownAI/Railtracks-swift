@@ -28,6 +28,13 @@ public class RTSFlow: @unchecked Sendable {
     }
 
     private let nodeStatusSubject = PassthroughSubject<RTSNodeStatus, Never>()
+    /// Serial, so statuses arrive in the order the invoker produced them. Its purpose is the
+    /// same as `RTSEventEmitter`'s delivery queue: these statuses are sent from sinks that run
+    /// on `RTSNodeInvoker`'s thread while its publish lock is held, so delivering subscribers
+    /// inline would let one slow app sink block every node in the flow from publishing.
+    private let nodeStatusDeliveryQueue = DispatchQueue(
+        label: "ai.railtown.railtracks.nodestatus"
+    )
     /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions
     /// state: `.queued` when it is created, `.executing` once its input guardrails have run and its
     /// body starts, and `.completed` or `.failed` when it finishes.
@@ -35,8 +42,13 @@ public class RTSFlow: @unchecked Sendable {
     /// Each status carries `parentNodeID` — the invocation that triggered it, `nil` at the flow root —
     /// so consumers can reconstruct the call tree. Ids are per-invocation, so a node invoked N times
     /// reports N distinct ids.
+    ///
+    /// Subscribers are delivered on a private serial queue, not on the invoking node's thread,
+    /// so a slow sink here cannot slow the run down.
     public var nodeStatusPublisher: AnyPublisher<RTSNodeStatus, Never> {
-        nodeStatusSubject.eraseToAnyPublisher()
+        nodeStatusSubject
+            .receive(on: nodeStatusDeliveryQueue)
+            .eraseToAnyPublisher()
     }
 
     let eventEmitter: RTSEventEmitter
@@ -46,8 +58,32 @@ public class RTSFlow: @unchecked Sendable {
     ///
     /// Independent of the JSON trace: the two are produced side by side and neither feeds
     /// the other. Silent when the flow was built with `emitsEvents: false`.
+    ///
+    /// Subscribers are delivered on a private serial queue rather than on the invoking node's
+    /// thread, so a slow sink cannot slow a run down — but delivery is therefore asynchronous.
+    /// Each `run` joins that backlog before returning, so the stream is complete once a run
+    /// ends; call ``flushEvents()`` if you need the same guarantee at any other moment, such
+    /// as before tearing a subscriber down mid-flow.
     public var eventPublisher: AnyPublisher<RTSEvent, Never> {
         eventEmitter.eventPublisher
+    }
+
+    /// Waits until every event published so far has been handed to subscribers.
+    ///
+    /// Events are delivered asynchronously so that observation cannot slow execution, which
+    /// means a subscriber torn down immediately after a run can miss the tail of the stream —
+    /// `session.completed` included. Call this first when that matters:
+    ///
+    /// ```swift
+    /// _ = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+    /// await flow.flushEvents()
+    /// await eventWriter.finish()
+    /// ```
+    ///
+    /// Not needed to *read* an ``RTSEventWriter``'s file — that closes itself on
+    /// `session.completed` and announces the file on its own publisher.
+    public func flushEvents() async {
+        await eventEmitter.flushDelivery()
     }
 
     /// - Parameters:
@@ -122,6 +158,7 @@ public class RTSFlow: @unchecked Sendable {
             // This path exits before `awaitCompletion()`, so it needs its own completion
             // event — otherwise a failed session build would leave the run unbracketed.
             emitSessionCompleted(startedAt: startedAt, error: error)
+            await flushEvents()
             throw error
         }
         onNewSession(session)   // subscribe the root agent's own session
@@ -156,6 +193,10 @@ public class RTSFlow: @unchecked Sendable {
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
         emitSessionCompleted(startedAt: startedAt, error: outcome.eventError)
+        // Emission is isolated from execution, so the backlog is joined here rather than
+        // interleaved with the run: subscribers cannot slow a node down, and the stream is
+        // still complete by the time `run` returns.
+        await flushEvents()
         return try outcome.get()
     }
 
@@ -205,6 +246,10 @@ public class RTSFlow: @unchecked Sendable {
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
         emitSessionCompleted(startedAt: startedAt, error: outcome.eventError)
+        // Emission is isolated from execution, so the backlog is joined here rather than
+        // interleaved with the run: subscribers cannot slow a node down, and the stream is
+        // still complete by the time `run` returns.
+        await flushEvents()
         return try outcome.get()
     }
 
