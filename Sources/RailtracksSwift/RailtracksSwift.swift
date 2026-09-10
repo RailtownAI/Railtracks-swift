@@ -35,6 +35,16 @@ public enum RailtracksSwift {
         ?? FileManager.default.temporaryDirectory
     ).appendingPathComponent("evaluations", isDirectory: true)
 
+    /// Directory where ``RTSEventWriter`` appends observability event JSONL files, one per
+    /// session (`<scope_id>.jsonl`). Sits beside `sessions` (flow-graph traces) and `evaluations`.
+    /// Configure once at app startup before any flow runs.
+    public nonisolated(unsafe) static var eventsOutputDirectory: URL = (
+        FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)
+            .first
+        ?? FileManager.default.temporaryDirectory
+    ).appendingPathComponent("events", isDirectory: true)
+
     /// Maximum character length for `content` passed to signpost IO events before truncation.
     /// Raise this to see more content in Instruments; lower it if events appear empty or malformed.
     /// Configure once at app startup before any flow runs.

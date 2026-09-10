@@ -63,6 +63,10 @@ final class RTSEventEmitter: @unchecked Sendable {
     ///   internal and a node invocation is `async`, but any *internal* subscriber that emits
     ///   would hit it. A sink should also stay cheap for the simpler reason that slow work
     ///   inside one blocks the invocation that published the event.
+    ///
+    ///   ``RTSEventWriter`` — the receiver this library ships — obeys both rules the way
+    ///   `RTSFlowGraphCollector` does: its sink only appends to a bounded buffer, and a separate
+    ///   consumer task does the file I/O. Any receiver an app writes should follow that shape.
     func emit(_ event: some RTSObservabilityEvent) {
         guard isEnabled else {
             return

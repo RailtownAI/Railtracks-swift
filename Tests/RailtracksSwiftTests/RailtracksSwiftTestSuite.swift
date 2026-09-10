@@ -11,7 +11,8 @@ import Testing
 /// file via `extension RailtracksSwiftTestSuite { ... }`, so `.serialized` here applies to all of them.
 ///
 /// Why the target must be serialized: the library exposes process-global configuration —
-/// `RailtracksSwift.flowGraphOutputDirectory` and `evaluationOutputDirectory` are
+/// `RailtracksSwift.flowGraphOutputDirectory`, `evaluationOutputDirectory` and
+/// `eventsOutputDirectory` are
 /// `nonisolated(unsafe) static var`s documented "configure once at app startup" — and several suites
 /// reassign them to redirect a flow's trace. `.serialized` on an individual suite only orders the
 /// tests *within* that suite; two independent suites still run concurrently (measured), which let one

@@ -531,6 +531,61 @@ RailtracksSwift.flowGraphOutputDirectory = URL(fileURLWithPath: "/custom/path")
 RailtracksSwift.debugMessageFileEnabled = false
 ```
 
+## Observability Events
+
+Alongside the flow-graph trace, every run publishes a stream of structured observability
+events — `node.*`, `session.*`, `llm.*` and `middleware.*` — mirroring the Python engine's
+event model. Subscribe to `eventPublisher` and process them however you like:
+
+```swift
+let cancellable = flow.eventPublisher.sink { event in
+    print(event.eventType, event.payload)
+}
+```
+
+Pass `RTSFlow(title:emitsEvents: false)` to turn the stream off; payloads are then never built,
+so a flow with no consumer pays no encoding cost.
+
+### Writing events to a file
+
+`RTSEventWriter` is a ready-made receiver that appends the stream to a JSONL file — one JSON
+object per line, named for the session. Wire it up yourself; any number of other subscribers
+can read the same stream alongside it.
+
+```swift
+let flow = RTSFlow(title: "Support")
+
+let eventWriter = RTSEventWriter()
+eventWriter.subscribe(to: flow.eventPublisher)   // before `run` — the stream has no replay
+
+let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+```
+
+That is the whole wiring. Each run ends with a `session.completed` event, and writing it closes
+the file — so there is nothing to remember per run. To use the file, wait for it:
+
+```swift
+eventWriter.fileURLPublisher
+    .sink { result in
+        if case .success(let url) = result {
+            print("events written to \(url.path)")
+        }
+    }
+    .store(in: &subscriptions)
+```
+
+Files land in an `events` folder beside `sessions` and `evaluations`, configurable at startup:
+
+```swift
+RailtracksSwift.eventsOutputDirectory = URL(fileURLWithPath: "/custom/path")
+```
+
+Two runs on the same flow share a session id, so the second reopens the same file in append
+mode and you get one file per session. Call `await eventWriter.finish()` when the writer is
+done with for good — it drops the subscription and closes a file left open by a run that never
+completed. The writer never throws: a write failure is logged and reported through
+`fileURLPublisher` and `finish()`, never raised into your run.
+
 ## Package Dependencies
 
 - [swift-conduit](https://github.com/RailtownAI/Conduit) — LLM backend (OpenAI and OpenRouter)
