@@ -224,7 +224,10 @@ private extension RTSValue {
     }
 }
 
-private extension RTSMessage {
+/// Internal rather than private: the observability event model reuses `toFlowGraphMessage()`
+/// so the `{role, content}` message shape has exactly one converter. See
+/// `Observability/Events/RTSLLMEvents.swift`.
+extension RTSMessage {
     /// Tool names in the message log are the provider-facing ones and are *deliberately* not mapped
     /// back to the authored spelling.
     ///
