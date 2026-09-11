@@ -556,11 +556,10 @@ the thread running your agents, so a slow subscriber can never stall node execut
 `.receive(on:)` for your own queue on top if you like (`.main` for UI work is safe). Order is
 preserved either way.
 
-The trade-off is that delivery is asynchronous. `run` waits for the backlog before returning,
-so the stream is complete once a run ends; if you need that guarantee at any other moment —
-say, tearing a subscriber down mid-flow — call `await flow.flushEvents()` first. Note it
-covers the library's queue only: a subscriber that adds its own `receive(on:)` must drain that
-hop itself.
+Delivery is therefore asynchronous. `run` waits for the backlog before returning, so the stream
+is complete once a run ends; at any other moment — tearing a subscriber down mid-flow, say —
+call `await flow.flushEvents()` first. It covers the library's queue only: a subscriber that
+adds its own `receive(on:)` drains that hop itself.
 
 ### Writing events to a file
 
@@ -593,9 +592,9 @@ RailtracksSwift.outputDirectory = URL(fileURLWithPath: "/custom/path")
 // → /custom/path/sessions, /custom/path/events, /custom/path/evaluations
 ```
 
-The subfolder names are fixed and the three per-artifact properties are read-only, so the layout
-is something a consumer can rely on rather than three knobs that can drift apart. Missing
-directories are created on first write.
+`flowGraphOutputDirectory`, `eventsOutputDirectory` and `evaluationOutputDirectory` are
+read-only and derive from the root; the subfolder names are fixed. Missing directories are
+created on first write.
 
 Two runs on the same flow share a session id, so the second reopens the same file in append
 mode and you get one file per session. The writer never throws: a write failure is logged and
@@ -615,10 +614,10 @@ RTSFlow(title: "Support", emitsEvents: false)               // no stream at all
 To handle events yourself — your own file format, an upload, a live view — subscribe to
 `eventPublisher`. That works whether or not the built-in log is on.
 
-`RTSEventWriter` is read-only from outside: you can observe `flow.eventWriter` (its
-`fileURLPublisher`, `lineCount`, `droppedEventCount`, `lateEventCount`), but only a flow can
-create, subscribe or close one. That keeps a second writer from resolving to the same file path
-and interleaving its writes with the flow's.
+`RTSEventWriter` is observable but not constructible: `flow.eventWriter` exposes
+`fileURLPublisher`, `lineCount`, `droppedEventCount` and `lateEventCount`, while only a flow can
+create, subscribe or close one. A second writer would resolve to the same file path and
+interleave its writes with the flow's.
 
 ## Package Dependencies
 
