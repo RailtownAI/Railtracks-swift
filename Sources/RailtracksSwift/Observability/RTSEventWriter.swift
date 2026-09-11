@@ -93,6 +93,7 @@ public actor RTSEventWriter {
     /// these either starts a new run or breaks the invariant — see ``noteArrival(of:)``.
     private var closedScopeIDs: Set<String> = []
     private var lateArrivalCount = 0
+    private var overlappingRunCount = 0
 
     /// - Parameters:
     ///   - directory: Where to write. Defaults to ``RailtracksSwift/eventsOutputDirectory``,
@@ -289,6 +290,24 @@ public actor RTSEventWriter {
     /// Warns once per close, by dropping the scope on the way through: the file is being
     /// reopened, so it is no longer closed. Log, never throw.
     private func noteArrival(of event: RTSEvent) {
+        if event.eventType == RTSSessionStartedEvent.eventTypeName,
+           handles[event.scopeID] != nil {
+            // A run started while this scope's file was still open, so two runs on one flow are
+            // in flight at once. They share a `scope_id` and therefore a file, and their events
+            // will interleave into overlapping `session.started`/`session.completed` brackets —
+            // readable by `stamp` and by node id, but not as one session per file.
+            //
+            // A precise detector: a first run finds no handle, and a sequential second run finds
+            // the handle closed. Only overlap reaches here.
+            overlappingRunCount += 1
+            log.warning(
+                """
+                ⚠️📮 a second run started on this flow while the previous one was still \
+                writing — both share scope \(event.scopeID), so the log will interleave two \
+                sessions
+                """
+            )
+        }
         guard closedScopeIDs.remove(event.scopeID) != nil else {
             return
         }
@@ -444,6 +463,12 @@ public actor RTSEventWriter {
     /// run and a file grew after being published as complete — see ``noteArrival(of:)``.
     public var lateEventCount: Int {
         lateArrivalCount
+    }
+
+    /// Runs that began on this flow while a previous run was still writing. Non-zero means the
+    /// file holds overlapping sessions rather than one bracket per run — see ``noteArrival(of:)``.
+    public var overlappingRunEventCount: Int {
+        overlappingRunCount
     }
 
     /// Events the queue discarded because it was full.

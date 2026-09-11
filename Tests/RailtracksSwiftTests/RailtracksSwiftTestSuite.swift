@@ -45,10 +45,10 @@ extension Trait where Self == RedirectsOutput {
 /// file via `extension RailtracksSwiftTestSuite { ... }`, so `.serialized` here applies to all of them.
 ///
 /// Why the target must be serialized: the library exposes process-global configuration —
-/// `RailtracksSwift.flowGraphOutputDirectory`, `evaluationOutputDirectory` and
-/// `eventsOutputDirectory` are
-/// `nonisolated(unsafe) static var`s documented "configure once at app startup" — and several suites
-/// reassign them to redirect a flow's trace. `.serialized` on an individual suite only orders the
+/// `RailtracksSwift.outputDirectory` is a `nonisolated(unsafe) static var` documented "configure
+/// once at app startup", and `flowGraphOutputDirectory` / `eventsOutputDirectory` /
+/// `evaluationOutputDirectory` derive from it — and several suites reassign it to redirect a
+/// flow's output. `.serialized` on an individual suite only orders the
 /// tests *within* that suite; two independent suites still run concurrently (measured), which let one
 /// suite's flow write its trace into another suite's output directory moments before that suite's
 /// `defer` deleted it. The result was `DuplicateNodeIdTests` failing roughly one run in four with

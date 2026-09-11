@@ -83,6 +83,14 @@ public class RTSFlow: @unchecked Sendable {
     ///     .store(in: &subscriptions)
     /// ```
     ///
+    /// Successive runs give one bracket each. **Overlapping** runs do not: two `run` calls in
+    /// flight on the same flow share a session id and therefore a file, so their events
+    /// interleave into overlapping `session.started`/`session.completed` pairs. Nothing is lost
+    /// — `stamp` and the node ids still separate them — but the file is no longer one session,
+    /// and the writer logs a warning and counts it on `overlappingRunEventCount`. Use a flow per
+    /// concurrent run if you need one session per file. (The flow-graph trace fares worse here:
+    /// it is named per session too, so concurrent runs overwrite one another.)
+    ///
     /// - Important: do not construct a second ``RTSEventWriter`` for a flow that already has
     ///   one. Both would resolve to the same `<session id>.jsonl` and interleave their writes.
     ///   Pass `savesEvents: false` if you want to own the writer yourself. Likewise avoid

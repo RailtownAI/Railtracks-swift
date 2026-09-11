@@ -742,6 +742,35 @@ extension RailtracksSwiftTestSuite {
             #expect(await writer.lateEventCount == 0)
         }
 
+        @Test("overlapping runs on one flow are flagged, sequential ones are not")
+        func overlappingRunsAreFlagged() async throws {
+            let (base, eventsDirectory) = Self.makeTemporaryDirectory()
+            defer {
+                try? FileManager.default.removeItem(at: base)
+            }
+
+            let subject = PassthroughSubject<RTSEvent, Never>()
+            let writer = RTSEventWriter(directory: eventsDirectory)
+            writer.subscribe(to: subject.eraseToAnyPublisher())
+
+            // Two sequential brackets: the file closes between them, so this is the ordinary
+            // re-arm path and must not count.
+            for _ in 0..<2 {
+                subject.send(Self.event(RTSSessionStartedEvent.eventTypeName, scopeID: "scope"))
+                subject.send(Self.event(RTSSessionCompletedEvent.eventTypeName, scopeID: "scope"))
+            }
+            // Then a second `session.started` while the bracket is still open — two `run` calls
+            // in flight on one flow.
+            subject.send(Self.event(RTSSessionStartedEvent.eventTypeName, scopeID: "scope"))
+            subject.send(Self.event(RTSSessionStartedEvent.eventTypeName, scopeID: "scope"))
+            subject.send(Self.event(RTSSessionCompletedEvent.eventTypeName, scopeID: "scope"))
+            _ = await writer.finish()
+
+            // Exactly one: the three sequential starts must contribute nothing, so a count of 3
+            // would mean the detector is firing on the ordinary re-arm path too.
+            #expect(await writer.overlappingRunEventCount == 1)
+        }
+
         @Test("a writer is one-shot: a run after finish is not recorded")
         func writerIsOneShot() async throws {
             let (base, eventsDirectory) = Self.makeTemporaryDirectory()
