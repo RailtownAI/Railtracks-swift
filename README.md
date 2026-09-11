@@ -524,12 +524,17 @@ The JSON schema is consumed by the Railtracks Python visualizer.
 Set these once at app startup before any flow runs:
 
 ```swift
-// Directory where flow graph JSON files are written. Defaults to the app's Documents directory.
-RailtracksSwift.flowGraphOutputDirectory = URL(fileURLWithPath: "/custom/path")
+// Root for everything the library writes. Defaults to the app's Documents directory.
+// Fixed subfolders beneath it: `sessions` (traces), `events` (event logs), `evaluations`.
+RailtracksSwift.outputDirectory = URL(fileURLWithPath: "/custom/path")
 
 // Set to false to suppress per-run debug message files (DEBUG builds only).
 RailtracksSwift.debugMessageFileEnabled = false
 ```
+
+`flowGraphOutputDirectory`, `eventsOutputDirectory` and `evaluationOutputDirectory` are derived
+and read-only — set the root instead, so redirecting one artifact cannot leave the others
+behind.
 
 ## Observability Events
 
@@ -580,11 +585,17 @@ flow.eventWriter?.fileURLPublisher
     .store(in: &subscriptions)
 ```
 
-Files land in an `events` folder beside `sessions` and `evaluations`, configurable at startup:
+Files land in an `events` folder beside `sessions` and `evaluations`. Set the root once at
+startup and all three move together:
 
 ```swift
-RailtracksSwift.eventsOutputDirectory = URL(fileURLWithPath: "/custom/path")
+RailtracksSwift.outputDirectory = URL(fileURLWithPath: "/custom/path")
+// → /custom/path/sessions, /custom/path/events, /custom/path/evaluations
 ```
+
+The subfolder names are fixed and the three per-artifact properties are read-only, so the layout
+is something a consumer can rely on rather than three knobs that can drift apart. Missing
+directories are created on first write.
 
 Two runs on the same flow share a session id, so the second reopens the same file in append
 mode and you get one file per session. The writer never throws: a write failure is logged and
@@ -601,12 +612,13 @@ RTSFlow(title: "Support", savesTrace: false, savesEvents: true)  // event log, n
 RTSFlow(title: "Support", emitsEvents: false)               // no stream at all
 ```
 
-To handle events yourself, subscribe to `eventPublisher` — that works whether or not the
-built-in log is on. To write your *own* file, pass `savesEvents: false` first and construct an
-`RTSEventWriter` with your own `directory:`; two writers on one flow would otherwise resolve to
-the same path and interleave their writes. A writer you own is subscribed with
-`subscribe(to: flow.eventPublisher)` **before** `run` (the stream has no replay) and torn down
-with `await writer.finish()`.
+To handle events yourself — your own file format, an upload, a live view — subscribe to
+`eventPublisher`. That works whether or not the built-in log is on.
+
+`RTSEventWriter` is read-only from outside: you can observe `flow.eventWriter` (its
+`fileURLPublisher`, `lineCount`, `droppedEventCount`, `lateEventCount`), but only a flow can
+create, subscribe or close one. That keeps a second writer from resolving to the same file path
+and interleaving its writes with the flow's.
 
 ## Package Dependencies
 

@@ -207,11 +207,13 @@ extension RailtracksSwiftTestSuite {
 
         @Test("evaluate persists a report file to evaluationOutputDirectory")
         func evaluatePersists() async throws {
-            let dir = FileManager.default.temporaryDirectory
+            let base = FileManager.default.temporaryDirectory
                 .appendingPathComponent("rts-eval-\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: dir) }
-            RailtracksSwift.evaluationOutputDirectory = dir
+            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: base) }
+            RailtracksSwift.outputDirectory = base
+            // Derived, not set: reports land in the fixed `evaluations` subfolder.
+            let dir = RailtracksSwift.evaluationOutputDirectory
 
             let point = dataPoint(agent: "Triage", tools: [toolCall("search", runtime: 0.3, status: .completed)])
             let reports = await RTSEvaluation.evaluate(

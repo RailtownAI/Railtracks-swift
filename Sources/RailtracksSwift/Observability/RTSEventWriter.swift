@@ -18,31 +18,31 @@ import Foundation
 /// event stream is already a multicast Combine publisher — the fan-out, registry and inline
 /// listener tiers Python builds by hand are what `eventPublisher` already is.
 ///
-/// The library ships this writer; **the app owns its setup and its lifetime**:
+/// **`RTSFlow` owns one and manages its lifetime** — it constructs the writer in `init`,
+/// subscribes it, and lets it run. An app reads it through `RTSFlow.eventWriter`:
 ///
 /// ```swift
 /// let flow = RTSFlow(title: "Support")
-/// let eventWriter = RTSEventWriter()
-/// eventWriter.subscribe(to: flow.eventPublisher)
 /// let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+/// flow.eventWriter?.fileURLPublisher.sink { /* … */ }
 /// ```
+///
+/// That is why ``init(directory:queueCapacity:)``, ``subscribe(to:)`` and ``finish()`` are
+/// internal while the observation surface is public: each of the three is a footgun from
+/// outside. A second writer would resolve to the same `<scope_id>.jsonl` and interleave its
+/// writes; a second `subscribe` is refused; and `finish()` is terminal, so it would stop every
+/// later run on that flow from being recorded. Apps that want their own handling subscribe to
+/// `RTSFlow.eventPublisher`, which this writer claims no exclusivity over.
+///
+/// Subscribing in the flow's `init` also means the built-in writer cannot be late —
+/// `eventPublisher` has no replay, so a writer attached after a run begins would silently lose
+/// `session.started` and everything before it.
 ///
 /// **The file closes itself.** Each run ends with `session.completed`, and writing that event
 /// closes the file and publishes it on ``fileURLPublisher`` — mirroring the Python engine,
 /// which drains and shuts its writers down in the `finally` of every top-level call. The
 /// subscription stays live afterwards, so a second run on the same flow reopens the same file
 /// in append mode. Nothing has to be remembered per run.
-///
-/// So ``finish()`` is teardown, not a correctness step: call it when the writer is done with
-/// for good, to drop the subscription and close a file left open by a run that never finished.
-///
-/// Any number of other receivers can subscribe to the same publisher alongside it and process
-/// the stream however they like — this writer claims no exclusivity over it.
-///
-/// One contract the caller has to honour, a consequence of app-side ownership:
-/// **subscribe before calling `run`.** `eventPublisher` is a plain `PassthroughSubject` with no
-/// replay, so a writer attached after a run has begun silently loses `session.started` and
-/// everything before it. Attach it as soon as the flow exists.
 ///
 /// To *read* a file, wait for it on ``fileURLPublisher`` rather than assuming it is closed the
 /// instant `run` returns. Every event is enqueued synchronously before `run` returns, but the
@@ -101,7 +101,7 @@ public actor RTSEventWriter {
     ///     oldest are dropped. Matches the Python observer's per-writer bound. Note this bounds
     ///     an event *count*, not bytes — an `llm.invocation` payload carries a whole serialized
     ///     message history, so the memory behind a full queue is not small.
-    public init(
+    init(
         directory: URL? = nil,
         queueCapacity: Int = 10_000
     ) {
@@ -136,7 +136,7 @@ public actor RTSEventWriter {
     ///   buffer append here would stall the node invocation that published the event, and
     ///   anything that emitted would deadlock. All file I/O happens on the consumer task
     ///   instead. Same structure, and the same reason, as `RTSFlowGraphCollector`.
-    public nonisolated func subscribe(to publisher: AnyPublisher<RTSEvent, Never>) {
+    nonisolated func subscribe(to publisher: AnyPublisher<RTSEvent, Never>) {
         let cancellable = publisher.sink { [queue] event in
             queue.enqueue(event)
         }
@@ -180,7 +180,7 @@ public actor RTSEventWriter {
     /// - Returns: the file that was written, or `nil` when no event ever arrived so no file was
     ///   created. `.failure` carries the write error, with the attempted path.
     @discardableResult
-    public func finish() async -> Outcome? {
+    func finish() async -> Outcome? {
         guard !isFinished else {
             return currentOutcome()
         }

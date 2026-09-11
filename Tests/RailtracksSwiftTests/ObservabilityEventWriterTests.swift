@@ -115,15 +115,26 @@ extension RailtracksSwiftTestSuite {
 
         @Test("the event output directory is redirected away from Documents")
         func outputDirectoryIsRedirected() {
-            // This suite is nested inside `RailtracksSwiftTestSuite`, so the assertion is really
-            // about `RedirectsEventOutput.isRecursive` reaching nested suites. `RTSFlow` builds
-            // its own writer against this global, so if the trait ever stops propagating the
-            // whole target starts writing into the developer's `~/Documents/events`.
-            #expect(RailtracksSwift.eventsOutputDirectory == RedirectsEventOutput.directory)
+            // This suite is nested inside `RailtracksSwiftTestSuite`, so this is really about
+            // `RedirectsOutput.isRecursive` reaching nested suites. `RTSFlow` builds its own
+            // writer against this root, so if the trait ever stops propagating, the whole target
+            // starts writing into the developer's `~/Documents`.
+            //
+            // Asserted as "somewhere under the temporary directory" rather than as the trait's
+            // exact path: other tests in this serialized suite assign `outputDirectory`
+            // themselves, and the trait's job is to cover the ones that do not.
+            #expect(
+                RailtracksSwift.outputDirectory.path
+                    .hasPrefix(FileManager.default.temporaryDirectory.path)
+            )
             #expect(
                 RailtracksSwift.eventsOutputDirectory.path
                     .hasPrefix(FileManager.default.temporaryDirectory.path)
             )
+            // The subfolder layout is a library invariant, not something an app composes.
+            #expect(RailtracksSwift.eventsOutputDirectory.lastPathComponent == "events")
+            #expect(RailtracksSwift.flowGraphOutputDirectory.lastPathComponent == "sessions")
+            #expect(RailtracksSwift.evaluationOutputDirectory.lastPathComponent == "evaluations")
         }
 
         // MARK: - The built-in writer on RTSFlow
@@ -141,7 +152,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("savesEvents follows savesTrace when it is not given", .timeLimit(.minutes(1)))
         func savesEventsFollowsSavesTrace() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let tracing = RTSFlow(title: "BuiltInFollowsTraceOn")
             #expect(tracing.eventWriter != nil)
@@ -186,7 +197,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("two runs append to the built-in writer's single file", .timeLimit(.minutes(1)))
         func builtInWriterAppendsAcrossRuns() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "BuiltInAppends")
             let root = StubOrchestrator(nodeName: "Root") { _, _ in
@@ -254,7 +265,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterMatchesStream")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -288,7 +299,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterDrain")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -312,7 +323,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterOneLine")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -349,7 +360,7 @@ extension RailtracksSwiftTestSuite {
                 try? FileManager.default.removeItem(at: base)
             }
             #expect(!FileManager.default.fileExists(atPath: eventsDirectory.path))
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterMakesDirectory")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -371,7 +382,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterNaming")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -393,7 +404,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterAppends")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -495,7 +506,7 @@ extension RailtracksSwiftTestSuite {
             // A regular file where the writer expects a directory: `createDirectory` fails.
             let blocker = base.appendingPathComponent("blocked")
             try Data("not a directory".utf8).write(to: blocker)
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterUnwritable")
             let writer = RTSEventWriter(directory: blocker.appendingPathComponent("events"))
@@ -564,7 +575,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterAutoClose")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -591,7 +602,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterReArm")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -674,7 +685,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterOneShot")
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -717,7 +728,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterDisabled", emitsEvents: false)
             let writer = RTSEventWriter(directory: eventsDirectory)
@@ -739,7 +750,7 @@ extension RailtracksSwiftTestSuite {
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: "WriterLate")
             let writer = RTSEventWriter(directory: eventsDirectory)

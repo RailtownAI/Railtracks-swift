@@ -88,7 +88,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("A run emits the full session and node lifecycle, in order")
         func lifecycleSequence() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "Root") { _, _ in
                 ["result": .string("done")]
@@ -112,7 +112,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("session.started carries the flow's identity and configuration")
         func sessionStartedPayload() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "EntryPoint") { _, _ in
                 [:]
@@ -137,7 +137,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("session.completed reports success and a duration")
         func sessionCompletedSuccess() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "Root") { _, _ in
                 [:]
@@ -159,7 +159,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("duration_seconds is exactly the span between the two session timestamps")
         func durationMatchesTimestampSpan() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "Root") { _, _ in
                 [:]
@@ -202,7 +202,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("A nested node's spatial parent is its caller's invocation id")
         func nestedParentage() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let child = StubOrchestrator(nodeName: "Child") { _, _ in
                 ["result": .string("child")]
@@ -244,7 +244,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("A throwing node emits failure and destruction, and fails the session")
         func failurePath() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "Boom") { _, _ in
                 throw StubError()
@@ -281,7 +281,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("A session-build failure is still bracketed by a session.completed")
         func sessionBuildFailureIsBracketed() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             // `run(agent:…)` builds the session eagerly and throws *before* awaiting the
             // collector, so that path cannot rely on the shared emit at the end of the
@@ -315,7 +315,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("Every exit path emits exactly one session.completed")
         func exactlyOneCompletionPerRun() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             // The invocation `catch` stores its error in `outcome` and falls through to the
             // shared emit, so it must not emit its own — that would double-report the run.
@@ -337,7 +337,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("emitsEvents: false publishes nothing")
         func emissionDisabled() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "Root") { _, _ in
                 ["result": .string("done")]
@@ -353,7 +353,7 @@ extension RailtracksSwiftTestSuite {
 
         @Test("The JSON trace is unaffected by whether events are emitted")
         func traceUnaffectedByEmission() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             func runAndLoadTrace(emitsEvents: Bool) async throws -> RTSFlowGraph {
                 let root = StubOrchestrator(nodeName: "Root") { _, _ in

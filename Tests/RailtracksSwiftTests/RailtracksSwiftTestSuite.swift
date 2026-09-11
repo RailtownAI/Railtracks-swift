@@ -9,34 +9,34 @@ import Foundation
 import Testing
 @testable import RailtracksSwift
 
-/// Redirects `RailtracksSwift.eventsOutputDirectory` into the temporary directory before every
-/// test in the target.
+/// Redirects `RailtracksSwift.outputDirectory` into the temporary directory before every test in
+/// the target, so nothing the suite writes lands in the developer's `~/Documents`.
 ///
-/// `RTSFlow` builds its own `RTSEventWriter` whenever it saves a trace, and that writer resolves
-/// the global when nothing overrides it — which defaults to the developer's `~/Documents/events`.
-/// Without this, an ordinary `swift test` would drop a JSONL file there for every flow the suite
-/// constructs. `isRecursive` is what carries it into the nested suites, since every suite in this
-/// target hangs off the root below.
+/// It defaults there, and `RTSFlow` now builds its own `RTSEventWriter` whenever it saves a
+/// trace — so without this, an ordinary `swift test` would drop a JSONL file into
+/// `~/Documents/events` for every flow the suite constructs, plus traces under `sessions`.
+/// Setting the one root covers all three artifacts. `isRecursive` is what carries it into the
+/// nested suites, since every suite in this target hangs off the root below.
 ///
 /// - Note: tests clean up by deleting a uniquely-named directory they created themselves. Nothing
 ///   should ever `removeItem` this path: if the redirect were to stop applying, that would delete
 ///   a real user folder.
-struct RedirectsEventOutput: SuiteTrait, TestTrait {
+struct RedirectsOutput: SuiteTrait, TestTrait {
     var isRecursive: Bool {
         true
     }
 
-    /// Where the suite's event logs go. Named once so a test can assert the redirect applied.
+    /// Where the suite writes. Named once so a test can assert the redirect applied.
     static let directory: URL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("rts-test-events", isDirectory: true)
+        .appendingPathComponent("rts-test-output", isDirectory: true)
 
     func prepare(for test: Test) async throws {
-        RailtracksSwift.eventsOutputDirectory = RedirectsEventOutput.directory
+        RailtracksSwift.outputDirectory = RedirectsOutput.directory
     }
 }
 
-extension Trait where Self == RedirectsEventOutput {
-    static var redirectsEventOutput: Self {
+extension Trait where Self == RedirectsOutput {
+    static var redirectsOutput: Self {
         Self()
     }
 }
@@ -57,6 +57,6 @@ extension Trait where Self == RedirectsEventOutput {
 /// Serializing is cheap here (the target runs in ~1–2s, dominated by one AppleAI probe) and removes
 /// the whole class of cross-suite interference. When adding a suite, nest it into this root the same
 /// way; a suite declared at file scope opts itself out and may race with the rest.
-@Suite("RailtracksSwift", .serialized, .redirectsEventOutput)
+@Suite("RailtracksSwift", .serialized, .redirectsOutput)
 struct RailtracksSwiftTestSuite {
 }
