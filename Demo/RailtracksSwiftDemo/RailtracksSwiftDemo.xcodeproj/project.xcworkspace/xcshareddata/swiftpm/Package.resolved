@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/railtown-swift-logger.git",
       "state" : {
-        "revision" : "0b7aae4f9c6c92bfe053d5be7133c420de784e0a",
-        "version" : "0.3.0"
+        "revision" : "a177e6f0946f50d03428a6923bc6e6aff4123047",
+        "version" : "0.3.1"
       }
     },
     {

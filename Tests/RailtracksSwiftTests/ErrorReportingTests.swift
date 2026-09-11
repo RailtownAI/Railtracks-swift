@@ -32,7 +32,7 @@ extension RailtracksSwiftTestSuite {
         /// is a no-op and the identical error — case and associated value — rethrows.
         @Test("flow errors rethrow unchanged with RailtownLogger unconfigured")
         func flowErrorRethrowsUnchanged() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "Boom") { _, _ in
                 throw RTSError.missingInput("intentional test failure")
@@ -63,7 +63,7 @@ extension RailtracksSwiftTestSuite {
         /// public reset; the other tests here only assert the rethrow, which holds either way.
         @Test("a flow error's raise site reaches the upload payload")
         func raiseSiteReachesTheUploadPayload() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
             let mirror = FileManager.default.temporaryDirectory
                 .appendingPathComponent("railtown-mirror-\(UUID().uuidString)", isDirectory: true)
 
@@ -109,7 +109,7 @@ extension RailtracksSwiftTestSuite {
         /// the identical error.
         @Test("agent session failures rethrow unchanged with RailtownLogger unconfigured")
         func agentSessionFailureRethrowsUnchanged() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let agent = RTSAgent(llmProvider: .anthropic(modelIDString: "claude-test"))
             let flow = RTSFlow(title: "ErrorReportingSessionTest")

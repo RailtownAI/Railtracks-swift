@@ -29,8 +29,13 @@ public enum RTSSessionStatus: String, Sendable, Codable {
 /// `sessionID` appears both here and as the enclosing ``RTSEvent``'s `scopeID`, matching
 /// Python.
 public struct RTSSessionStartedEvent: RTSObservabilityEvent {
+    /// The wire name, owned here alongside the type it names, so a consumer matching on it
+    /// (``RTSEventWriter`` keys its per-run file handling off these) shares one definition
+    /// rather than repeating the literal.
+    public static let eventTypeName = "session.started"
+
     public var eventType: String {
-        "session.started"
+        RTSSessionStartedEvent.eventTypeName
     }
 
     public let timestamp: Date
@@ -90,8 +95,12 @@ public struct RTSSessionStartedEvent: RTSObservabilityEvent {
 /// Mirrors the Python engine's `SessionCompleted` (`events/session.py`). `error` is a
 /// stringified exception and is set only when `status` is ``RTSSessionStatus/failure``.
 public struct RTSSessionCompletedEvent: RTSObservabilityEvent {
+    /// The wire name — see ``RTSSessionStartedEvent/eventTypeName``. This one is the event
+    /// stream's end-of-run marker, so more than one consumer keys off it.
+    public static let eventTypeName = "session.completed"
+
     public var eventType: String {
-        "session.completed"
+        RTSSessionCompletedEvent.eventTypeName
     }
 
     public let timestamp: Date

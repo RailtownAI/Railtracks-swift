@@ -37,7 +37,7 @@ extension RailtracksSwiftTestSuite {
         /// `outputFileURLPublisher` rather than scanning the output directory — `flowGraphOutputDirectory`
         /// is a process-global that other suites' flows mutate concurrently, so a directory scan is racy.
         private func runAndLoadRun(title: String, root: some RTSOrchestratorNode) async throws -> RTSFlowRun {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let flow = RTSFlow(title: title)
             _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))

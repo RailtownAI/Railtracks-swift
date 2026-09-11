@@ -17,9 +17,21 @@ import Foundation
 /// **observability must never break execution.** Nothing here throws, and a failure to
 /// build a payload degrades to `null` rather than propagating.
 ///
-/// Concurrency follows `RTSNodeInvoker`'s established pattern — `@unchecked Sendable`
-/// backed by a real `NSLock`, because `PassthroughSubject.send` is not safe under
-/// concurrent calls and one emitter is shared by every node in a flow.
+/// **Delivery is isolated from execution.** One emitter is shared by every node in a flow, and
+/// `PassthroughSubject.send` runs its subscribers' sinks synchronously on the calling thread —
+/// so publishing inline would put arbitrary subscriber code on the invocation's critical path.
+/// Worse, serializing that with a lock (the previous design) held the lock *across* the sinks,
+/// so one slow subscriber blocked every other node's `emit` and stalled the whole flow.
+///
+/// Instead, `emit` builds the envelope and hands it to ``deliveryQueue``. The invoking thread
+/// does bounded work and returns; the send, and every subscriber's sink, runs on that queue.
+/// Nothing an app attaches to `RTSFlow.eventPublisher` can slow a run down.
+///
+/// The queue is **serial**, so events reach subscribers in the order they were emitted — this
+/// is deliberately not a concurrent queue and deliberately not a `Task` per event, which is
+/// the ordering bug `docs/duplicate-node-id.md` records. It also replaces the lock outright:
+/// serialization is what the lock was for, so `subject.send` and ``announcedMiddleware`` are
+/// now confined to the queue rather than guarded by one.
 final class RTSEventEmitter: @unchecked Sendable {
 
     /// The enclosing session's identifier, used as every envelope's `scope_id`.
@@ -31,11 +43,12 @@ final class RTSEventEmitter: @unchecked Sendable {
     /// more than the event, and that happens before `emit` is reached.
     let isEnabled: Bool
     private let subject = PassthroughSubject<RTSEvent, Never>()
-    /// Guards both `subject.send` and `announcedMiddleware`.
-    private let publishLock = NSLock()
+    /// Serial, so delivery order matches emission order. Every `subject.send` and every
+    /// access to ``announcedMiddleware`` happens here and nowhere else.
+    private let deliveryQueue = DispatchQueue(label: "ai.railtown.railtracks.events")
     /// Middleware type ids already announced, so `middleware.creation` fires once per
     /// definition rather than once per invocation — matching Python's `_has_registered`
-    /// guard in `middleware/core.py`.
+    /// guard in `middleware/core.py`. Confined to ``deliveryQueue``.
     private var announcedMiddleware: Set<String> = []
 
     init(
@@ -56,29 +69,27 @@ final class RTSEventEmitter: @unchecked Sendable {
     /// payload is not free — it JSON-encodes message histories — and a flow with events
     /// turned off should pay nothing.
     ///
-    /// - Important: `PassthroughSubject.send` runs its subscribers' sinks synchronously on
-    ///   the calling thread, and this holds a non-reentrant `NSLock` across it. So a sink
-    ///   must not re-enter `emit` — directly or transitively — or the thread deadlocks on a
-    ///   lock it already owns. Out of reach for an external subscriber today, since `emit` is
-    ///   internal and a node invocation is `async`, but any *internal* subscriber that emits
-    ///   would hit it. A sink should also stay cheap for the simpler reason that slow work
-    ///   inside one blocks the invocation that published the event.
+    /// The envelope is built here, on the calling thread, so `stamp` records when the event
+    /// *happened* rather than when it was delivered. Only the send is deferred.
+    ///
+    /// - Note: delivery is asynchronous, so an event is not necessarily in a subscriber's
+    ///   hands when this returns. Use ``flushDelivery()`` where that matters.
     func emit(_ event: some RTSObservabilityEvent) {
         guard isEnabled else {
             return
         }
-        // Built before the lock is taken: `encodePayload()` must not run inside the
-        // critical section, and nothing may suspend while the lock is held.
         let envelope = RTSEvent.session(event, sessionID: sessionID)
-        publishLock.lock()
-        defer {
-            publishLock.unlock()
+        deliveryQueue.async { [self] in
+            subject.send(envelope)
         }
-        subject.send(envelope)
     }
 
     /// Publishes `middleware.creation` the first time a given middleware definition is seen
     /// in this session, and does nothing on later calls.
+    ///
+    /// The envelope is built up front even though the dedupe may discard it, so its `stamp`
+    /// is the sighting instant rather than the queue's. A rail is announced once per session,
+    /// so the wasted build is bounded and rare.
     func emitMiddlewareCreationOnce(
         typeID: String,
         name: String
@@ -86,18 +97,36 @@ final class RTSEventEmitter: @unchecked Sendable {
         guard isEnabled else {
             return
         }
-        publishLock.lock()
-        let isFirstSighting = announcedMiddleware.insert(typeID).inserted
-        publishLock.unlock()
-        // Released before emitting: `NSLock` is not recursive, and `emit` takes it again.
-        guard isFirstSighting else {
-            return
-        }
-        emit(
+        let envelope = RTSEvent.session(
             RTSMiddlewareCreationEvent(
                 middlewareTypeID: typeID,
                 middlewareName: name
-            )
+            ),
+            sessionID: sessionID
         )
+        deliveryQueue.async { [self] in
+            // Reading and writing the set on the queue is what makes it safe without a lock,
+            // and keeps the dedupe ordered against the sends it gates.
+            guard announcedMiddleware.insert(typeID).inserted else {
+                return
+            }
+            subject.send(envelope)
+        }
+    }
+
+    /// Blocks until every event emitted before this call has been handed to subscribers.
+    ///
+    /// A barrier on the serial delivery queue: work enqueued earlier runs first, so when this
+    /// returns the backlog is drained. Needed because ``emit(_:)`` is fire-and-forget — a
+    /// caller tearing a subscriber down right after a run would otherwise cut off the tail of
+    /// the stream, including `session.completed`.
+    /// Suspends rather than blocking: a `sync` barrier here would tie up a cooperative thread
+    /// for as long as the backlog takes, and every caller is already in an async context.
+    func flushDelivery() async {
+        await withCheckedContinuation { continuation in
+            deliveryQueue.async {
+                continuation.resume()
+            }
+        }
     }
 }

@@ -33,6 +33,10 @@ class MathViewModel {
     /// per run — the model outlives them and accumulates each run as its own root.
     @MainActor let nodeTree = RTSNodeTreeViewModel()
 
+    /// Where the run's observability events were written, surfaced so the demo shows the file
+    /// exists rather than only claiming it does.
+    var eventLogSummary: String = ""
+
     private var cancellables = Set<AnyCancellable>()
 
     func startPrompt() {
@@ -47,6 +51,10 @@ class MathViewModel {
         let flow = RTSFlow(title: "Math Workflow")
         subscribe(to: flow)
         nodeTree.attach(to: flow)
+
+        // No wiring needed: the flow builds and subscribes its own writer, because `savesEvents`
+        // follows `savesTrace`. This just watches the file it produces.
+        observeEventLog(from: flow.eventWriter)
 
         let workflow = MathWorkflow(
             agentA: Self.mathAgent(named: "Math Agent A"),
@@ -79,6 +87,31 @@ class MathViewModel {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.updateStep(name: status.nodeName, state: status.state)
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Reports each event log as the flow's own writer closes it — which happens on
+    /// `session.completed`, so this fires while the run is still wrapping up.
+    private func observeEventLog(from eventWriter: RTSEventWriter?) {
+        eventLogSummary = ""
+        guard let eventWriter else {
+            return
+        }
+        eventWriter.fileURLPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] outcome in
+                switch outcome {
+                case .success(let url):
+                    let lineCount = (try? String(contentsOf: url, encoding: .utf8))?
+                        .split(separator: "\n")
+                        .count ?? 0
+                    self?.eventLogSummary = "\(lineCount) events → \(url.path)"
+                    Log.debug("event log written: \(url.path)")
+                case .failure(let error):
+                    self?.eventLogSummary = "Event log failed: \(error)"
+                    Log.error("event log failed: \(error)")
+                }
             }
             .store(in: &cancellables)
     }

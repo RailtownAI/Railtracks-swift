@@ -48,16 +48,19 @@ extension RailtracksSwiftTestSuite {
 
         @Test("flow run creates a missing output directory and writes the report")
         func createsMissingOutputDirectory() async throws {
-            // A unique, nested path guaranteed not to exist — exercises intermediate-directory creation.
+            // A unique base guaranteed not to exist. Neither it nor the `sessions` subfolder the
+            // library derives from it is created up front, so the write has to make both —
+            // which is what `withIntermediateDirectories` is there for.
             let base = FileManager.default.temporaryDirectory
                 .appendingPathComponent("rts-test-\(UUID().uuidString)", isDirectory: true)
-            let outputDirectory = base.appendingPathComponent("sessions", isDirectory: true)
-            #expect(!FileManager.default.fileExists(atPath: outputDirectory.path))
+            #expect(!FileManager.default.fileExists(atPath: base.path))
             defer {
                 try? FileManager.default.removeItem(at: base)
             }
 
-            RailtracksSwift.flowGraphOutputDirectory = outputDirectory
+            RailtracksSwift.outputDirectory = base
+            let outputDirectory = RailtracksSwift.flowGraphOutputDirectory
+            #expect(!FileManager.default.fileExists(atPath: outputDirectory.path))
 
             let root = StubOrchestrator(nodeName: "Root") { _, _ in
                 ["result": .string("ok")]

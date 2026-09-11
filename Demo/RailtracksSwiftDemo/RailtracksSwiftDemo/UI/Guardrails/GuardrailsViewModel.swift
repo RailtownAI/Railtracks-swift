@@ -9,6 +9,7 @@ import Foundation
 import RailtracksSwift
 import RailtracksSwiftUI
 import FoundationModels
+import Combine
 import Logging
 
 /// Demo of input/output guardrails on a standard OpenAI agent:
@@ -55,7 +56,14 @@ class GuardrailsViewModel {
     /// screen in particular: a blocked input guardrail short-circuits before the LLM runs, so the
     /// agent shows as failed with no children beneath it.
     @MainActor let nodeTree = RTSNodeTreeViewModel()
-    
+
+    /// Where the run's observability events were written. This screen is the one that exercises
+    /// the `middleware.guard.*` family, so the log it produces is what the Python visualizer's
+    /// guardrail attribution reads.
+    var eventLogSummary: String = ""
+
+    private var cancellables = Set<AnyCancellable>()
+
     func isSelected(_ preset: Preset) -> Bool {
         preset.text == prompt
     }
@@ -76,6 +84,11 @@ class GuardrailsViewModel {
             let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
             let flow = RTSFlow(title: "Safe Support Assistant")
             await self?.nodeTree.attach(to: flow)
+
+            // No wiring needed: the flow builds and subscribes its own writer. This just
+            // watches the file it produces.
+            self?.observeEventLog(from: flow.eventWriter)
+
             do {
                 // Reject obvious prompt-injection first; otherwise redact PII before the model sees it.
                 let injectionGuard = try RTSBlockTextInputGuardrail(
@@ -113,5 +126,32 @@ class GuardrailsViewModel {
                 self?.promptResult = "Error: \(error)"
             }
         }
+    }
+
+    /// Reports the event log as the flow's own writer closes it, on `session.completed` —
+    /// including on the blocked path, which still emits that event.
+    private func observeEventLog(from eventWriter: RTSEventWriter?) {
+        eventLogSummary = ""
+        cancellables.removeAll()
+        guard let eventWriter else {
+            return
+        }
+        eventWriter.fileURLPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] outcome in
+                switch outcome {
+                case .success(let url):
+                    let events = (try? String(contentsOf: url, encoding: .utf8))?
+                        .split(separator: "\n") ?? []
+                    let guardEvents = events.filter { $0.contains("\"middleware.guard.") }.count
+                    self?.eventLogSummary =
+                        "\(events.count) events (\(guardEvents) guard) → \(url.path)"
+                    Log.debug("event log written: \(url.path)")
+                case .failure(let error):
+                    self?.eventLogSummary = "Event log failed: \(error)"
+                    Log.error("event log failed: \(error)")
+                }
+            }
+            .store(in: &cancellables)
     }
 }

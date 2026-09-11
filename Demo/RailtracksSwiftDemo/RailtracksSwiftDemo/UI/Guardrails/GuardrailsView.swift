@@ -56,6 +56,14 @@ struct GuardrailsView: View {
                 RTSNodeTreeView(viewModel: viewModel.nodeTree)
                     .frame(minHeight: 180)
             }
+
+            if !viewModel.eventLogSummary.isEmpty {
+                Text(viewModel.eventLogSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+            }
         }
         .padding()
     }

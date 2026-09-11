@@ -62,7 +62,18 @@ private final class LLMEventRecorder: @unchecked Sendable {
         }
     }
 
+    /// Flushes first: the emitter delivers asynchronously so that a subscriber cannot slow a
+    /// run down, which means events published moments ago may still be in flight. Folding the
+    /// flush into the accessor makes it impossible for a test to read a half-delivered stream.
     var events: [RTSEvent] {
+        get async {
+            await emitter.flushDelivery()
+            return delivered
+        }
+    }
+
+    /// The synchronous read. Split out because `NSLock` is unavailable from an async context.
+    private var delivered: [RTSEvent] {
         lock.lock()
         defer {
             lock.unlock()
@@ -71,15 +82,17 @@ private final class LLMEventRecorder: @unchecked Sendable {
     }
 
     var eventTypes: [String] {
-        events.map { $0.eventType }
+        get async {
+            await events.map { $0.eventType }
+        }
     }
 
-    func events(ofType eventType: String) -> [RTSEvent] {
-        events.filter { $0.eventType == eventType }
+    func events(ofType eventType: String) async -> [RTSEvent] {
+        await events.filter { $0.eventType == eventType }
     }
 
-    func first(ofType eventType: String) -> RTSEvent? {
-        events.first { $0.eventType == eventType }
+    func first(ofType eventType: String) async -> RTSEvent? {
+        await events.first { $0.eventType == eventType }
     }
 }
 
@@ -153,7 +166,7 @@ extension RailtracksSwiftTestSuite {
             )
 
             #expect(
-                recorder.eventTypes == [
+                await recorder.eventTypes == [
                     "llm.creation", "llm.invocation", "llm.response",
                     "llm.creation", "llm.invocation", "llm.response",
                 ]
@@ -164,7 +177,7 @@ extension RailtracksSwiftTestSuite {
         func noAssistantMessagesEmitsNothing() async {
             let recorder = LLMEventRecorder()
             await emit([message(.user, "hi")], into: recorder)
-            #expect(recorder.events.isEmpty)
+            #expect(await recorder.events.isEmpty)
         }
 
         @Test("llm.response carries what the provider reported")
@@ -175,7 +188,7 @@ extension RailtracksSwiftTestSuite {
                 into: recorder
             )
 
-            let response = try #require(recorder.first(ofType: "llm.response"))
+            let response = try #require(await recorder.first(ofType: "llm.response"))
             #expect(response.payload["reported_model_name"] == .string("gpt-4o-2024"))
             #expect(response.payload["input_tokens"] == .number(12))
             #expect(response.payload["output_tokens"] == .number(3))
@@ -204,12 +217,12 @@ extension RailtracksSwiftTestSuite {
             )
 
             // `llm.creation.llm_id` is what `llm.*.parent_llm_type_id` joins to.
-            let creationIDs = recorder.events(ofType: "llm.creation")
+            let creationIDs = await recorder.events(ofType: "llm.creation")
                 .compactMap { str($0.payload["llm_id"]) }
             #expect(creationIDs.count == 2)
             #expect(Set(creationIDs).count == 1, "llm_id identifies the model, not the trip")
 
-            let responses = recorder.events(ofType: "llm.response")
+            let responses = await recorder.events(ofType: "llm.response")
             let typeIDs = responses.compactMap { str($0.payload["parent_llm_type_id"]) }
             #expect(Set(typeIDs) == Set(creationIDs))
 
@@ -223,8 +236,8 @@ extension RailtracksSwiftTestSuite {
             let recorder = LLMEventRecorder()
             await emit([message(.assistant, "hello")], into: recorder)
 
-            let invocation = try #require(recorder.first(ofType: "llm.invocation"))
-            let response = try #require(recorder.first(ofType: "llm.response"))
+            let invocation = try #require(await recorder.first(ofType: "llm.invocation"))
+            let response = try #require(await recorder.first(ofType: "llm.response"))
             #expect(
                 invocation.payload["parent_llm_invoke_id"]
                     == response.payload["parent_llm_invoke_id"]
@@ -238,8 +251,9 @@ extension RailtracksSwiftTestSuite {
             await emit([message(.assistant, "hello")], nodeID: nodeID, into: recorder)
 
             // The key Python's visualizer uses to attribute an LLM call to a node.
-            for event in recorder.events(ofType: "llm.invocation")
-                + recorder.events(ofType: "llm.response") {
+            let invocations = await recorder.events(ofType: "llm.invocation")
+            let responses = await recorder.events(ofType: "llm.response")
+            for event in invocations + responses {
                 #expect(event.payload["spatial_parent_node_id"] == .string(nodeID.uuidString))
             }
         }
@@ -249,7 +263,7 @@ extension RailtracksSwiftTestSuite {
             let recorder = LLMEventRecorder()
             await emit([message(.assistant, "hello")], into: recorder)
 
-            let creation = try #require(recorder.first(ofType: "llm.creation"))
+            let creation = try #require(await recorder.first(ofType: "llm.creation"))
             #expect(creation.payload["spatial_parent_type"] == .string("none"))
             #expect(!creation.payload.keys.contains("parent_type"))
         }
@@ -263,8 +277,8 @@ extension RailtracksSwiftTestSuite {
 
             // Nothing observes the request moment — it happens inside Conduit — so it is
             // derived. The response time is real, carried through from the message.
-            let invocation = try #require(recorder.first(ofType: "llm.invocation"))
-            let response = try #require(recorder.first(ofType: "llm.response"))
+            let invocation = try #require(await recorder.first(ofType: "llm.invocation"))
+            let response = try #require(await recorder.first(ofType: "llm.response"))
             let requestedAt = try #require(
                 RTSEventTimestamp.date(from: str(invocation.payload["timestamp"]) ?? "")
             )
@@ -287,11 +301,11 @@ extension RailtracksSwiftTestSuite {
             )
 
             #expect(
-                recorder.eventTypes == [
+                await recorder.eventTypes == [
                     "llm.creation", "llm.invocation", "llm.response", "llm.failure",
                 ]
             )
-            let failure = try #require(recorder.first(ofType: "llm.failure"))
+            let failure = try #require(await recorder.first(ofType: "llm.failure"))
             #expect(failure.payload["exception_name"] == .string("StubLLMError"))
             // Everything accumulated when the error surfaced — the trip that actually threw
             // left no assistant message, so it cannot be singled out.
@@ -308,7 +322,7 @@ extension RailtracksSwiftTestSuite {
             // stream. Python's `LLMFailureEvent` comes only from inside the model call.
             await emit([], error: StubLLMError(), into: recorder)
 
-            #expect(recorder.events.isEmpty)
+            #expect(await recorder.events.isEmpty)
         }
 
         @Test("An error is reported once the session has been used")
@@ -319,7 +333,7 @@ extension RailtracksSwiftTestSuite {
             // it from the case above.
             await emit([message(.user, "hi")], error: StubLLMError(), into: recorder)
 
-            #expect(recorder.eventTypes == ["llm.failure"])
+            #expect(await recorder.eventTypes == ["llm.failure"])
         }
 
         // MARK: - Cost when disabled
@@ -339,7 +353,7 @@ extension RailtracksSwiftTestSuite {
                 error: nil
             )
 
-            #expect(recorder.events.isEmpty)
+            #expect(await recorder.events.isEmpty)
         }
 
         // NOTE: `emit` also guards on `isEnabled` *before* reconstructing, so a disabled flow
@@ -399,7 +413,7 @@ extension RailtracksSwiftTestSuite {
             // Placed after the body and before the terminal node event, so the LLM work sits
             // inside the node's own lifecycle — as it does in Python.
             #expect(
-                recorder.eventTypes == [
+                await recorder.eventTypes == [
                     "node.creation",
                     "node.invocation",
                     "llm.creation",
@@ -437,7 +451,7 @@ extension RailtracksSwiftTestSuite {
                 session: session
             )
 
-            #expect(recorder.events(ofType: "llm.response").isEmpty)
+            #expect(await recorder.events(ofType: "llm.response").isEmpty)
         }
     }
 }

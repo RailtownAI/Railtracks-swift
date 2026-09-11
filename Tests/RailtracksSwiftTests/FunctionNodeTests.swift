@@ -38,7 +38,7 @@ extension RailtracksSwiftTestSuite {
         /// A function node as the flow entry point returns its output (no agents involved).
         @Test("orchestrator as flow root returns its output")
         func functionRoot() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "Root") { input, _ in
                 ["result": .string("done:\(str(input["x"]) ?? "")")]
@@ -57,7 +57,7 @@ extension RailtracksSwiftTestSuite {
         func failedRunWritesTrace() async throws {
             struct StubError: Error {}
 
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let root = StubOrchestrator(nodeName: "Boom") { _, _ in
                 throw StubError()
@@ -90,7 +90,7 @@ extension RailtracksSwiftTestSuite {
         /// A function node calling another function node composes, with output propagating.
         @Test("function → function composes")
         func functionToFunction() async throws {
-            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
 
             let inner = StubOrchestrator(nodeName: "Inner") { _, _ in
                 ["result": .string("inner")]

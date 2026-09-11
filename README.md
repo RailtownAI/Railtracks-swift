@@ -524,12 +524,100 @@ The JSON schema is consumed by the Railtracks Python visualizer.
 Set these once at app startup before any flow runs:
 
 ```swift
-// Directory where flow graph JSON files are written. Defaults to the app's Documents directory.
-RailtracksSwift.flowGraphOutputDirectory = URL(fileURLWithPath: "/custom/path")
+// Root for everything the library writes. Defaults to the app's Documents directory.
+// Fixed subfolders beneath it: `sessions` (traces), `events` (event logs), `evaluations`.
+RailtracksSwift.outputDirectory = URL(fileURLWithPath: "/custom/path")
 
 // Set to false to suppress per-run debug message files (DEBUG builds only).
 RailtracksSwift.debugMessageFileEnabled = false
 ```
+
+`flowGraphOutputDirectory`, `eventsOutputDirectory` and `evaluationOutputDirectory` are derived
+and read-only — set the root instead, so redirecting one artifact cannot leave the others
+behind.
+
+## Observability Events
+
+Alongside the flow-graph trace, every run publishes a stream of structured observability
+events — `node.*`, `session.*`, `llm.*` and `middleware.*` — mirroring the Python engine's
+event model. Subscribe to `eventPublisher` and process them however you like:
+
+```swift
+let cancellable = flow.eventPublisher.sink { event in
+    print(event.eventType, event.payload)
+}
+```
+
+Pass `RTSFlow(title:emitsEvents: false)` to turn the stream off; payloads are then never built,
+so a flow with no consumer pays no encoding cost.
+
+**Observation cannot slow a run down.** Events are delivered on a private serial queue, not on
+the thread running your agents, so a slow subscriber can never stall node execution — add
+`.receive(on:)` for your own queue on top if you like (`.main` for UI work is safe). Order is
+preserved either way.
+
+Delivery is therefore asynchronous. `run` waits for the backlog before returning, so the stream
+is complete once a run ends; at any other moment — tearing a subscriber down mid-flow, say —
+call `await flow.flushEvents()` first. It covers the library's queue only: a subscriber that
+adds its own `receive(on:)` drains that hop itself.
+
+### Writing events to a file
+
+Every flow writes its event stream to a JSONL file — one JSON object per line, named for the
+session — through a built-in `RTSEventWriter`. There is nothing to wire:
+
+```swift
+let flow = RTSFlow(title: "Support")
+let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+```
+
+Each run ends with a `session.completed` event, and writing it closes the file, so there is
+nothing to remember per run either. To use the file, wait for it:
+
+```swift
+flow.eventWriter?.fileURLPublisher
+    .sink { result in
+        if case .success(let url) = result {
+            print("events written to \(url.path)")
+        }
+    }
+    .store(in: &subscriptions)
+```
+
+Files land in an `events` folder beside `sessions` and `evaluations`. Set the root once at
+startup and all three move together:
+
+```swift
+RailtracksSwift.outputDirectory = URL(fileURLWithPath: "/custom/path")
+// → /custom/path/sessions, /custom/path/events, /custom/path/evaluations
+```
+
+`flowGraphOutputDirectory`, `eventsOutputDirectory` and `evaluationOutputDirectory` are
+read-only and derive from the root; the subfolder names are fixed. Missing directories are
+created on first write.
+
+Two runs on the same flow share a session id, so the second reopens the same file in append
+mode and you get one file per session. The writer never throws: a write failure is logged and
+reported through `fileURLPublisher`, never raised into your run.
+
+### Turning it off, or owning it yourself
+
+`savesEvents` follows `savesTrace` unless you set it, so a flow that persists a trace also
+persists an event log:
+
+```swift
+RTSFlow(title: "Support", savesEvents: false)               // trace, no event log
+RTSFlow(title: "Support", savesTrace: false, savesEvents: true)  // event log, no trace
+RTSFlow(title: "Support", emitsEvents: false)               // no stream at all
+```
+
+To handle events yourself — your own file format, an upload, a live view — subscribe to
+`eventPublisher`. That works whether or not the built-in log is on.
+
+`RTSEventWriter` is observable but not constructible: `flow.eventWriter` exposes
+`fileURLPublisher`, `lineCount`, `droppedEventCount` and `lateEventCount`, while only a flow can
+create, subscribe or close one. A second writer would resolve to the same file path and
+interleave its writes with the flow's.
 
 ## Package Dependencies
 
