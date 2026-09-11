@@ -218,6 +218,15 @@ public actor RTSEventWriter {
     // MARK: - Writing
 
     private func write(_ event: RTSEvent) {
+        if event.eventType == RTSSessionStartedEvent.eventTypeName {
+            // A new run gets a fresh attempt. `hasWriteFailed` is deliberately sticky *within* a
+            // run — a broken handle does not heal mid-run, and retrying per event would turn one
+            // failure into one log line per remaining event — but a flow outlives its runs, so
+            // leaving it set would let one transient failure silence every later run on that
+            // flow, with no file and no report.
+            hasWriteFailed = false
+            failure = nil
+        }
         guard !hasWriteFailed else {
             return
         }

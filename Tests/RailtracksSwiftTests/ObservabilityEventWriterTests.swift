@@ -207,13 +207,76 @@ extension RailtracksSwiftTestSuite {
             _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
 
             let writer = try #require(flow.eventWriter)
-            let url = try await publishedFileURL(writer)
+            // Drained explicitly rather than read off `fileURLPublisher`: that subject holds the
+            // *latest* close, so subscribing after run two can still hand back run one's publish
+            // before run two's close has landed on the consumer task.
+            let url = try #require(await writer.finish()).get()
             let written = try Self.decodeEvents(in: url)
             // One file, two runs, one scope — the re-arm path, now driven by library-owned
             // wiring rather than by the test.
             #expect(Set(written.map { $0.scopeID }).count == 1)
             #expect(Self.count(of: RTSSessionStartedEvent.eventTypeName, in: written) == 2)
             #expect(Self.count(of: RTSSessionCompletedEvent.eventTypeName, in: written) == 2)
+        }
+
+        @Test("releasing a flow releases its writer", .timeLimit(.minutes(1)))
+        func flowDeinitReleasesTheWriter() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+
+            weak var writerAfterRelease: RTSEventWriter?
+            do {
+                let flow = RTSFlow(title: "BuiltInRelease")
+                writerAfterRelease = try #require(flow.eventWriter)
+                let root = StubOrchestrator(nodeName: "Root") { _, _ in
+                    [:]
+                }
+                _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+            }
+
+            // The writer holds two cycles that only `finish()` breaks — its queue owns the
+            // subscription whose sink captures that queue, and its consumer task retains it
+            // across `for await`. `RTSFlow.deinit` breaks both; without it this stays non-nil
+            // and every flow leaks its writer, queue and buffer.
+            var attempts = 0
+            while writerAfterRelease != nil, attempts < 100 {
+                // `deinit` schedules `finish()` on a task, so the teardown lands asynchronously.
+                try await Task.sleep(for: .milliseconds(20))
+                attempts += 1
+            }
+            #expect(writerAfterRelease == nil)
+        }
+
+        @Test("a write failure on one run does not silence the next", .timeLimit(.minutes(1)))
+        func writeFailureDoesNotSilenceLaterRuns() async throws {
+            let (base, eventsDirectory) = Self.makeTemporaryDirectory()
+            defer {
+                try? FileManager.default.removeItem(at: base)
+            }
+
+            let subject = PassthroughSubject<RTSEvent, Never>()
+            let writer = RTSEventWriter(directory: eventsDirectory)
+            writer.subscribe(to: subject.eraseToAnyPublisher())
+
+            // Run one fails: the path guard rejects the scope id, so `write` records a failure.
+            // Driven through the scope rather than by moving the output directory mid-test —
+            // the directory is resolved on the consumer task, so that would race.
+            subject.send(Self.event(RTSSessionStartedEvent.eventTypeName, scopeID: "a/b"))
+            subject.send(Self.event("node.creation", scopeID: "a/b"))
+            subject.send(Self.event(RTSSessionCompletedEvent.eventTypeName, scopeID: "a/b"))
+
+            // Run two is fine. A flow outlives its runs, so the earlier failure must not leave
+            // the writer permanently silent.
+            subject.send(Self.event(RTSSessionStartedEvent.eventTypeName, scopeID: "scope"))
+            subject.send(Self.event("node.creation", scopeID: "scope"))
+            subject.send(Self.event(RTSSessionCompletedEvent.eventTypeName, scopeID: "scope"))
+
+            let url = try #require(await writer.finish()).get()
+            let written = try Self.decodeEvents(in: url)
+            #expect(written.map { $0.eventType } == [
+                RTSSessionStartedEvent.eventTypeName,
+                "node.creation",
+                RTSSessionCompletedEvent.eventTypeName,
+            ])
         }
 
         // MARK: - The AsyncStream contract the queue is built on

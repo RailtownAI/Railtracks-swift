@@ -154,6 +154,23 @@ public class RTSFlow: @unchecked Sendable {
         }
     }
 
+    /// Tears the built-in event log down when the flow goes away.
+    ///
+    /// Required, not tidiness: the writer holds two reference cycles that only `finish()` breaks.
+    /// Its `Queue` stores the Combine subscription whose sink captures that same `Queue`, and its
+    /// consumer task retains the writer across `for await` — a loop that ends only when the
+    /// stream is finished. Without this, every flow that saves events would leak its writer, its
+    /// queue and the queue's buffer for the life of the process.
+    deinit {
+        // A local copy, so the task captures the writer rather than a deinitializing `self`.
+        guard let eventWriter else {
+            return
+        }
+        Task {
+            await eventWriter.finish()
+        }
+    }
+
     /// Runs the pipeline from the given root agent and returns its text result.
     ///
     /// Creates a fresh node invoker and graph collector, wires up event subscriptions,
