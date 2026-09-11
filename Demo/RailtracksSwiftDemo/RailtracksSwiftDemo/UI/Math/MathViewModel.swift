@@ -52,11 +52,9 @@ class MathViewModel {
         subscribe(to: flow)
         nodeTree.attach(to: flow)
 
-        // Attached before `run`, because the event stream has no replay — a writer subscribed
-        // later would miss `session.started` and everything up to that point.
-        let eventWriter = RTSEventWriter()
-        eventWriter.subscribe(to: flow.eventPublisher)
-        observeEventLog(from: eventWriter)
+        // No wiring needed: the flow builds and subscribes its own writer, because `savesEvents`
+        // follows `savesTrace`. This just watches the file it produces.
+        observeEventLog(from: flow.eventWriter)
 
         let workflow = MathWorkflow(
             agentA: Self.mathAgent(named: "Math Agent A"),
@@ -77,9 +75,6 @@ class MathViewModel {
             } catch {
                 self?.promptResult = "Error: \(error)"
             }
-            // Teardown, not a correctness step: the writer already closed the file when it
-            // wrote `session.completed`. This drops the subscription now the flow is done.
-            await eventWriter.finish()
             Log.debug("math workflow finished")
         }
     }
@@ -96,10 +91,13 @@ class MathViewModel {
             .store(in: &cancellables)
     }
 
-    /// Reports each event log as the writer closes it — which happens on `session.completed`,
-    /// so this fires while the run is still wrapping up rather than only at teardown.
-    private func observeEventLog(from eventWriter: RTSEventWriter) {
+    /// Reports each event log as the flow's own writer closes it — which happens on
+    /// `session.completed`, so this fires while the run is still wrapping up.
+    private func observeEventLog(from eventWriter: RTSEventWriter?) {
         eventLogSummary = ""
+        guard let eventWriter else {
+            return
+        }
         eventWriter.fileURLPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] outcome in

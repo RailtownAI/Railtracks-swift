@@ -559,24 +559,19 @@ hop itself.
 
 ### Writing events to a file
 
-`RTSEventWriter` is a ready-made receiver that appends the stream to a JSONL file — one JSON
-object per line, named for the session. Wire it up yourself; any number of other subscribers
-can read the same stream alongside it.
+Every flow writes its event stream to a JSONL file — one JSON object per line, named for the
+session — through a built-in `RTSEventWriter`. There is nothing to wire:
 
 ```swift
 let flow = RTSFlow(title: "Support")
-
-let eventWriter = RTSEventWriter()
-eventWriter.subscribe(to: flow.eventPublisher)   // before `run` — the stream has no replay
-
 let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
 ```
 
-That is the whole wiring. Each run ends with a `session.completed` event, and writing it closes
-the file — so there is nothing to remember per run. To use the file, wait for it:
+Each run ends with a `session.completed` event, and writing it closes the file, so there is
+nothing to remember per run either. To use the file, wait for it:
 
 ```swift
-eventWriter.fileURLPublisher
+flow.eventWriter?.fileURLPublisher
     .sink { result in
         if case .success(let url) = result {
             print("events written to \(url.path)")
@@ -592,10 +587,26 @@ RailtracksSwift.eventsOutputDirectory = URL(fileURLWithPath: "/custom/path")
 ```
 
 Two runs on the same flow share a session id, so the second reopens the same file in append
-mode and you get one file per session. Call `await eventWriter.finish()` when the writer is
-done with for good — it drops the subscription and closes a file left open by a run that never
-completed. The writer never throws: a write failure is logged and reported through
-`fileURLPublisher` and `finish()`, never raised into your run.
+mode and you get one file per session. The writer never throws: a write failure is logged and
+reported through `fileURLPublisher`, never raised into your run.
+
+### Turning it off, or owning it yourself
+
+`savesEvents` follows `savesTrace` unless you set it, so a flow that persists a trace also
+persists an event log:
+
+```swift
+RTSFlow(title: "Support", savesEvents: false)               // trace, no event log
+RTSFlow(title: "Support", savesTrace: false, savesEvents: true)  // event log, no trace
+RTSFlow(title: "Support", emitsEvents: false)               // no stream at all
+```
+
+To handle events yourself, subscribe to `eventPublisher` — that works whether or not the
+built-in log is on. To write your *own* file, pass `savesEvents: false` first and construct an
+`RTSEventWriter` with your own `directory:`; two writers on one flow would otherwise resolve to
+the same path and interleave their writes. A writer you own is subscribed with
+`subscribe(to: flow.eventPublisher)` **before** `run` (the stream has no replay) and torn down
+with `await writer.finish()`.
 
 ## Package Dependencies
 

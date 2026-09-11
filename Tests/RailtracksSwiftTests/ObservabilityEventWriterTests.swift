@@ -111,6 +111,100 @@ extension RailtracksSwiftTestSuite {
             )
         }
 
+        // MARK: - The suite-wide output redirect
+
+        @Test("the event output directory is redirected away from Documents")
+        func outputDirectoryIsRedirected() {
+            // This suite is nested inside `RailtracksSwiftTestSuite`, so the assertion is really
+            // about `RedirectsEventOutput.isRecursive` reaching nested suites. `RTSFlow` builds
+            // its own writer against this global, so if the trait ever stops propagating the
+            // whole target starts writing into the developer's `~/Documents/events`.
+            #expect(RailtracksSwift.eventsOutputDirectory == RedirectsEventOutput.directory)
+            #expect(
+                RailtracksSwift.eventsOutputDirectory.path
+                    .hasPrefix(FileManager.default.temporaryDirectory.path)
+            )
+        }
+
+        // MARK: - The built-in writer on RTSFlow
+
+        /// Runs a trivial flow and returns the event types its built-in writer recorded.
+        private func runAndReadBuiltInLog(_ flow: RTSFlow) async throws -> [String] {
+            let root = StubOrchestrator(nodeName: "Root") { _, _ in
+                [:]
+            }
+            _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+            let writer = try #require(flow.eventWriter)
+            let url = try await publishedFileURL(writer)
+            return try Self.decodeEvents(in: url).map { $0.eventType }
+        }
+
+        @Test("savesEvents follows savesTrace when it is not given", .timeLimit(.minutes(1)))
+        func savesEventsFollowsSavesTrace() async throws {
+            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+
+            let tracing = RTSFlow(title: "BuiltInFollowsTraceOn")
+            #expect(tracing.eventWriter != nil)
+            let recorded = try await runAndReadBuiltInLog(tracing)
+            #expect(recorded.first == RTSSessionStartedEvent.eventTypeName)
+            #expect(recorded.last == RTSSessionCompletedEvent.eventTypeName)
+
+            // The evaluation-protection case: the judge's per-call sub-flows pass
+            // `savesTrace: false`, so inheriting it is what keeps them from spilling one event
+            // log per judged datapoint. Asserted directly rather than trusted.
+            let traceless = RTSFlow(title: "BuiltInFollowsTraceOff", savesTrace: false)
+            #expect(traceless.eventWriter == nil)
+        }
+
+        @Test("savesEvents overrides savesTrace in both directions")
+        func savesEventsOverridesSavesTrace() async throws {
+            let eventsWithoutTrace = RTSFlow(
+                title: "BuiltInEventsOnly",
+                savesTrace: false,
+                savesEvents: true
+            )
+            #expect(eventsWithoutTrace.eventWriter != nil)
+
+            let traceWithoutEvents = RTSFlow(
+                title: "BuiltInTraceOnly",
+                savesTrace: true,
+                savesEvents: false
+            )
+            #expect(traceWithoutEvents.eventWriter == nil)
+        }
+
+        @Test("emitsEvents false suppresses the built-in writer whatever savesEvents says")
+        func disabledEmissionSuppressesTheBuiltInWriter() {
+            let flow = RTSFlow(
+                title: "BuiltInNoEmission",
+                savesTrace: true,
+                savesEvents: true,
+                emitsEvents: false
+            )
+            #expect(flow.eventWriter == nil)
+        }
+
+        @Test("two runs append to the built-in writer's single file", .timeLimit(.minutes(1)))
+        func builtInWriterAppendsAcrossRuns() async throws {
+            RailtracksSwift.flowGraphOutputDirectory = FileManager.default.temporaryDirectory
+
+            let flow = RTSFlow(title: "BuiltInAppends")
+            let root = StubOrchestrator(nodeName: "Root") { _, _ in
+                [:]
+            }
+            _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+            _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            let writer = try #require(flow.eventWriter)
+            let url = try await publishedFileURL(writer)
+            let written = try Self.decodeEvents(in: url)
+            // One file, two runs, one scope — the re-arm path, now driven by library-owned
+            // wiring rather than by the test.
+            #expect(Set(written.map { $0.scopeID }).count == 1)
+            #expect(Self.count(of: RTSSessionStartedEvent.eventTypeName, in: written) == 2)
+            #expect(Self.count(of: RTSSessionCompletedEvent.eventTypeName, in: written) == 2)
+        }
+
         // MARK: - The AsyncStream contract the queue is built on
 
         @Test("bufferingNewest evicts the oldest and reports it, and finish still drains")
