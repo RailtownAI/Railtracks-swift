@@ -51,7 +51,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/RailtownAI/railtown-swift-logger.git",
-            .upToNextMinor(from: "0.3.1")
+            .upToNextMinor(from: "0.3.2")
         ),
     ],
     targets: [
