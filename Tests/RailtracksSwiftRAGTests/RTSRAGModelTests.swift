@@ -67,6 +67,40 @@ struct RTSRAGModelTests {
         #expect(bytes[8] & 0xC0 == 0x80)
     }
 
+    // MARK: - Document type
+
+    @Test("an app can name a format the library has never heard of")
+    func documentTypeIsOpen() {
+        // The point of the open type. There is no format registry — a caller picks a loader by
+        // constructing it — so an app writing a `.docx` loader must be able to say so rather than
+        // mislabelling its output as `.text`.
+        let custom = RTSRAGDocumentType(rawValue: "docx")
+
+        #expect(custom != .text)
+        #expect(custom.rawValue == "docx")
+    }
+
+    @Test("a document type codes as a bare string")
+    func documentTypeCodesAsBareString() throws {
+        let encoded = try JSONEncoder().encode([RTSRAGDocumentType.jsonLines])
+
+        // Pinned because this reaches persisted stores: a `{"rawValue": "jsonl"}` object would be
+        // a silent format break against both the closed enum this replaced and Python's values.
+        #expect(String(decoding: encoded, as: UTF8.self) == "[\"jsonl\"]")
+    }
+
+    @Test("an unrecognised document type decodes rather than throwing")
+    func unknownDocumentTypeDecodes() throws {
+        let decoded = try JSONDecoder().decode(
+            [RTSRAGDocumentType].self,
+            from: Data("[\"docx\"]".utf8)
+        )
+
+        // A closed enum throws here, which would make a store written by a build — or a Python
+        // engine — that knows one extra format unreadable rather than merely less informative.
+        #expect(decoded == [RTSRAGDocumentType(rawValue: "docx")])
+    }
+
     // MARK: - Content hashing
 
     @Test("content hashing answers whether a source changed")
