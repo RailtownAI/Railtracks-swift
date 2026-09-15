@@ -8,7 +8,16 @@
 import Foundation
 
 /// Resolves a path into the ordered list of files a loader should read.
-enum RTSRAGFileEnumeration {
+///
+/// Public because apps are expected to write their own loaders — there is no format registry, so
+/// any format the library does not ship is an app's to add. Without this they would each
+/// re-implement the same recursive walk, and the parts that are easy to get subtly wrong are
+/// exactly the parts that matter: the explicit sort (enumeration order is not guaranteed, and
+/// ingest order is observable), skipping non-regular files, and validating existence before
+/// extension so the same mistake always reports the same way.
+///
+/// Holds no state — a namespace for two free functions.
+public enum RTSRAGFileEnumeration {
 
     /// Every file under `path` with one of `extensions`, sorted — or `path` itself when it is a
     /// file rather than a directory.
@@ -23,7 +32,7 @@ enum RTSRAGFileEnumeration {
     ///   element. Python validates these in a different order per loader — extension first in
     ///   `TextLoader`, existence first in `CSVLoader` — so the same mistake reports differently.
     ///   Here it is always existence first, which is the more useful message.
-    static func resolveSources(
+    public static func resolveSources(
         at path: URL,
         extensions: Set<String>
     ) throws -> [URL] {
@@ -83,7 +92,7 @@ enum RTSRAGFileEnumeration {
     ///   Foundation strips it already, verified against `String(contentsOf:encoding:)`,
     ///   `String(data:encoding:)` and `JSONSerialization`. A test pins the behaviour, since BOMs
     ///   are common in Excel-exported CSV.
-    static func readText(at url: URL) throws -> String {
+    public static func readText(at url: URL) throws -> String {
         do {
             return try String(contentsOf: url, encoding: .utf8)
         } catch {

@@ -41,6 +41,15 @@ public struct RTSRAGDocumentStream: AsyncSequence, Sendable {
         self.loadOne = loadOne
     }
 
+    /// How many sources this stream will read.
+    ///
+    /// The denominator for "file N of M" progress, which is the reason ``sources`` is resolved in
+    /// `stream()` rather than discovered while iterating. Not a document count — a source may
+    /// produce many documents (a CSV row each) or none at all.
+    public var sourceCount: Int {
+        sources.count
+    }
+
     public func makeAsyncIterator() -> Iterator {
         Iterator(sources: sources, loadOne: loadOne)
     }

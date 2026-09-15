@@ -13,6 +13,7 @@
 		44106E4E2FA27C5E003BAF6C /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 44106E4D2FA27C5E003BAF6C /* RailtracksSwift */; };
 		443F84F12FA27E2700B3DEEF /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 443F84F02FA27E2700B3DEEF /* RailtracksSwift */; };
 		444B11DA2F9FDE4D009CAC9A /* RailtracksSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 444B11D92F9FDE4D009CAC9A /* RailtracksSwift */; };
+		4472A6100001000000000002 /* RailtracksSwiftRAG in Frameworks */ = {isa = PBXBuildFile; productRef = 4472A6100001000000000001 /* RailtracksSwiftRAG */; };
 		44A1B0012FB00001003BAF6C /* RailtracksSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 44A1B0022FB00002003BAF6C /* RailtracksSwiftUI */; };
 		44E5403330473CAD00A91119 /* RailtownLogger in Frameworks */ = {isa = PBXBuildFile; productRef = 44E5403230473CAD00A91119 /* RailtownLogger */; };
 /* End PBXBuildFile section */
@@ -71,6 +72,7 @@
 				44A1B0012FB00001003BAF6C /* RailtracksSwiftUI in Frameworks */,
 				44E5403330473CAD00A91119 /* RailtownLogger in Frameworks */,
 				196F7AA03035111400E089B9 /* RailtracksSwift in Frameworks */,
+				4472A6100001000000000002 /* RailtracksSwiftRAG in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,6 +141,7 @@
 				196F7A9F3035111400E089B9 /* RailtracksSwift */,
 				196F7AA13035111400E089B9 /* RailtracksSwiftUI */,
 				44E5403230473CAD00A91119 /* RailtownLogger */,
+				4472A6100001000000000001 /* RailtracksSwiftRAG */,
 			);
 			productName = RailtracksSwiftDemo;
 			productReference = 44EAA7FA2F9FC9CE0069A845 /* RailtracksSwiftDemo.app */;
@@ -699,6 +702,10 @@
 		444B11D92F9FDE4D009CAC9A /* RailtracksSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RailtracksSwift;
+		};
+		4472A6100001000000000001 /* RailtracksSwiftRAG */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RailtracksSwiftRAG;
 		};
 		44A1B0022FB00002003BAF6C /* RailtracksSwiftUI */ = {
 			isa = XCSwiftPackageProductDependency;

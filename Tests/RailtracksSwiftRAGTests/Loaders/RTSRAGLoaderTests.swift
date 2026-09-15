@@ -377,7 +377,7 @@ struct RTSRAGLoaderTests {
         #expect(failures.isEmpty)
     }
 
-    @Test("a throwing sanitizer propagates rather than becoming a failure element")
+    @Test("a throwing sanitizer fails its source rather than being swallowed")
     func sanitizerErrorsPropagate() async throws {
         let directory = try Self.makeDirectory()
         defer {

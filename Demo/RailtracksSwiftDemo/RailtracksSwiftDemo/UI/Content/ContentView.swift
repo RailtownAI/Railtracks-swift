@@ -69,6 +69,12 @@ struct ContentView: View {
                 }
                 .background(viewModel.mode == .vision ? Color.accentColor.opacity(0.2) : Color.clear)
                 .buttonStyle(.bordered)
+
+                Button("RAG") {
+                    viewModel.mode = .rag
+                }
+                .background(viewModel.mode == .rag ? Color.accentColor.opacity(0.2) : Color.clear)
+                .buttonStyle(.bordered)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -119,6 +125,8 @@ struct ContentView: View {
                 EvaluationView()
             case .vision:
                 VisionView()
+            case .rag:
+                RAGView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

@@ -60,8 +60,11 @@ public struct RTSRAGSanitizingLoader<Wrapped: RTSRAGDocumentLoader>: RTSRAGDocum
         return try wrapped.stream().mapDocuments { documents in
             var kept: [RTSRAGDocument] = []
             for document in documents {
-                // A throwing sanitizer propagates rather than becoming a `.failure`: it means the
-                // sanitizer is misconfigured, which is true of every document, not just this one.
+                // A throwing sanitizer surfaces as a `.failure` for the source being read, not as
+                // a thrown error. `next()` is non-throwing, so there is nowhere for it to
+                // propagate to — and since a misconfigured sanitizer is wrong for every document,
+                // it produces a failure per source and no documents at all, which is loud enough
+                // to be unmistakable.
                 guard let sanitized = try await sanitizer.sanitize(document) else {
                     let origin = document.source ?? "an unsourced document"
                     ragLog.debug("📚 sanitizer dropped \(origin)")
