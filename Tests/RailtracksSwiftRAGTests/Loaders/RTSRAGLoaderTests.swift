@@ -208,7 +208,89 @@ struct RTSRAGLoaderTests {
         #expect(documents[0].content == "name: Alice")
     }
 
+    @Test("CRLF line endings parse as rows, not as one giant field")
+    func csvCarriageReturns() async throws {
+        let directory = try Self.makeDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = directory.appendingPathComponent("crlf.csv")
+        try "name,age\r\nAlice,30\r\nBob,41\r\n".write(to: url, atomically: true, encoding: .utf8)
+
+        // The regression this exists for: Swift's `Character` is a grapheme cluster, so "\r\n" is
+        // one character matching neither "\n" nor "\r". The parser's `case "\r"` therefore never
+        // fired, the whole file collapsed into a single row, that row became the header, and the
+        // loader returned **zero documents with no error** — silent total data loss on the most
+        // likely real input, since Excel on Windows writes CRLF (alongside the BOM tested above).
+        let (documents, failures) = try await Self.drain(RTSRAGCSVLoader(path: url))
+
+        #expect(failures.isEmpty)
+        #expect(documents.count == 2)
+        #expect(documents[0].content == "name: Alice\nage: 30")
+        #expect(documents[1].content == "name: Bob\nage: 41")
+    }
+
+    @Test("a blank row keeps its place instead of renumbering the rows below it")
+    func csvBlankRowIsPreserved() async throws {
+        let directory = try Self.makeDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = directory.appendingPathComponent("gap.csv")
+        // A trailing blank line as well, to pin that the terminator artifact is still dropped.
+        try "name\nAlice\n\nBob\n\n".write(to: url, atomically: true, encoding: .utf8)
+
+        let (documents, _) = try await Self.drain(RTSRAGCSVLoader(path: url))
+
+        // The empty value is a row of its own. Skipping it would pull Bob up to index 1, changing
+        // his `row_index` and — with positional identity — his document id, so one blank cell
+        // would re-identify every row beneath it.
+        #expect(documents.count == 3)
+        #expect(documents.map { $0.content } == ["name: Alice", "name: ", "name: Bob"])
+        #expect(documents[2].metadata["row_index"] == .integer(2))
+    }
+
+    @Test("line endings do not change a document's content hash")
+    func lineEndingsDoNotChangeContentHash() async throws {
+        let directory = try Self.makeDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let unix = directory.appendingPathComponent("unix.txt")
+        let windows = directory.appendingPathComponent("windows.txt")
+        try "first line\nsecond line\n".write(to: unix, atomically: true, encoding: .utf8)
+        try "first line\r\nsecond line\r\n".write(to: windows, atomically: true, encoding: .utf8)
+
+        let (documents, _) = try await Self.drain(RTSRAGTextLoader(path: directory))
+
+        // Staleness detection compares content hashes, so without normalisation the same file
+        // checked out on Windows and on macOS would look edited and re-embed the whole corpus.
+        #expect(documents.count == 2)
+        #expect(
+            RTSRAGContentHash.of(documents[0].content) == RTSRAGContentHash.of(documents[1].content)
+        )
+    }
+
     // MARK: - JSON
+
+    @Test("a JSONL file with CRLF endings yields one document per line")
+    func jsonLinesCarriageReturns() async throws {
+        let directory = try Self.makeDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = directory.appendingPathComponent("crlf.jsonl")
+        try "{\"id\":1}\r\n\r\n{\"id\":2}\r\n".write(to: url, atomically: true, encoding: .utf8)
+
+        // Same grapheme-cluster cause as the CSV case, different symptom: `split(separator: "\n")`
+        // did not split at all, so the entire file was "line 1", failed to parse as an object, and
+        // the whole file was reported as a failure. The blank line also pins that the skip works
+        // once a stray carriage return can no longer survive trimming.
+        let (documents, failures) = try await Self.drain(RTSRAGJSONLoader(path: url))
+
+        #expect(failures.isEmpty)
+        #expect(documents.count == 2)
+    }
 
     @Test("a JSON array yields one document per object, JSONL one per line")
     func jsonShapes() async throws {

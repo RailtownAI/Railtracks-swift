@@ -114,7 +114,9 @@ public struct RTSRAGJSONLoader: RTSRAGDocumentLoader {
         var objects: [[String: Any]] = []
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         for (lineNumber, line) in lines.enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // `.whitespacesAndNewlines`, not `.whitespaces` — the latter is space and tab only, so
+            // a stray carriage return would survive and be parsed as if it were a JSON object.
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             // Blank lines are skipped, and the object index counts *objects* rather than lines —
             // so a blank line in the middle does not shift every subsequent identity.
             guard !trimmed.isEmpty else {

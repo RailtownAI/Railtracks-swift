@@ -84,17 +84,31 @@ public enum RTSRAGFileEnumeration {
         return found.sorted { $0.path < $1.path }
     }
 
-    /// Reads a text file.
+    /// Reads a text file, with CRLF line endings normalised to LF.
+    ///
+    /// **The normalisation is load-bearing, not tidiness.** Swift's `Character` is a grapheme
+    /// cluster, so `"\r\n"` is a *single* `Character` equal to neither `"\n"` nor `"\r"`. Any
+    /// parser that compares characters therefore matches no line break at all in a CRLF file:
+    /// `RTSRAGCSVParser` collapsed such a file into one row and emitted no documents without
+    /// error, and `RTSRAGJSONLoader` read the whole file as one line and failed it outright.
+    /// Normalising here fixes both at the only point they share, rather than asking every parser
+    /// to remember a rule that looks like it does not apply.
+    ///
+    /// It also makes ``RTSRAGContentHash`` platform-independent: a Windows and a Unix copy of the
+    /// same file hash the same, so a re-ingest skips it instead of re-embedding a corpus whose
+    /// only change was line endings.
     ///
     /// - Note: no byte-order-mark handling, and that is correct rather than an omission. Python
     ///   defaults its loaders to `utf-8-sig` because plain `utf-8` would leave a `U+FEFF` at the
     ///   start of the content — which breaks CSV header matching and corrupts the content hash.
     ///   Foundation strips it already, verified against `String(contentsOf:encoding:)`,
     ///   `String(data:encoding:)` and `JSONSerialization`. A test pins the behaviour, since BOMs
-    ///   are common in Excel-exported CSV.
+    ///   are common in Excel-exported CSV — which is also where CRLF arrives, so the two travel
+    ///   together and both need a test.
     public static func readText(at url: URL) throws -> String {
         do {
-            return try String(contentsOf: url, encoding: .utf8)
+            let text = try String(contentsOf: url, encoding: .utf8)
+            return text.replacingOccurrences(of: "\r\n", with: "\n")
         } catch {
             throw RTSRAGError.loadFailed(source: url.path, reason: "\(error)")
         }

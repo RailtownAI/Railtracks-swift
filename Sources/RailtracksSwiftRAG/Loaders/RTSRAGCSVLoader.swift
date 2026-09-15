@@ -156,10 +156,7 @@ enum RTSRAGCSVParser {
         }
         func endRow() {
             endField()
-            // A trailing newline would otherwise produce a final row of one empty field.
-            if !(row.count == 1 && row[0].isEmpty) {
-                rows.append(row)
-            }
+            rows.append(row)
             row = []
         }
 
@@ -207,6 +204,20 @@ enum RTSRAGCSVParser {
         }
         if !field.isEmpty || !row.isEmpty {
             endRow()
+        }
+        // A file ending in a blank line leaves one final row of a single empty field. That is an
+        // artifact of the terminator, not a record, so it is dropped here — at end of input, where
+        // "final" can actually be known.
+        //
+        // Dropping it inside `endRow` instead, which is what this did, also silently swallowed
+        // *mid-file* blank rows. In a single-column CSV those are legitimately empty values, and
+        // losing one did more than lose a document: every row below shifted its `row_index` and,
+        // without an `idColumn`, its derived id — so a blank cell quietly re-identified the rest of
+        // the file. In a multi-column CSV a blank line now yields an all-empty document instead;
+        // that is data the file really contains, and a sanitizer can drop it without renumbering,
+        // since ids are already assigned by then.
+        if let last = rows.last, last.count == 1, last[0].isEmpty {
+            rows.removeLast()
         }
         return rows
     }

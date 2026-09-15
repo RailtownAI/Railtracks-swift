@@ -101,6 +101,22 @@ struct RTSRAGModelTests {
         #expect(decoded == [RTSRAGDocumentType(rawValue: "docx")])
     }
 
+    @Test("derived ids match values computed by Python's uuid5")
+    func derivedIDMatchesPython() {
+        // Vectors from `uuid5(NAMESPACE_URL, source)` in the Python engine's interpreter. The
+        // structural check above passes for any SHA-1-shaped construction — a wrong namespace, or
+        // hashing source before namespace, would satisfy it and still disagree with Python. Only
+        // a known value catches that, and the two engines sharing a store depends on it.
+        #expect(
+            RTSRAGDocument.derivedID(for: "file:///docs/policy.md").uuidString.lowercased()
+                == "14e95f57-eeff-5dd0-bc6a-daab0d3413e2"
+        )
+        #expect(
+            RTSRAGDocument.derivedID(for: "/Users/x/a.pdf#page-2").uuidString.lowercased()
+                == "112b8095-b64a-5d8f-8976-d83f09f482e2"
+        )
+    }
+
     // MARK: - Content hashing
 
     @Test("content hashing answers whether a source changed")
