@@ -57,9 +57,9 @@ class RAGViewModel {
         /// Whether the library implements this phase yet.
         var isImplemented: Bool {
             switch self {
-            case .resolve, .load:
+            case .resolve, .load, .chunk:
                 return true
-            case .chunk, .embed, .store:
+            case .embed, .store:
                 return false
             }
         }
@@ -67,13 +67,11 @@ class RAGViewModel {
         /// What the phase is waiting on, for the placeholder line.
         var pendingNote: String {
             switch self {
-            case .chunk:
-                return "pending — RTSRAGChunker (phase 3) not implemented"
             case .embed:
                 return "pending — RTSRAGEmbedding (phase 4) not implemented"
             case .store:
                 return "pending — RTSRAGVectorStore (phase 5) not implemented"
-            case .resolve, .load:
+            case .resolve, .load, .chunk:
                 return ""
             }
         }
@@ -151,6 +149,30 @@ class RAGViewModel {
                 return RTSRAGPDFLoader(path: path)
             }
         }
+
+        /// Which chunker pairs with this format.
+        ///
+        /// The pairing is the whole reason the library puts the chunker on the ingest call rather
+        /// than on the runtime: CSV and JSON loaders already emit one document per record, so the
+        /// record *is* the chunk and splitting again would strand a row's columns across two
+        /// embeddings. Text and PDF documents are prose and need real boundaries.
+        func makeChunker() -> any RTSRAGChunker {
+            switch self {
+            case .csv, .json:
+                return RTSRAGIdentityChunker()
+            case .text, .pdf:
+                return RTSRAGSentenceChunker()
+            }
+        }
+
+        var chunkerNote: String {
+            switch self {
+            case .csv, .json:
+                return "identity chunker — the record is already the chunk"
+            case .text, .pdf:
+                return "sentence chunker — packed to \(RTSRAGLimits.defaultMaxChunkCharacters) characters"
+            }
+        }
     }
 
     // MARK: - State
@@ -165,9 +187,14 @@ class RAGViewModel {
     var sourceTotal = 0
     var documentCount = 0
     var failureCount = 0
+    var chunkCount = 0
+    var chunkFailureCount = 0
     /// First document of the run, kept so the preview can show what a "document" actually is for
     /// the chosen format.
     var previewDocument: RTSRAGDocument?
+    /// That document's chunks, which is where the difference between the two chunkers shows: the
+    /// identity chunker returns the document unchanged, the sentence chunker returns slices.
+    var previewChunks: [RTSRAGChunk] = []
     var isShowingPreview = false
 
     private var runTask: Task<Void, Never>?
@@ -264,7 +291,12 @@ class RAGViewModel {
             return documents
         }
 
+        let chunker = format.makeChunker()
         append(.load, "starting")
+        append(.chunk, format.chunkerNote)
+        // Each document is chunked as it arrives rather than after the whole corpus loads, which
+        // is what keeps the stream's back-pressure meaningful — nothing is read ahead of what the
+        // pipeline has finished with.
         for await element in observed {
             if Task.isCancelled {
                 append(.load, "cancelled after \(documentCount) document(s)")
@@ -273,9 +305,7 @@ class RAGViewModel {
             switch element {
             case .success(let document):
                 documentCount += 1
-                if previewDocument == nil {
-                    previewDocument = document
-                }
+                await chunk(document, with: chunker)
             case .failure(let error):
                 // One unreadable file does not end the run — that is the library's departure from
                 // the Python engine, and this is where it shows.
@@ -288,7 +318,28 @@ class RAGViewModel {
             "loaded \(documentCount) document(s) from \(sourcesProcessed) file(s), "
                 + "\(failureCount) failure(s)"
         )
+        append(
+            .chunk,
+            "produced \(chunkCount) chunk(s) from \(documentCount) document(s), "
+                + "\(chunkFailureCount) failure(s)"
+        )
         appendPendingPhases()
+    }
+
+    private func chunk(_ document: RTSRAGDocument, with chunker: any RTSRAGChunker) async {
+        do {
+            let chunks = try await chunker.chunk(document)
+            chunkCount += chunks.count
+            if previewDocument == nil {
+                previewDocument = document
+                previewChunks = chunks
+            }
+        } catch {
+            // A chunker failing one document does not end the run, matching how the loader treats
+            // one unreadable file.
+            chunkFailureCount += 1
+            append(.chunk, "⚠️ \(sourceLabel(document.source)): \(error)")
+        }
     }
 
     private func noteSourceFinished(_ documents: [RTSRAGDocument]) {
@@ -342,6 +393,9 @@ class RAGViewModel {
         sourceTotal = 0
         documentCount = 0
         failureCount = 0
+        chunkCount = 0
+        chunkFailureCount = 0
         previewDocument = nil
+        previewChunks = []
     }
 }

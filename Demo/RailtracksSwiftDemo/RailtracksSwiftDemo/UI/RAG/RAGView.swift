@@ -17,12 +17,16 @@ struct RAGView: View {
     @State private var viewModel = RAGViewModel()
 
     var body: some View {
-        VStack(spacing: 16) {
-            inputSection
-            Divider()
-            statusSection
+        // The whole page scrolls: an expanded preview of a long document plus its chunks runs well
+        // past the window, and the status log's own scroll view only covers the log.
+        ScrollView {
+            VStack(spacing: 16) {
+                inputSection
+                Divider()
+                statusSection
+            }
+            .padding()
         }
-        .padding()
         .fileImporter(
             isPresented: $viewModel.isShowingFileImporter,
             allowedContentTypes: viewModel.format.contentTypes,
@@ -44,7 +48,7 @@ struct RAGView: View {
             .pickerStyle(.segmented)
             .disabled(viewModel.isRunning)
 
-            Text(viewModel.format.granularityNote)
+            Text("\(viewModel.format.granularityNote)\n\(viewModel.format.chunkerNote)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -86,7 +90,9 @@ struct RAGView: View {
     }
 
     private var progressText: String {
-        "file \(viewModel.sourcesProcessed)/\(viewModel.sourceTotal) · \(viewModel.documentCount) document(s)"
+        "file \(viewModel.sourcesProcessed)/\(viewModel.sourceTotal)"
+            + " · \(viewModel.documentCount) doc(s)"
+            + " · \(viewModel.chunkCount) chunk(s)"
     }
 
     // MARK: - Status
@@ -160,17 +166,39 @@ struct RAGView: View {
                 previewRow("type", document.type.rawValue)
                 previewRow("id", document.id.description)
                 previewRow("metadata", document.metadata.isEmpty ? "none" : "\(document.metadata.count) key(s)")
-                Text(document.content.prefix(400) + (document.content.count > 400 ? "…" : ""))
-                    .font(.system(.caption, design: .monospaced))
-                    .padding(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .textSelection(.enabled)
+                excerpt(document.content)
+
+                // The chunks this document produced, which is where the two chunkers visibly
+                // differ: identity returns the document unchanged, sentence returns slices.
+                if !viewModel.previewChunks.isEmpty {
+                    Divider()
+                    previewRow("chunks", "\(viewModel.previewChunks.count)")
+                    ForEach(viewModel.previewChunks.prefix(3), id: \.id) { chunk in
+                        Text("[\(chunk.index)] \(chunk.content.count) chars")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        excerpt(chunk.content)
+                    }
+                    if viewModel.previewChunks.count > 3 {
+                        Text("…\(viewModel.previewChunks.count - 3) more")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.top, 4)
         }
         .font(.caption)
+    }
+
+    private func excerpt(_ content: String) -> some View {
+        Text(content.prefix(400) + (content.count > 400 ? "…" : ""))
+            .font(.system(.caption, design: .monospaced))
+            .padding(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .textSelection(.enabled)
     }
 
     private func previewRow(_ label: String, _ value: String) -> some View {
