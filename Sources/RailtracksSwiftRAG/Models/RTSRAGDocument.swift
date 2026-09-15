@@ -29,13 +29,43 @@ public struct RTSRAGDocumentID: Sendable, Hashable, Codable, CustomStringConvert
 // MARK: - RTSRAGDocumentType
 
 /// The content format of a document, as reported by the loader that produced it.
-public enum RTSRAGDocumentType: String, Sendable, Codable {
-    case text
-    case markdown
-    case pdf
-    case csv
-    case json
-    case jsonLines = "jsonl"
+///
+/// **Open rather than a closed enum, deliberately.** An app is expected to write its own loaders —
+/// there is no format registry, the caller picks a loader by constructing it — so the set of
+/// formats cannot be known here. A closed enum would force a `.docx`, HTML or database-row loader
+/// to mislabel its output as ``text``.
+///
+/// It also keeps decoding total. A closed enum throws on an unrecognised raw value, so a store
+/// written by a build (or a Python engine) that knows a format this one does not would fail to
+/// read back rather than degrade. The raw strings match Python's `DocumentType`, whose `str`-based
+/// enum is likewise open in practice — its `Document` dataclass validates nothing, so its own
+/// cloud loaders infer types from file extensions it never enumerates.
+public struct RTSRAGDocumentType: RawRepresentable, Sendable, Hashable, Codable {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public static let text = RTSRAGDocumentType(rawValue: "text")
+    public static let markdown = RTSRAGDocumentType(rawValue: "markdown")
+    public static let pdf = RTSRAGDocumentType(rawValue: "pdf")
+    public static let csv = RTSRAGDocumentType(rawValue: "csv")
+    public static let json = RTSRAGDocumentType(rawValue: "json")
+    public static let jsonLines = RTSRAGDocumentType(rawValue: "jsonl")
+
+    // Coded as a bare string rather than the synthesised `{"rawValue": …}` object, so the wire
+    // format is byte-identical to the closed enum this replaced and to Python's values. Written
+    // out rather than left to the standard library's `RawRepresentable` defaults, because this
+    // shape reaches persisted stores and should not depend on which conformance wins.
+    public init(from decoder: Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 // MARK: - RTSRAGDocument
