@@ -9,14 +9,27 @@ import Foundation
 
 // MARK: - RTSRAGDocumentLoader
 
-/// Produces documents to ingest. Phase 2.
+/// Produces documents to ingest.
 ///
 /// The loader decides *what* is processed; the chunker, embedder and store decide *how*. A
 /// loader is free to emit one document per file, per section, or per database row — and that
 /// choice is the main lever over update cost, because a document is the unit that gets replaced.
+///
+/// A loader also assigns ``RTSRAGDocument/source``, which derives the document id and is therefore
+/// the key an update replaces on. Getting it wrong turns an update into a silent duplicate.
 public protocol RTSRAGDocumentLoader: Sendable {
-    /// Streams documents lazily, so a large source is never fully resident.
-    func stream() -> AsyncThrowingStream<RTSRAGDocument, Error>
+    /// Streams documents lazily, so a large corpus is never fully resident.
+    ///
+    /// Per-item failures arrive as `.failure` elements rather than ending the stream, so one
+    /// unreadable file in a directory does not abandon the rest.
+    ///
+    /// Throwing is reserved for failures that make the *whole* stream meaningless and can be
+    /// detected before reading anything — a root path that does not exist, or one that is not a
+    /// supported type. Those surface here, at the call site, rather than as the first element.
+    /// A per-file problem discovered while reading, including a CSV whose header lacks a
+    /// configured column, stays a `.failure`: in a directory each file has its own header, and one
+    /// mismatched schema should not abandon the rest.
+    func stream() throws -> RTSRAGDocumentStream
 }
 
 // MARK: - RTSRAGChunker

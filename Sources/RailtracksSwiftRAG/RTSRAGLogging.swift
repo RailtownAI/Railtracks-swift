@@ -13,7 +13,8 @@ import Logging
 /// Its own label rather than reusing `RTSLoggers`, so nothing in this module imports
 /// RailtracksSwift for logging alone — one of the couplings the port deliberately avoids.
 ///
-/// Follows the Swift library [log level guidance](https://www.swift.org/documentation/server/guides/libraries/log-levels.html),
+/// Follows the Swift library
+/// [log level guidance](https://www.swift.org/documentation/server/guides/libraries/log-levels.html)
 /// and the repository convention of an emoji prefix per subsystem: 📚 here, alongside 🎁 for the
 /// flow-graph collector, 📮 for the event writer, 🧪 for evaluation.
 internal enum RTSRAGLoggers {

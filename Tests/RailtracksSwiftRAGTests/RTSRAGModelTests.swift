@@ -25,7 +25,10 @@ struct RTSRAGModelTests {
     @Test("a source yields the same document id every time")
     func derivedIDIsStable() {
         let first = RTSRAGDocument(content: "one", source: "file:///docs/policy.md")
-        let second = RTSRAGDocument(content: "two — different content", source: "file:///docs/policy.md")
+        let second = RTSRAGDocument(
+            content: "two — different content",
+            source: "file:///docs/policy.md"
+        )
 
         // Stability across processes is what makes an update replace rather than duplicate: the
         // pipeline clears the prior version by id, which only works if the id is reproducible.

@@ -55,7 +55,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
-            exact: "1.0.0"
+            .upToNextMinor(from: "1.0.0")
         ),
         .package(
             url: "https://github.com/RailtownAI/railtown-swift-logger.git",
