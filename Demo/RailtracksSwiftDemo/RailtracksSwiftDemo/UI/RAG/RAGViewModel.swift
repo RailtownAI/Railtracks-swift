@@ -57,9 +57,9 @@ class RAGViewModel {
         /// Whether the library implements this phase yet.
         var isImplemented: Bool {
             switch self {
-            case .resolve, .load, .chunk:
+            case .resolve, .load, .chunk, .embed:
                 return true
-            case .embed, .store:
+            case .store:
                 return false
             }
         }
@@ -67,12 +67,43 @@ class RAGViewModel {
         /// What the phase is waiting on, for the placeholder line.
         var pendingNote: String {
             switch self {
-            case .embed:
-                return "pending — RTSRAGEmbedding (phase 4) not implemented"
             case .store:
                 return "pending — RTSRAGVectorStore (phase 5) not implemented"
-            case .resolve, .load, .chunk:
+            case .resolve, .load, .chunk, .embed:
                 return ""
+            }
+        }
+    }
+
+    // MARK: - Embedder
+
+    /// Which embedder the run uses.
+    ///
+    /// Offered as a choice because the two differ in ways no unit test can show: dimension, speed,
+    /// whether anything is billed, and whether the corpus leaves the machine at all.
+    enum EmbedderChoice: String, CaseIterable, Identifiable {
+        case apple
+        case openAI
+
+        var id: String {
+            rawValue
+        }
+
+        var title: String {
+            switch self {
+            case .apple:
+                return "On-device"
+            case .openAI:
+                return "OpenAI"
+            }
+        }
+
+        var note: String {
+            switch self {
+            case .apple:
+                return "NLContextualEmbedding — 512-dim, free, offline, 256-token cap"
+            case .openAI:
+                return "text-embedding-3-small — 1536-dim, billed per token, needs a key"
             }
         }
     }
@@ -189,6 +220,13 @@ class RAGViewModel {
     var failureCount = 0
     var chunkCount = 0
     var chunkFailureCount = 0
+    var embedder: EmbedderChoice = .apple
+    var embeddedCount = 0
+    var embedFailureCount = 0
+    var embeddedTokens = 0
+    /// Dimension of the first vector produced, which is the most visible difference between the
+    /// two embedders.
+    var vectorDimension: Int?
     /// First document of the run, kept so the preview can show what a "document" actually is for
     /// the chosen format.
     var previewDocument: RTSRAGDocument?
@@ -294,6 +332,10 @@ class RAGViewModel {
         let chunker = format.makeChunker()
         append(.load, "starting")
         append(.chunk, format.chunkerNote)
+        append(.embed, embedder.note)
+        guard let embedding = await makeEmbedder() else {
+            return
+        }
         // Each document is chunked as it arrives rather than after the whole corpus loads, which
         // is what keeps the stream's back-pressure meaningful — nothing is read ahead of what the
         // pipeline has finished with.
@@ -305,7 +347,7 @@ class RAGViewModel {
             switch element {
             case .success(let document):
                 documentCount += 1
-                await chunk(document, with: chunker)
+                await chunk(document, with: chunker, embedding: embedding)
             case .failure(let error):
                 // One unreadable file does not end the run — that is the library's departure from
                 // the Python engine, and this is where it shows.
@@ -323,22 +365,66 @@ class RAGViewModel {
             "produced \(chunkCount) chunk(s) from \(documentCount) document(s), "
                 + "\(chunkFailureCount) failure(s)"
         )
+        append(
+            .embed,
+            "embedded \(embeddedCount) of \(chunkCount) chunk(s), \(embedFailureCount) failure(s)"
+                + (vectorDimension.map { ", \($0) dimensions" } ?? "")
+                + (embeddedTokens > 0 ? ", \(embeddedTokens) tokens billed" : "")
+        )
         appendPendingPhases()
     }
 
-    private func chunk(_ document: RTSRAGDocument, with chunker: any RTSRAGChunker) async {
+    private func chunk(
+        _ document: RTSRAGDocument,
+        with chunker: any RTSRAGChunker,
+        embedding: any RTSRAGEmbedding
+    ) async {
+        let chunks: [RTSRAGChunk]
         do {
-            let chunks = try await chunker.chunk(document)
-            chunkCount += chunks.count
-            if previewDocument == nil {
-                previewDocument = document
-                previewChunks = chunks
-            }
+            chunks = try await chunker.chunk(document)
         } catch {
             // A chunker failing one document does not end the run, matching how the loader treats
             // one unreadable file.
             chunkFailureCount += 1
             append(.chunk, "⚠️ \(sourceLabel(document.source)): \(error)")
+            return
+        }
+        chunkCount += chunks.count
+        if previewDocument == nil {
+            previewDocument = document
+            previewChunks = chunks
+        }
+        await embed(chunks, from: document, with: embedding)
+    }
+
+    /// Embeds one document's chunks, which is the pipeline's real unit: a document is embedded
+    /// whole before anything about it is committed, so a batch that never succeeds means simply
+    /// not committing rather than storing a partial document.
+    private func embed(
+        _ chunks: [RTSRAGChunk],
+        from document: RTSRAGDocument,
+        with embedding: any RTSRAGEmbedding
+    ) async {
+        guard !chunks.isEmpty else {
+            return
+        }
+        for outcome in await embedding.embed(chunks) {
+            switch outcome {
+            case .embedded(let embedded, let metrics):
+                embeddedCount += embedded.count
+                embeddedTokens += metrics.inputTokens ?? 0
+                if vectorDimension == nil {
+                    vectorDimension = embedded.first?.vector.count
+                }
+            case .failed(let failure):
+                embedFailureCount += failure.chunks.count
+                append(
+                    .embed,
+                    "⚠️ \(sourceLabel(document.source)) [\(failure.kind)] "
+                        + "\(failure.chunks.count) chunk(s) after \(failure.attempts) attempt(s): "
+                        + failure.underlying
+                )
+            }
         }
     }
 
@@ -395,7 +481,35 @@ class RAGViewModel {
         failureCount = 0
         chunkCount = 0
         chunkFailureCount = 0
+        embeddedCount = 0
+        embedFailureCount = 0
+        embeddedTokens = 0
+        vectorDimension = nil
         previewDocument = nil
         previewChunks = []
+    }
+
+    /// Builds the chosen embedder, or reports why it cannot be built.
+    ///
+    /// Both failure modes are real and worth showing rather than crashing: the on-device model may
+    /// not have downloaded its assets, and the OpenAI path needs a key in the Keychain.
+    private func makeEmbedder() async -> (any RTSRAGEmbedding)? {
+        switch embedder {
+        case .apple:
+            do {
+                let apple = try RTSRAGAppleEmbedding()
+                try await apple.prepare()
+                return apple
+            } catch {
+                append(.embed, "❌ \(error)")
+                return nil
+            }
+        case .openAI:
+            guard let key = KeychainHelper.readOpenAIKey(), !key.isEmpty else {
+                append(.embed, "❌ no OpenAI key in the Keychain")
+                return nil
+            }
+            return RTSRAGOpenAIEmbedding(apiKey: key)
+        }
     }
 }

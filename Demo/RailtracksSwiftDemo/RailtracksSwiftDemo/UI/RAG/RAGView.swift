@@ -52,6 +52,18 @@ struct RAGView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            Picker("Embedder", selection: $viewModel.embedder) {
+                ForEach(RAGViewModel.EmbedderChoice.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(viewModel.isRunning)
+
+            Text(viewModel.embedder.note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Button("Select File or Folder…") {
                 viewModel.selectPath()
             }
@@ -93,6 +105,7 @@ struct RAGView: View {
         "file \(viewModel.sourcesProcessed)/\(viewModel.sourceTotal)"
             + " · \(viewModel.documentCount) doc(s)"
             + " · \(viewModel.chunkCount) chunk(s)"
+            + " · \(viewModel.embeddedCount) embedded"
     }
 
     // MARK: - Status
