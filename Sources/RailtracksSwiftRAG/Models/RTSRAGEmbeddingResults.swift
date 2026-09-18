@@ -103,6 +103,38 @@ public enum RTSRAGEmbeddingFailureKind: Sendable, Hashable {
             return false
         }
     }
+
+    /// Whether the *embedder* is unusable, as opposed to this batch being unembeddable.
+    ///
+    /// The distinction the loaders already draw between a precondition and a per-item failure:
+    /// `stream()` throws when the root path does not exist, while one unreadable file is a
+    /// `.failure` element. Either kind here means **no** batch can succeed, so continuing is at
+    /// best pointless — though for different reasons, and it is worth not conflating them:
+    ///
+    /// - ``quotaExhausted`` is *expensive* to ignore. Every remaining batch spends a network round
+    ///   trip that is certain to be refused — a hundred for a large document, repeated for every
+    ///   document in the corpus.
+    /// - ``modelUnavailable`` is *cheap* to ignore, since it is local and fails immediately. It
+    ///   ends the run for clarity instead: N identical failures and a "0 of 500 embedded" report
+    ///   tell the reader less than one error does. And a later document cannot fare better — an
+    ///   embedder is built once per run and every document gets the same instance, so there is no
+    ///   healthy model waiting further down the corpus.
+    ///
+    ///   The one case it forecloses is a load that failed under memory pressure and would succeed
+    ///   on a retry. Letting the document loop limp on is the wrong way to exploit that — it
+    ///   re-attempts the load implicitly, once per document, with no backoff and no reporting. If
+    ///   it ever matters, the retry belongs inside the embedder's load, where the transience is.
+    ///
+    /// ``invalidInput`` is deliberately *not* here: that batch is unembeddable, the next one may be
+    /// fine, and isolating it is what the bisect is for.
+    public var endsTheRun: Bool {
+        switch self {
+        case .quotaExhausted, .modelUnavailable:
+            return true
+        case .rateLimited, .transient, .invalidInput:
+            return false
+        }
+    }
 }
 
 // MARK: - RTSRAGEmbeddingFailure

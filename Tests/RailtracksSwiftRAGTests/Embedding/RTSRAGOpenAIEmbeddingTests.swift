@@ -120,20 +120,59 @@ struct RTSRAGOpenAIEmbeddingTests {
         StubTransport.respond { _ in
             StubTransport.error(status: 429, code: "rate_limit_exceeded")
         }
-        let limited = await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
+        let limited = try await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
 
         StubTransport.reset()
         StubTransport.respond { _ in
             StubTransport.error(status: 429, code: "insufficient_quota")
         }
-        let exhausted = await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
+        let exhausted = await #expect(throws: RTSRAGEmbeddingError.self) {
+            try await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
+        }
 
-        // The same status code meaning opposite things. Python catches bare `Exception` and draws
-        // no distinction, so an out-of-credit key buys a full retry pass on every document.
+        // The same status code meaning opposite things, and now with opposite *control flow*: a
+        // rate limit is this batch's problem and comes back as a value, while an exhausted account
+        // is the embedder's and ends the call. Python catches bare `Exception` and draws neither
+        // distinction, so an out-of-credit key buys a full pass over every document.
         #expect(limited.first?.failure?.kind == .rateLimited)
-        #expect(exhausted.first?.failure?.kind == .quotaExhausted)
         #expect(limited.first?.failure?.kind.isWorthRetrying == true)
-        #expect(exhausted.first?.failure?.kind.isWorthRetrying == false)
+        #expect(exhausted?.embeddingFailureKind == .quotaExhausted)
+        #expect(exhausted?.embeddingFailureKind.endsTheRun == true)
+    }
+
+    @Test("an implausible Retry-After ends the run instead of stalling it")
+    func implausibleRetryAfterIsRefused() async throws {
+        StubTransport.reset()
+        StubTransport.respond { _ in
+            StubTransport.error(status: 429, code: "rate_limit_exceeded")
+        }
+        // Epoch seconds where delta-seconds were meant — the common unit bug. Obeying it would hold
+        // the governor for ~56 years: no crash, no log, just a run that never finishes and gives a
+        // reader nothing to investigate. Refusing it names the value and points at the sender.
+        StubTransport.headers = ["Retry-After": "1789000000"]
+
+        let error = await #expect(throws: RTSRAGEmbeddingError.self) {
+            try await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
+        }
+
+        #expect(error?.embeddingFailureKind == .modelUnavailable)
+        #expect(error?.embeddingFailureKind.endsTheRun == true)
+        #expect(error?.message.contains("1789000000") == true)
+    }
+
+    @Test("a plausible Retry-After is obeyed")
+    func plausibleRetryAfterIsKept() async throws {
+        StubTransport.reset()
+        StubTransport.respond { _ in
+            StubTransport.error(status: 429, code: "rate_limit_exceeded")
+        }
+        StubTransport.headers = ["Retry-After": "2"]
+
+        let outcomes = try await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
+
+        // The refusal must not become a blanket distrust of the header: a real instruction still
+        // comes back as an ordinary rate-limited failure, not a run-ending one.
+        #expect(outcomes.first?.failure?.kind == .rateLimited)
     }
 
     @Test("a 400 is permanent, a 500 is transient")
@@ -142,13 +181,13 @@ struct RTSRAGOpenAIEmbeddingTests {
         StubTransport.respond { _ in
             StubTransport.error(status: 400, code: "invalid_request_error")
         }
-        let bad = await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
+        let bad = try await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
 
         StubTransport.reset()
         StubTransport.respond { _ in
             StubTransport.error(status: 503, code: nil)
         }
-        let down = await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
+        let down = try await makeEmbedder().embed([chunk("a")], maxAttempts: 1)
 
         #expect(bad.first?.failure?.kind == .invalidInput)
         #expect(down.first?.failure?.kind == .transient)
@@ -163,7 +202,7 @@ struct RTSRAGOpenAIEmbeddingTests {
             StubTransport.error(status: 400, code: "invalid_request_error")
         }
 
-        let outcomes = await makeEmbedder().embed([chunk("a")], batchSize: 1)
+        let outcomes = try await makeEmbedder().embed([chunk("a")], batchSize: 1)
 
         // Pre-filtering the unretryable ones is the tempting shortcut and loses the failures a
         // human most needs to see. Classification is a label, not a filter.
@@ -186,7 +225,7 @@ struct RTSRAGOpenAIEmbeddingTests {
         }
 
         let chunks = ["a", "b", "poison", "d", "e", "f", "g", "h"].map { chunk($0) }
-        let outcomes = await makeEmbedder().embed(chunks, batchSize: 8)
+        let outcomes = try await makeEmbedder().embed(chunks, batchSize: 8)
 
         // Without the split, one bad chunk denies the other seven — and against OpenAI's array
         // request that is up to 512, which the phase 6 commit rule would turn into a lost
@@ -202,17 +241,35 @@ struct RTSRAGOpenAIEmbeddingTests {
     func rateLimitIsNotBisected() async throws {
         StubTransport.reset()
         StubTransport.respond { _ in
-            StubTransport.error(status: 429, code: "insufficient_quota")
+            StubTransport.error(status: 429, code: "rate_limit_exceeded")
         }
 
         let chunks = ["a", "b", "c", "d"].map { chunk($0) }
-        let outcomes = await makeEmbedder().embed(chunks, batchSize: 4)
+        let outcomes = try await makeEmbedder().embed(chunks, batchSize: 4, maxAttempts: 1)
 
         // Splitting here would double the requests while the account is already refusing them,
         // and would report four failures where there is one condition.
         #expect(StubTransport.requestCount == 1)
         #expect(outcomes.count == 1)
         #expect(outcomes.first?.failure?.chunks.count == 4)
+    }
+
+    @Test("an exhausted account stops the run instead of retrying every batch")
+    func quotaExhaustionStopsTheRun() async throws {
+        StubTransport.reset()
+        StubTransport.respond { _ in
+            StubTransport.error(status: 429, code: "insufficient_quota")
+        }
+        let chunks = (0..<50).map { chunk("chunk \($0)") }
+
+        await #expect(throws: RTSRAGEmbeddingError.self) {
+            try await makeEmbedder().embed(chunks, batchSize: 1)
+        }
+
+        // The point of classifying `insufficient_quota` apart from a rate limit. Continuing would
+        // spend one doomed request per remaining batch — fifty here, and again for every document
+        // in the corpus — when the first refusal already said no rate will help.
+        #expect(StubTransport.requestCount == 1)
     }
 
     @Test("one failing batch does not take the others down")
@@ -224,7 +281,7 @@ struct RTSRAGOpenAIEmbeddingTests {
                 : StubTransport.embeddings(count: 1, tokens: 3)
         }
 
-        let outcomes = await makeEmbedder()
+        let outcomes = try await makeEmbedder()
             .embed([chunk("a"), chunk("b"), chunk("c")], batchSize: 1, maxAttempts: 1)
 
         #expect(outcomes.count == 3)
@@ -240,7 +297,7 @@ struct RTSRAGOpenAIEmbeddingTests {
             StubTransport.embeddings(count: 2, tokens: 5)   // two vectors for three inputs
         }
 
-        let outcomes = await makeEmbedder()
+        let outcomes = try await makeEmbedder()
             .embed([chunk("a"), chunk("b"), chunk("c")], batchSize: 3, maxAttempts: 1)
 
         // Without this guard every chunk after the gap silently receives its neighbour's vector —
@@ -260,7 +317,7 @@ struct RTSRAGOpenAIEmbeddingTests {
                 : StubTransport.embeddings(count: 1, tokens: 7)
         }
 
-        let outcomes = await makeEmbedder().embed([chunk("a")], batchSize: 1)
+        let outcomes = try await makeEmbedder().embed([chunk("a")], batchSize: 1)
 
         #expect(StubTransport.requestCount == 2)
         #expect(outcomes.first?.failure == nil)
@@ -271,16 +328,17 @@ struct RTSRAGOpenAIEmbeddingTests {
     func permanentFailureSkipsTheRetry() async throws {
         StubTransport.reset()
         StubTransport.respond { _ in
-            StubTransport.error(status: 429, code: "insufficient_quota")
+            StubTransport.error(status: 400, code: "invalid_request_error")
         }
 
-        let outcomes = await makeEmbedder().embed([chunk("a")], batchSize: 1)
+        let outcomes = try await makeEmbedder().embed([chunk("a")], batchSize: 1)
 
-        // The half worth pinning: an out-of-credit key would otherwise buy a second full pass over
-        // every document in the corpus, for nothing.
+        // A malformed input fails identically forever, so a second attempt is pure waste. Uses a
+        // 400 rather than an exhausted quota because the latter now ends the call outright — see
+        // `quotaExhaustionStopsTheRun`.
         #expect(StubTransport.requestCount == 1)
         #expect(outcomes.first?.failure?.attempts == 1)
-        #expect(outcomes.first?.failure?.kind == .quotaExhausted)
+        #expect(outcomes.first?.failure?.kind == .invalidInput)
     }
 
     // MARK: - Helpers

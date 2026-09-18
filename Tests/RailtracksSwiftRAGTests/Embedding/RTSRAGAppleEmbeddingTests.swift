@@ -116,7 +116,7 @@ struct RTSRAGAppleEmbeddingTests {
             index: 0
         )
 
-        let outcomes = await embedder.embed([chunk])
+        let outcomes = try await embedder.embed([chunk])
 
         #expect(embedder.maxInputCharacters == 512)
         #expect(outcomes.first?.failure == nil)
@@ -141,7 +141,7 @@ struct RTSRAGAppleEmbeddingTests {
         let long = Array(repeating: "The quick brown fox jumped over the lazy dog.", count: 120)
             .joined(separator: " ")
 
-        let outcomes = await embedder.embed([
+        let outcomes = try await embedder.embed([
             RTSRAGChunk(content: long, documentID: RTSRAGDocumentID(UUID()), index: 0)
         ])
 
@@ -173,7 +173,7 @@ struct RTSRAGAppleEmbeddingTests {
             index: 0
         )
 
-        let failure = try #require(await embedder.embed([chunk]).first?.failure)
+        let failure = try #require(try await embedder.embed([chunk]).first?.failure)
 
         let suggested = Self.suggestedCharacters(in: failure.underlying)
         #expect(failure.kind == .invalidInput)
@@ -199,7 +199,7 @@ struct RTSRAGAppleEmbeddingTests {
             index: 3
         )
 
-        let outcomes = await embedder.embed([chunk])
+        let outcomes = try await embedder.embed([chunk])
 
         let embedded = try #require(outcomes.first?.embeddedChunks.first)
         #expect(embedded.chunk.index == 3)

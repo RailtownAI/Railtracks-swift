@@ -514,7 +514,18 @@ class RAGViewModel {
             switch element {
             case .success(let document):
                 documentCount += 1
-                await chunk(document, with: chunking, embedding: embedding)
+                do {
+                    try await chunk(document, with: chunking, embedding: embedding)
+                } catch {
+                    // The embedder itself is unusable — an exhausted account, or a model that
+                    // cannot load. The embedder is built once for the whole run, so every
+                    // remaining document would fail identically on the same instance: continuing
+                    // spends a doomed request per batch across the corpus in the first case, and
+                    // reports the same error N times in the second.
+                    append(.embed, "❌ \(error)")
+                    append(.embed, "run stopped — no further documents attempted")
+                    return
+                }
             case .failure(let error):
                 // One unreadable file does not end the run — that is the library's departure from
                 // the Python engine, and this is where it shows.
@@ -541,11 +552,13 @@ class RAGViewModel {
         appendPendingPhases()
     }
 
+    /// - Throws: only when the *embedder* is unusable. A chunker failing one document is caught
+    ///   here and counted, because that is a per-document problem; an exhausted account is not.
     private func chunk(
         _ document: RTSRAGDocument,
         with chunker: any RTSRAGChunker,
         embedding: any RTSRAGEmbedding
-    ) async {
+    ) async throws {
         let chunks: [RTSRAGChunk]
         do {
             chunks = try await chunker.chunk(document)
@@ -561,7 +574,7 @@ class RAGViewModel {
             previewDocument = document
             previewChunks = chunks
         }
-        await embed(chunks, from: document, with: embedding)
+        try await embed(chunks, from: document, with: embedding)
     }
 
     /// Embeds one document's chunks, which is the pipeline's real unit: a document is embedded
@@ -571,11 +584,11 @@ class RAGViewModel {
         _ chunks: [RTSRAGChunk],
         from document: RTSRAGDocument,
         with embedding: any RTSRAGEmbedding
-    ) async {
+    ) async throws {
         guard !chunks.isEmpty else {
             return
         }
-        for outcome in await embedding.embed(chunks) {
+        for outcome in try await embedding.embed(chunks) {
             switch outcome {
             case .embedded(let embedded, let metrics):
                 embeddedCount += embedded.count

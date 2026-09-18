@@ -31,6 +31,27 @@ import Synchronization
 ///   429; its constraint is a non-`Sendable` model that must not be used concurrently, which actor
 ///   isolation solves and a rate limiter does not.
 public actor RTSRAGRateGovernor {
+    
+    /// Below this fraction of budget remaining, shed a permit rather than wait to be refused.
+    private static let headroomFloor = 0.1
+    /// Above this fraction, the budget is ample enough that climbing is safe.
+    private static let headroomCeiling = 0.5
+
+    /// How often thin headroom may step the limit down.
+    ///
+    /// Matches ``backoffDebounce`` so both pressure responses move at most once a second, which is
+    /// roughly one round trip — the rate AIMD is defined at.
+    private static let shedDebounce: TimeInterval = 1
+    
+    /// How long a back-off pauses new starts when the provider names no `Retry-After`.
+    private static let defaultBackoffHold: TimeInterval = 1
+
+    /// Within this of the last back-off, a refusal is treated as the same congestion event.
+    ///
+    /// Deliberately *not* the provider's `Retry-After`: this is about our own in-flight burst, all
+    /// of which is about to be refused too, and a provider asking for a 50ms pause has said nothing
+    /// about how many of our requests were already in the air.
+    private static let backoffDebounce: TimeInterval = 1
 
     /// How many requests may be in flight right now.
     private var limit: Int
@@ -41,13 +62,29 @@ public actor RTSRAGRateGovernor {
     /// keeps the climb gentle enough that it does not immediately re-trip the limit it just found.
     private var successesSinceIncrease = 0
     private let successesPerIncrease: Int
-    /// Set once the provider says the account is out of credit. The limit then never climbs again
-    /// for this governor's lifetime — probing upward cannot help and only wastes requests.
-    private var isCapped = false
     /// Earliest time a new slot may start, honouring a provider's `Retry-After`.
     private var openAt = Date.distantPast
+    /// When the current congestion event began.
+    ///
+    /// Separate from ``openAt`` because the two answer different questions and want different
+    /// minimums: how long to pause is the *provider's* call and may legitimately be very short,
+    /// while what counts as one event is about *our own* burst of in-flight requests. They coincide
+    /// for a typical `Retry-After: 2`, which is what made merging them look right.
+    private var lastBackoffAt = Date.distantPast
+    /// When the limit was last stepped down for thin headroom.
+    ///
+    /// Its own field rather than sharing ``lastBackoffAt``, because the three pressure responses —
+    /// shed, halve, pin — have different strengths and **a weaker one must not suppress a stronger
+    /// one**. Sharing would let a shed swallow a genuine 429's halving, which is backwards: the 429
+    /// is the better evidence.
+    private var lastShedAt = Date.distantPast
     /// Queued acquirers, each wrapped so that a free slot and a cancellation cannot both resume it.
     private var waiters: [CancellationToken] = []
+    
+    /// The current permit count. Exposed for reporting and tests.
+    public var currentLimit: Int {
+        limit
+    }
 
     public init(
         initialLimit: Int = 4,
@@ -55,15 +92,15 @@ public actor RTSRAGRateGovernor {
         maximumLimit: Int = 32,
         successesPerIncrease: Int = 8
     ) {
-        self.limit = max(minimumLimit, min(initialLimit, maximumLimit))
+        // Bounds first, then the limit clamped against the *stored* ones. Computing `limit` from
+        // the raw arguments let `minimumLimit: 0, initialLimit: 0` store a limit of zero while the
+        // floor became one — and `inFlight < 0` is false forever, so nothing could ever acquire and
+        // nothing could raise the limit either, since only a completed request does that. A silent,
+        // permanent hang from an initialiser that accepted the argument without complaint.
         self.minimumLimit = max(1, minimumLimit)
         self.maximumLimit = max(self.minimumLimit, maximumLimit)
+        self.limit = max(self.minimumLimit, min(initialLimit, self.maximumLimit))
         self.successesPerIncrease = max(1, successesPerIncrease)
-    }
-
-    /// The current permit count. Exposed for reporting and tests.
-    public var currentLimit: Int {
-        limit
     }
 
     /// Runs `work` once a slot is free and any back-off window has elapsed.
@@ -94,17 +131,28 @@ public actor RTSRAGRateGovernor {
     ///   `x-ratelimit-remaining-*` on every response, but a compatible gateway or a self-hosted
     ///   endpoint may send nothing, and the AIMD fallback has to still work there.
     public func recordSuccess(headroom: Double? = nil) {
-        guard !isCapped else {
-            return
-        }
         if let headroom {
             // Below the floor the budget is nearly spent, so ease off now rather than wait to be
             // refused. A gentle decrement, not the halving `recordBackoff` uses — nothing has gone
             // wrong yet, and overreacting to a dip would give up throughput the account is still
             // entitled to.
+            //
+            // Debounced for the same reason the halving is, and the case is *more* common: thin
+            // headroom is not an event but a **condition** that persists for the rest of the rate
+            // window. Stepping down per success would take 32 in-flight successes to the floor,
+            // and since a per-minute budget runs thin at the tail of every window, that collapse
+            // would repeat every minute with a climb of one per eight successes to recover.
+            //
+            // `successesSinceIncrease` is still reset on every low-headroom success even when the
+            // step is suppressed — thin budget should stop the climb *continuously*, while only
+            // moving the limit down *periodically*.
             guard headroom > RTSRAGRateGovernor.headroomFloor else {
                 successesSinceIncrease = 0
-                limit = max(minimumLimit, limit - 1)
+                let now = Date()
+                if now.timeIntervalSince(lastShedAt) >= RTSRAGRateGovernor.shedDebounce {
+                    lastShedAt = now
+                    limit = max(minimumLimit, limit - 1)
+                }
                 return
             }
             // Comfortable but not ample: hold. Climbing here is what would trip the limit.
@@ -122,11 +170,6 @@ public actor RTSRAGRateGovernor {
         resumeWaiters()
     }
 
-    /// Below this fraction of budget remaining, shed a permit rather than wait to be refused.
-    private static let headroomFloor = 0.1
-    /// Above this fraction, the budget is ample enough that climbing is safe.
-    private static let headroomCeiling = 0.5
-
     /// The provider asked for less: halve the limit, and hold new slots until `retryAfter` passes.
     ///
     /// Multiplicative decrease rather than a decrement because backing off slowly means spending
@@ -138,36 +181,46 @@ public actor RTSRAGRateGovernor {
         // walks 32 → 16 → 8 → … → 1 from a single round trip, undoing the calibration this exists
         // to hold. AIMD halves once per round trip.
         //
-        // `openAt` already marks the window a back-off opened, so a second arriving inside it is by
-        // definition from the same burst — the window that pauses new starts and the window that
-        // de-duplicates refusals are the same window.
-        guard Date() >= openAt else {
+        // Measured against ``lastBackoffAt`` rather than ``openAt``. An earlier version used the
+        // hold window for both, which coincides for a typical `Retry-After: 2` and breaks at the
+        // degenerate values: `Retry-After: 0` — or a negative one, which `TimeInterval.init` parses
+        // happily from `"-5"` — puts `openAt` at or before now, so the very next refusal passes this
+        // guard and the collapse returns in full.
+        let now = Date()
+        guard now.timeIntervalSince(lastBackoffAt) >= RTSRAGRateGovernor.backoffDebounce else {
             return
         }
+        lastBackoffAt = now
         successesSinceIncrease = 0
         limit = max(minimumLimit, limit / 2)
         // A hold is imposed even without `Retry-After`, where previously there was none. Firing
         // straight back into a limit that just refused you is what produces the burst in the first
-        // place, and it gives the in-flight failures a window to be recognised in.
+        // place.
         //
         // The provider's own figure wins when it sends one, including when it is *shorter* than the
         // default: it knows its limits and we do not, and overriding a deliberate 200ms with a
-        // blanket second would hold back throughput the account is entitled to.
-        openAt = Date().addingTimeInterval(retryAfter ?? RTSRAGRateGovernor.defaultBackoffHold)
+        // blanket second would hold back throughput the account is entitled to. Clamped at zero so
+        // a malformed or negative header cannot push the window into the past.
+        openAt = now.addingTimeInterval(max(0, retryAfter ?? RTSRAGRateGovernor.defaultBackoffHold))
     }
-
-    /// How long a back-off pauses new starts when the provider names no `Retry-After`.
-    ///
-    /// Doubles as the window within which further refusals count as the same congestion event.
-    private static let defaultBackoffHold: TimeInterval = 1
 
     /// The account cannot serve more requests at any rate — out of credit.
     ///
-    /// Distinct from ``recordBackoff(retryAfter:)`` because it shares a status code with it and
-    /// means the opposite: no amount of tuning helps, so the limit is pinned at its floor and never
-    /// climbs again.
+    /// Drops straight to the floor rather than halving, and imposes no hold: unlike a rate limit,
+    /// there is no rate low enough to succeed, so there is nothing to converge on and nothing to
+    /// wait out. The two share a status code and mean opposite things.
+    ///
+    /// - Note: **this cannot help the run that reports it.** `quotaExhausted` is classified
+    ///   `endsTheRun`, so the caller throws and stops as soon as it sees one — the limit never gets
+    ///   used again in that run. What it is for is a governor *shared across runs*, the pattern this
+    ///   type's documentation encourages: the next run then starts at the floor instead of
+    ///   optimistically at `initialLimit`.
+    ///
+    ///   The floor is not a latch. Nothing prevents a later success from climbing back, which is
+    ///   correct — a success is direct evidence the account is funded again, and an earlier version
+    ///   that *did* latch left a shared governor pinned forever after one exhausted run, with no way
+    ///   back short of constructing a new one.
     public func recordFatal() {
-        isCapped = true
         limit = minimumLimit
         successesSinceIncrease = 0
     }
@@ -232,6 +285,12 @@ public actor RTSRAGRateGovernor {
     ///
     /// Tokens already cancelled are dropped without counting against the wake budget — they resumed
     /// themselves and are no longer queueing.
+    ///
+    /// - Note: that is also the *only* place they are reclaimed, so a cancelled waiter's token sits
+    ///   in `waiters` until the next drain. Deliberate: removing it at cancellation time would need
+    ///   a `Task` hop onto the actor from the `@Sendable` handler, which costs more than the ~60
+    ///   bytes it frees, and the entries go anyway the moment any slot frees. Only a governor that
+    ///   takes cancellations and then idles forever holds them — and it is about to be deallocated.
     private func resumeWaiters() {
         // Counted locally rather than re-reading `inFlight`, which does not move until each woken
         // task actually takes its permit. Testing `inFlight < limit` in the loop condition is true

@@ -51,6 +51,36 @@ struct RTSRAGRateGovernorTests {
         #expect(await limitAfter(headroom: 0.02, successes: 1) == 3)  // nearly spent → sheds
     }
 
+    @Test("thin headroom steps down once, not once per success")
+    func shedIsDebounced() async {
+        let governor = RTSRAGRateGovernor(initialLimit: 32, maximumLimit: 32, successesPerIncrease: 1)
+
+        // Thin headroom is a **condition**, not an event: it persists for the rest of the rate
+        // window. Stepping down per success takes 32 in-flight successes to the floor — and since a
+        // per-minute budget runs thin at the tail of every window, that collapse would repeat every
+        // minute, recovering at one per `successesPerIncrease`.
+        for _ in 0..<32 {
+            await governor.recordSuccess(headroom: 0.02)
+        }
+
+        #expect(await governor.currentLimit == 31)
+    }
+
+    @Test("a shed does not suppress a genuine refusal's halving")
+    func shedDoesNotSwallowBackoff() async {
+        let governor = RTSRAGRateGovernor(initialLimit: 16, maximumLimit: 16)
+
+        await governor.recordSuccess(headroom: 0.02)
+        let afterShed = await governor.currentLimit
+        await governor.recordBackoff()
+
+        // The two responses have different strengths and separate timers, so the weaker one cannot
+        // swallow the stronger. Sharing a debounce field would have let this shed eat the 429's
+        // halving for a second — backwards, since the refusal is the better evidence.
+        #expect(afterShed == 15)
+        #expect(await governor.currentLimit == 7)
+    }
+
     @Test("shedding on thin headroom is gentler than backing off after a refusal")
     func headroomShedIsGentlerThanBackoff() async {
         let shed = RTSRAGRateGovernor(initialLimit: 8, maximumLimit: 16)
@@ -117,17 +147,34 @@ struct RTSRAGRateGovernorTests {
 
     @Test("a back-off after the window halves again", .timeLimit(.minutes(1)))
     func backoffAfterTheWindowHalvesAgain() async {
-        // A short `Retry-After` so the window is known and brief rather than the one-second default.
         let governor = RTSRAGRateGovernor(initialLimit: 8, maximumLimit: 16)
 
         await governor.recordBackoff(retryAfter: 0.2)
         let once = await governor.currentLimit
-        try? await Task.sleep(nanoseconds: 350_000_000)
+        try? await Task.sleep(nanoseconds: 1_100_000_000)
         await governor.recordBackoff(retryAfter: 0.2)
 
         // Debouncing must not become deafness: a genuinely separate event still halves.
         #expect(once == 4)
         #expect(await governor.currentLimit == 2)
+    }
+
+    @Test("a zero or negative Retry-After cannot defeat the debounce")
+    func degenerateRetryAfterStillDebounces() async {
+        let zero = RTSRAGRateGovernor(initialLimit: 32, maximumLimit: 32)
+        let negative = RTSRAGRateGovernor(initialLimit: 32, maximumLimit: 32)
+
+        // The debounce used to be measured against the *hold* window, so a `Retry-After` of 0 — or
+        // a negative one, which `TimeInterval.init` parses happily from `"-5"` — put that window at
+        // or before now and the very next refusal halved again. Thirty-two refusals from one burst
+        // took the limit to the floor, which is exactly what the debounce exists to stop.
+        for _ in 0..<32 {
+            await zero.recordBackoff(retryAfter: 0)
+            await negative.recordBackoff(retryAfter: -5)
+        }
+
+        #expect(await zero.currentLimit == 16)
+        #expect(await negative.currentLimit == 16)
     }
 
     @Test("the limit never falls below its floor")
@@ -147,15 +194,26 @@ struct RTSRAGRateGovernorTests {
         let governor = RTSRAGRateGovernor(initialLimit: 8, maximumLimit: 16, successesPerIncrease: 1)
 
         await governor.recordFatal()
-        let afterFatal = await governor.currentLimit
-        for _ in 0..<20 {
+
+        // `quotaExhausted` shares a status code with rate limiting and means the opposite: no rate
+        // is low enough to succeed, so the limit drops to the floor rather than being halved.
+        #expect(await governor.currentLimit == 1)
+    }
+
+    @Test("the floor is not a latch — later successes climb back")
+    func successClimbsBackFromTheFloor() async {
+        let governor = RTSRAGRateGovernor(initialLimit: 8, maximumLimit: 16, successesPerIncrease: 1)
+
+        await governor.recordFatal()
+        for _ in 0..<4 {
             await governor.recordSuccess()
         }
 
-        // `quotaExhausted` shares a status code with rate limiting and means the opposite: no rate
-        // is low enough to succeed, so probing upward only wastes requests.
-        #expect(afterFatal == 1)
-        #expect(await governor.currentLimit == 1)
+        // The floor is not a latch. A success is direct evidence the account is funded again, and
+        // an earlier version that latched left a governor shared across runs — the pattern the type
+        // documents — pinned forever after one exhausted run, with no way back short of building a
+        // new one.
+        #expect(await governor.currentLimit == 5)
     }
 
     @Test("concurrent work never exceeds the limit in flight")

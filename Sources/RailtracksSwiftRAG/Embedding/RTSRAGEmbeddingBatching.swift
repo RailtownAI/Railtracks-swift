@@ -28,13 +28,21 @@ public extension RTSRAGEmbedding {
     ///   - chunks: The chunks to embed, in order.
     ///   - batchSize: Texts per request. Defaults to ``RTSRAGEmbedding/defaultBatchSize``.
     ///   - maxAttempts: Attempts per batch, including the first. `1` disables retrying.
-    /// - Returns: One outcome per batch, in batch order. Never throws: a batch that cannot be
-    ///   embedded comes back as ``RTSRAGEmbeddingBatchOutcome/failed(_:)`` carrying its chunks.
+    /// - Returns: One outcome per batch, in batch order. A batch that cannot be embedded comes back
+    ///   as ``RTSRAGEmbeddingBatchOutcome/failed(_:)`` carrying its chunks.
+    /// - Throws: ``RTSRAGEmbeddingError`` when the **embedder** is unusable rather than the batch —
+    ///   an exhausted account or an unavailable model. That is the same line the loaders draw
+    ///   between a precondition and a per-item failure, and it is what stops a dead API key
+    ///   spending one doomed request per remaining batch, for every document in the corpus.
+    ///
+    ///   Nothing useful is lost by abandoning the outcomes already collected: a document holding
+    ///   any failure of this class is not committed anyway, so those embeddings were never going to
+    ///   be stored.
     func embed(
         _ chunks: [RTSRAGChunk],
         batchSize: Int? = nil,
         maxAttempts: Int = 2
-    ) async -> [RTSRAGEmbeddingBatchOutcome] {
+    ) async throws -> [RTSRAGEmbeddingBatchOutcome] {
         guard !chunks.isEmpty else {
             return []
         }
@@ -45,7 +53,14 @@ public extension RTSRAGEmbedding {
             let batch = Array(chunks[index..<min(index + size, chunks.count)])
             // `contentsOf`, because a batch rejected for its *content* is split to isolate the
             // offender and therefore yields several outcomes rather than one.
-            outcomes.append(contentsOf: await embedOneBatch(batch, maxAttempts: maxAttempts))
+            let batchOutcomes = await embedOneBatch(batch, maxAttempts: maxAttempts)
+            if let fatal = batchOutcomes.compactMap({ $0.failure }).first(where: { $0.kind.endsTheRun }) {
+                throw RTSRAGEmbeddingError(
+                    kind: fatal.kind,
+                    message: "embedding stopped after \(outcomes.count) batch(es): \(fatal.underlying)"
+                )
+            }
+            outcomes.append(contentsOf: batchOutcomes)
             index += size
         }
         return outcomes

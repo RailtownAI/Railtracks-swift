@@ -153,7 +153,7 @@ public struct RTSRAGOpenAIEmbedding: RTSRAGEmbedding {
         }
         let message = String(data: body, encoding: .utf8) ?? "status \(response.statusCode)"
         let code = Self.errorCode(in: body)
-        let retryAfter = response.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
+        let retryAfter = try Self.retryAfter(in: response)
 
         switch response.statusCode {
         case 429 where code == "insufficient_quota":
@@ -170,6 +170,50 @@ public struct RTSRAGOpenAIEmbedding: RTSRAGEmbedding {
             // request will fail the same way forever, so it must not consume the retry budget.
             throw RTSRAGEmbeddingError(kind: .invalidInput, message: message)
         }
+    }
+
+    /// Longer than any legitimate embedding rate window, so a larger value is a bug at the sender
+    /// rather than an instruction.
+    ///
+    /// The two ways it happens are both unit confusion: epoch seconds sent where delta-seconds were
+    /// meant (~56 years), or milliseconds sent as seconds (a 33-minute hold for an intended 2). Only
+    /// the first is large enough to overflow the nanosecond conversion, and even that needs ~584
+    /// years — so the realistic outcome of obeying one is not a crash but a **silent stall** with
+    /// nothing to investigate.
+    private static let implausibleRetryAfter: TimeInterval = 300
+
+    /// The `Retry-After` header, refusing a value that cannot be a real instruction.
+    ///
+    /// Throws rather than clamping deliberately. Clamping would keep the run alive on a value we
+    /// know is wrong, which hides the sender's bug — and the bug is the thing worth finding. This
+    /// ends the run, names the value and points at the gateway, which is what a crash would achieve
+    /// except that a library should not take its host process down over a third party's header.
+    ///
+    /// Classified ``RTSRAGEmbeddingFailureKind/modelUnavailable`` because a provider speaking
+    /// nonsense means no batch can succeed — the same row of the taxonomy as an unloadable model.
+    private static func retryAfter(in response: HTTPURLResponse) throws -> TimeInterval? {
+        guard let raw = response.value(forHTTPHeaderField: "Retry-After") else {
+            return nil
+        }
+        // A non-numeric value is the RFC's HTTP-date form, which we do not read: falling back to
+        // the governor's own hold is right, and is not a sender bug.
+        guard let seconds = TimeInterval(raw) else {
+            return nil
+        }
+        guard seconds <= RTSRAGOpenAIEmbedding.implausibleRetryAfter else {
+            ragLog.error(
+                "📚 Retry-After of \(seconds)s from \(response.url?.host() ?? "the provider") is not a usable instruction — check the gateway"
+            )
+            throw RTSRAGEmbeddingError(
+                kind: .modelUnavailable,
+                message: """
+                provider sent Retry-After: \(raw), which is \(Int(seconds / 86_400)) day(s) — \
+                refusing it rather than stalling the run; the sender is likely sending epoch \
+                seconds or milliseconds where delta-seconds were expected
+                """
+            )
+        }
+        return seconds
     }
 
     private static func errorCode(in body: Data) -> String? {
