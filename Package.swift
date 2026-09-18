@@ -24,6 +24,14 @@ let package = Package(
             name: "RailtracksSwiftUI",
             targets: ["RailtracksSwiftUI"]
         ),
+        // Retrieval-augmented generation: loaders, chunkers, embedders and vector stores.
+        // A separate product so consumers opt in — the SPM equivalent of the Python engine's
+        // `pip install railtracks[retrieval]` extra — and so the module stays cheap to extract
+        // into its own repository later.
+        .library(
+            name: "RailtracksSwiftRAG",
+            targets: ["RailtracksSwiftRAG"]
+        ),
     ],
     dependencies: [
         .package(
@@ -47,11 +55,18 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
-            exact: "1.0.0"
+            .upToNextMinor(from: "1.0.0")
         ),
         .package(
             url: "https://github.com/RailtownAI/railtown-swift-logger.git",
             .upToNextMinor(from: "0.3.1")
+        ),
+        // Declared rather than relied on transitively through Conduit: RailtracksSwiftRAG hashes
+        // document sources and content, and an undeclared import would break the moment that
+        // module is lifted into its own package.
+        .package(
+            url: "https://github.com/apple/swift-crypto.git",
+            from: "4.5.0"
         ),
     ],
     targets: [
@@ -82,6 +97,21 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
             ]
         ),
+        // Retrieval / RAG. Deliberately **does not depend on RailtracksSwift**: nothing in the
+        // pipeline needs agent orchestration. Embedding goes straight to Conduit, and even the
+        // semantic chunker splits on embedding distance rather than asking a model. The Python
+        // engine's `railtracks/retrieval` is standalone for the same reason — it imports the
+        // agent runtime nowhere, leaving the tool wrapper to user code.
+        //
+        // That keeps the module liftable into its own package by moving the folder.
+        .target(
+            name: "RailtracksSwiftRAG",
+            dependencies: [
+                .product(name: "Conduit", package: "Conduit"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
+        ),
         .testTarget(
             name: "RailtracksSwiftTests",
             dependencies: [
@@ -90,6 +120,12 @@ let package = Package(
                 // GeminiOptionsTests asserts against Conduit's GenerateConfig / GeminiOptions
                 // directly, so the import is declared rather than inherited transitively.
                 .product(name: "Conduit", package: "Conduit"),
+            ]
+        ),
+        .testTarget(
+            name: "RailtracksSwiftRAGTests",
+            dependencies: [
+                "RailtracksSwiftRAG",
             ]
         ),
     ],
