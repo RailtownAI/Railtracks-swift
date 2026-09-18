@@ -233,9 +233,16 @@ public actor RTSRAGRateGovernor {
     /// Tokens already cancelled are dropped without counting against the wake budget — they resumed
     /// themselves and are no longer queueing.
     private func resumeWaiters() {
-        while inFlight < limit, !waiters.isEmpty {
+        // Counted locally rather than re-reading `inFlight`, which does not move until each woken
+        // task actually takes its permit. Testing `inFlight < limit` in the loop condition is true
+        // throughout, so one freed slot would wake *every* waiter and all but one would re-queue —
+        // O(N) wakeups and N fresh tokens per slot.
+        var available = limit - inFlight
+        while available > 0, !waiters.isEmpty {
+            // A token that cancellation already resolved is discarded without spending a slot: it
+            // resumed itself and is no longer queueing for one.
             if waiters.removeFirst().resumeIfWaiting() {
-                continue
+                available -= 1
             }
         }
     }

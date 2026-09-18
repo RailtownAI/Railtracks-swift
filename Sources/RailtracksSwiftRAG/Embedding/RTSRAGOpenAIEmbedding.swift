@@ -20,7 +20,14 @@ import Foundation
 /// several embedders that share an API key is deliberate — the limit is enforced per key, so two
 /// embedders discovering it independently would each pay for the discovery.
 ///
-/// `baseURL` makes Azure OpenAI and compatible gateways reachable without a second type.
+/// `baseURL` reaches **OpenAI-compatible gateways** — Together, Groq, vLLM, a LiteLLM proxy —
+/// without a second type, since they take the same body, the same `/embeddings` path and the same
+/// `Authorization: Bearer` header.
+///
+/// - Note: **Azure OpenAI is not among them**, despite an earlier claim here. Its URL shape does
+///   work — `appendingPathComponent` preserves the mandatory `?api-version=` query — but it
+///   authenticates with an `api-key` header rather than `Authorization: Bearer`, and that header is
+///   fixed below. Supporting it needs an `extraHeaders` parameter, not just a different `baseURL`.
 public struct RTSRAGOpenAIEmbedding: RTSRAGEmbedding {
 
     public let modelIdentifier: String
