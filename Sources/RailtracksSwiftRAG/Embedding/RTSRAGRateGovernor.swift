@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 /// An adaptive concurrency limiter that converges on the rate a provider actually accepts.
 ///
@@ -45,7 +46,8 @@ public actor RTSRAGRateGovernor {
     private var isCapped = false
     /// Earliest time a new slot may start, honouring a provider's `Retry-After`.
     private var openAt = Date.distantPast
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    /// Queued acquirers, each wrapped so that a free slot and a cancellation cannot both resume it.
+    private var waiters: [CancellationToken] = []
 
     public init(
         initialLimit: Int = 4,
@@ -130,12 +132,34 @@ public actor RTSRAGRateGovernor {
     /// Multiplicative decrease rather than a decrement because backing off slowly means spending
     /// the interval still being refused — the point is to get under the limit quickly and re-climb.
     public func recordBackoff(retryAfter: TimeInterval? = nil) {
+        // **Halve once per congestion event, not once per refusal.** Every request already in
+        // flight when the limit dropped is about to be refused too, and those refusals are the same
+        // event rather than new information: with 32 in flight and all refused, halving per failure
+        // walks 32 → 16 → 8 → … → 1 from a single round trip, undoing the calibration this exists
+        // to hold. AIMD halves once per round trip.
+        //
+        // `openAt` already marks the window a back-off opened, so a second arriving inside it is by
+        // definition from the same burst — the window that pauses new starts and the window that
+        // de-duplicates refusals are the same window.
+        guard Date() >= openAt else {
+            return
+        }
         successesSinceIncrease = 0
         limit = max(minimumLimit, limit / 2)
-        if let retryAfter, retryAfter > 0 {
-            openAt = max(openAt, Date().addingTimeInterval(retryAfter))
-        }
+        // A hold is imposed even without `Retry-After`, where previously there was none. Firing
+        // straight back into a limit that just refused you is what produces the burst in the first
+        // place, and it gives the in-flight failures a window to be recognised in.
+        //
+        // The provider's own figure wins when it sends one, including when it is *shorter* than the
+        // default: it knows its limits and we do not, and overriding a deliberate 200ms with a
+        // blanket second would hold back throughput the account is entitled to.
+        openAt = Date().addingTimeInterval(retryAfter ?? RTSRAGRateGovernor.defaultBackoffHold)
     }
+
+    /// How long a back-off pauses new starts when the provider names no `Retry-After`.
+    ///
+    /// Doubles as the window within which further refusals count as the same congestion event.
+    private static let defaultBackoffHold: TimeInterval = 1
 
     /// The account cannot serve more requests at any rate — out of credit.
     ///
@@ -150,21 +174,52 @@ public actor RTSRAGRateGovernor {
 
     // MARK: - Permits
 
+    /// Takes a permit, waiting for a free slot and for any back-off window to elapse.
+    ///
+    /// **Cancellation ends the wait rather than being swallowed**, and both halves of that matter:
+    ///
+    /// - A cancelled `Task.sleep` throws *immediately*. An earlier version wrote
+    ///   `try? await Task.sleep(…)` and then `continue`, which recomputed the same positive wait
+    ///   and slept again — a hot loop burning a core for the whole `Retry-After` window. Measured at
+    ///   200,000 iterations in half a second.
+    /// - A continuation has no cancellation handling of its own, so a task cancelled while queued
+    ///   would never be resumed: `withSlot` would never return and its caller's cleanup would never
+    ///   run. Hence ``CancellationToken`` and the handler below.
+    ///
+    /// A cancelled acquire still takes its permit, so `withSlot`'s `defer` releases exactly one.
+    /// The cancellation is then observed by `work` itself, which is where it belongs.
     private func acquire() async {
-        while true {
+        while !Task.isCancelled {
             let wait = openAt.timeIntervalSinceNow
             if wait > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                } catch {
+                    break
+                }
                 continue
             }
             if inFlight < limit {
                 inFlight += 1
                 return
             }
-            await withCheckedContinuation { continuation in
-                waiters.append(continuation)
+            let token = CancellationToken()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    // The handler may already have fired between the `isCancelled` check and here,
+                    // in which case resume now rather than joining a queue nothing will drain.
+                    if token.claim(continuation) == false {
+                        continuation.resume()
+                    } else {
+                        waiters.append(token)
+                    }
+                }
+            } onCancel: {
+                token.cancel()
             }
         }
+        // Cancelled: take the permit anyway so the release in `withSlot` stays balanced.
+        inFlight += 1
     }
 
     private func release() {
@@ -174,9 +229,73 @@ public actor RTSRAGRateGovernor {
 
     /// Wakes as many waiters as there are free slots. Woken waiters re-check rather than assume a
     /// slot is theirs, so a limit that shrank between wake and resume is still respected.
+    ///
+    /// Tokens already cancelled are dropped without counting against the wake budget — they resumed
+    /// themselves and are no longer queueing.
     private func resumeWaiters() {
         while inFlight < limit, !waiters.isEmpty {
-            waiters.removeFirst().resume()
+            if waiters.removeFirst().resumeIfWaiting() {
+                continue
+            }
         }
+    }
+}
+
+// MARK: - CancellationToken
+
+/// Holds a queued waiter's continuation so that either the governor or a cancellation can resume
+/// it, whichever happens first, and never both.
+///
+/// A plain `CheckedContinuation` cannot be handed to a cancellation handler safely: the handler runs
+/// on an arbitrary thread, outside the actor, so the race between "the governor freed a slot" and
+/// "this task was cancelled" needs its own lock. Resuming twice traps; resuming never hangs.
+/// `Mutex` rather than a lock held by hand, and rather than a serial `DispatchQueue`: `sync` would
+/// block a cooperative-pool thread from inside the cancellation handler, `async` could not return
+/// the `Bool` `claim` needs, and a queue per queued acquire is far heavier than this. Every
+/// critical section here is a few assignments, which is exactly what a mutex is for.
+private final class CancellationToken: Sendable {
+
+    private struct State {
+        var continuation: CheckedContinuation<Void, Never>?
+        var isResolved = false
+    }
+
+    private let state = Mutex(State())
+
+    /// Stores the continuation, or reports `false` when cancellation already won.
+    func claim(_ continuation: CheckedContinuation<Void, Never>) -> Bool {
+        state.withLock { state in
+            guard !state.isResolved else {
+                return false
+            }
+            state.continuation = continuation
+            return true
+        }
+    }
+
+    /// Resumes because a slot is free. `false` when cancellation got there first.
+    func resumeIfWaiting() -> Bool {
+        // Taken out of the lock before resuming: a resume is cheap but it is still someone else's
+        // code, and holding a lock across it is the habit that eventually deadlocks.
+        let pending = state.withLock { state -> (CheckedContinuation<Void, Never>?, Bool) in
+            let continuation = state.continuation
+            let wasResolved = state.isResolved
+            state.continuation = nil
+            state.isResolved = true
+            return (continuation, wasResolved)
+        }
+        pending.0?.resume()
+        return !pending.1
+    }
+
+    /// Resumes because the task was cancelled, so `acquire` can re-check and bail out.
+    func cancel() {
+        let pending = state.withLock { state -> CheckedContinuation<Void, Never>? in
+            let continuation = state.continuation
+            state.continuation = nil
+            state.isResolved = true
+            return continuation
+        }
+        pending?.resume()
     }
 }

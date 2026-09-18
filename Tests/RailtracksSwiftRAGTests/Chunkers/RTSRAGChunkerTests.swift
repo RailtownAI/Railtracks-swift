@@ -280,6 +280,34 @@ struct RTSRAGChunkerTests {
 
     // MARK: - Custom splitter
 
+    @Test("a misbehaving splitter cannot produce empty chunks or broken offsets")
+    func malformedSplitterRangesAreNormalised() async throws {
+        let text = "Alpha beta gamma. Delta epsilon zeta. Eta theta iota."
+        let document = RTSRAGDocument(content: text, source: "file:///a.txt")
+
+        let chunks = try await RTSRAGSentenceChunker(
+            maxCharacters: 40,
+            overlapSentences: 0,
+            splitter: MisbehavingSplitter(text: text)
+        ).chunk(document)
+
+        // `RTSRAGSplitter` exists so somebody else can implement it, so the chunker enforces what
+        // it relies on rather than documenting it. Untrimmed ranges would make `hardSplit` land on
+        // its own start and emit an empty piece; an all-whitespace range would become an empty
+        // chunk the embedder rejects; and an out-of-order range would make the cumulative offset
+        // walk go *backwards*, silently corrupting every chunk after it.
+        #expect(!chunks.isEmpty)
+        #expect(chunks.allSatisfy { !$0.content.isEmpty })
+        #expect(chunks.allSatisfy { ($0.offsets?.lowerBound ?? 0) >= 0 })
+        #expect(chunks.allSatisfy { !($0.content.first?.isWhitespace ?? false) })
+
+        let characters = Array(text)
+        for chunk in chunks {
+            let offsets = try #require(chunk.offsets)
+            #expect(String(characters[offsets]) == chunk.content)
+        }
+    }
+
     @Test("a custom splitter changes boundaries without touching the packing")
     func customSplitterComposes() async throws {
         let text = "1.1 First clause 1.2 Second clause 1.3 Third clause"
@@ -300,6 +328,25 @@ struct RTSRAGChunkerTests {
 }
 
 // MARK: - Test doubles
+
+/// Returns ranges that break every rule the chunker depends on, so the normalisation is exercised
+/// rather than assumed: untrimmed, all-whitespace, out of order, and overlapping.
+private struct MisbehavingSplitter: RTSRAGSplitter {
+    let text: String
+
+    func split(_ text: String) -> [Range<String.Index>] {
+        let characters = Array(text.indices)
+        func index(_ offset: Int) -> String.Index {
+            characters[min(max(0, offset), characters.count - 1)]
+        }
+        return [
+            index(17)..<index(37),   // " Delta epsilon zeta." — leading whitespace
+            index(0)..<index(17),    // "Alpha beta gamma." — out of order, before the cursor
+            index(17)..<index(18),   // " " — whitespace only
+            index(37)..<index(53),   // " Eta theta iota." — leading whitespace again
+        ]
+    }
+}
 
 /// Splits on `N.N` clause numbering — the shape a contracts corpus needs and sentences cannot see.
 private struct ClauseSplitter: RTSRAGSplitter {

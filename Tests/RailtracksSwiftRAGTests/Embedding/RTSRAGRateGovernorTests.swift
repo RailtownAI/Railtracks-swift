@@ -95,23 +95,48 @@ struct RTSRAGRateGovernorTests {
         let governor = RTSRAGRateGovernor(initialLimit: 8, maximumLimit: 16)
 
         await governor.recordBackoff()
-        let once = await governor.currentLimit
-        await governor.recordBackoff()
-        let twice = await governor.currentLimit
 
         // Multiplicative decrease: backing off one at a time would spend the interval still being
         // refused. The point is to get under the limit fast, then re-climb.
+        #expect(await governor.currentLimit == 4)
+    }
+
+    @Test("refusals from the same burst halve only once")
+    func backoffIsDebouncedWithinItsWindow() async {
+        let governor = RTSRAGRateGovernor(initialLimit: 32, maximumLimit: 32)
+
+        // Every request already in flight when the limit dropped is about to be refused too. Those
+        // are the same congestion event, not thirty-two of them — halving per refusal would walk
+        // 32 → 1 from a single round trip. AIMD halves once per round trip.
+        for _ in 0..<32 {
+            await governor.recordBackoff()
+        }
+
+        #expect(await governor.currentLimit == 16)
+    }
+
+    @Test("a back-off after the window halves again", .timeLimit(.minutes(1)))
+    func backoffAfterTheWindowHalvesAgain() async {
+        // A short `Retry-After` so the window is known and brief rather than the one-second default.
+        let governor = RTSRAGRateGovernor(initialLimit: 8, maximumLimit: 16)
+
+        await governor.recordBackoff(retryAfter: 0.2)
+        let once = await governor.currentLimit
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        await governor.recordBackoff(retryAfter: 0.2)
+
+        // Debouncing must not become deafness: a genuinely separate event still halves.
         #expect(once == 4)
-        #expect(twice == 2)
+        #expect(await governor.currentLimit == 2)
     }
 
     @Test("the limit never falls below its floor")
     func backoffIsBounded() async {
-        let governor = RTSRAGRateGovernor(initialLimit: 4, minimumLimit: 1)
+        // Already at the floor, so the halving has nowhere to go. Driven with one event rather
+        // than a loop, since repeated back-offs inside one window now debounce to a single halving.
+        let governor = RTSRAGRateGovernor(initialLimit: 1, minimumLimit: 1)
 
-        for _ in 0..<10 {
-            await governor.recordBackoff()
-        }
+        await governor.recordBackoff()
 
         // A floor of zero would deadlock every waiter permanently.
         #expect(await governor.currentLimit == 1)
@@ -154,6 +179,62 @@ struct RTSRAGRateGovernorTests {
         #expect(await tracker.peak > 1)
     }
 
+    @Test(
+        "cancelling during a back-off hold returns promptly instead of spinning",
+        .timeLimit(.minutes(1))
+    )
+    func cancellationEndsTheBackoffWait() async {
+        let governor = RTSRAGRateGovernor(initialLimit: 4)
+        // A long hold, as a provider's `Retry-After` would set.
+        await governor.recordBackoff(retryAfter: 30)
+
+        let started = Date()
+        let task = Task {
+            await governor.withSlot {
+            }
+        }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        task.cancel()
+        await task.value
+
+        // A cancelled `Task.sleep` throws immediately, so `try?` plus `continue` recomputed the
+        // same positive wait and slept again — 200,000 iterations in half a second, burning a core
+        // for the whole retry window. Returning promptly is the fix; the 30-second hold is what
+        // makes the old behaviour visible as a hang here.
+        #expect(Date().timeIntervalSince(started) < 5)
+    }
+
+    @Test(
+        "cancelling while queued for a permit does not strand the task",
+        .timeLimit(.minutes(1))
+    )
+    func cancellationReleasesAQueuedWaiter() async {
+        let governor = RTSRAGRateGovernor(initialLimit: 1, maximumLimit: 1)
+        let occupied = Occupancy()
+
+        // Fill the single slot and hold it, so the next acquire has to queue.
+        let holder = Task {
+            await governor.withSlot {
+                await occupied.markEntered()
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+        await occupied.waitUntilEntered()
+
+        let queued = Task {
+            await governor.withSlot {
+            }
+        }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        queued.cancel()
+
+        // Without a cancellation handler the continuation is never resumed, so this never returns
+        // and the caller's cleanup — `isRunning = false` in the demo — never runs either.
+        await queued.value
+        holder.cancel()
+        _ = await holder.value
+    }
+
     @Test("a slot is released even when the work throws")
     func slotsSurviveErrors() async {
         let governor = RTSRAGRateGovernor(initialLimit: 1, maximumLimit: 1)
@@ -175,6 +256,29 @@ struct RTSRAGRateGovernorTests {
 }
 
 // MARK: - Test doubles
+
+/// Lets a test wait until a held slot is actually occupied, rather than sleeping and hoping.
+private actor Occupancy {
+    private var hasEntered = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func markEntered() {
+        hasEntered = true
+        for waiter in waiters {
+            waiter.resume()
+        }
+        waiters = []
+    }
+
+    func waitUntilEntered() async {
+        guard !hasEntered else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+}
 
 private actor ConcurrencyPeak {
     private var current = 0

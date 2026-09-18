@@ -84,11 +84,31 @@ public struct RTSRAGSentenceChunker: RTSRAGChunker {
         var cursor = text.startIndex
         var offset = 0
         for range in splitter.split(text) {
-            offset += text.distance(from: cursor, to: range.lowerBound)
-            let length = text.distance(from: range.lowerBound, to: range.upperBound)
-            sentences.append(Sentence(range: range, offsets: offset..<(offset + length)))
+            // Normalise what the splitter returned rather than trusting it. ``RTSRAGSplitter`` is a
+            // public seam whose whole purpose is that somebody else implements it, so the two
+            // things this loop relies on are enforced here rather than documented and hoped for:
+            //
+            // - **Trimmed.** A leading space makes `lastWordBoundary` land on `pieceStart` and emit
+            //   an empty piece; an all-whitespace range becomes an empty chunk that the embedder
+            //   then rejects.
+            // - **In order, non-overlapping.** The offset walk below is cumulative, so a range
+            //   starting before `cursor` produces a *negative* distance — every later chunk's
+            //   offsets silently wrong, and slicing with them traps.
+            //
+            // A malformed range is skipped rather than thrown, matching how one unreadable file
+            // becomes a `.failure` while its directory continues: a splitter bug should cost the
+            // ranges it got wrong, not the document.
+            guard
+                let trimmed = text.rtsRAGTrimmingWhitespace(range),
+                trimmed.lowerBound >= cursor
+            else {
+                continue
+            }
+            offset += text.distance(from: cursor, to: trimmed.lowerBound)
+            let length = text.distance(from: trimmed.lowerBound, to: trimmed.upperBound)
+            sentences.append(Sentence(range: trimmed, offsets: offset..<(offset + length)))
             offset += length
-            cursor = range.upperBound
+            cursor = trimmed.upperBound
         }
         return sentences
     }
