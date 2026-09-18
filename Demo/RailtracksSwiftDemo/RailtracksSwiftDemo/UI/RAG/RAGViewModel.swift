@@ -106,6 +106,20 @@ class RAGViewModel {
                 return "text-embedding-3-small — 1536-dim, billed per token, needs a key"
             }
         }
+
+        /// The chunk budget this embedder implies, for labelling the UI before a run starts.
+        ///
+        /// Mirrors what `run` reads off the constructed embedder. Duplicated rather than built
+        /// eagerly because constructing the on-device one can fail — a missing revision or
+        /// undownloaded assets — and a label should not need a model to exist.
+        var inputBudget: Int {
+            switch self {
+            case .apple:
+                return 256 * RTSRAGAppleEmbedding.defaultCharactersPerToken
+            case .openAI:
+                return RTSRAGLimits.defaultMaxChunkCharacters
+            }
+        }
     }
 
     // MARK: - Format
@@ -168,47 +182,113 @@ class RAGViewModel {
             }
         }
 
-        func makeLoader(path: URL) -> any RTSRAGDocumentLoader {
+        /// - Parameter contentKeys: which fields become embedded content. Empty means *not* "no
+        ///   content" but the loader's default — for JSON the whole re-serialized object, for CSV
+        ///   every column — which is why the UI labels the empty state rather than leaving it blank.
+        func makeLoader(path: URL, contentKeys: [String]) -> any RTSRAGDocumentLoader {
+            let keys = contentKeys.isEmpty ? nil : contentKeys
             switch self {
             case .text:
                 return RTSRAGTextLoader(path: path)
             case .csv:
-                return RTSRAGCSVLoader(path: path)
+                return RTSRAGCSVLoader(path: path, contentColumns: keys)
             case .json:
-                return RTSRAGJSONLoader(path: path)
+                return RTSRAGJSONLoader(path: path, contentKeys: keys)
             case .pdf:
                 return RTSRAGPDFLoader(path: path)
             }
         }
 
-        /// Which chunker pairs with this format.
-        ///
-        /// The pairing is the whole reason the library puts the chunker on the ingest call rather
-        /// than on the runtime: CSV and JSON loaders already emit one document per record, so the
-        /// record *is* the chunk and splitting again would strand a row's columns across two
-        /// embeddings. Text and PDF documents are prose and need real boundaries.
-        func makeChunker() -> any RTSRAGChunker {
+        /// Whether this format has named fields to choose between.
+        var hasSelectableKeys: Bool {
             switch self {
             case .csv, .json:
-                return RTSRAGIdentityChunker()
+                return true
             case .text, .pdf:
-                return RTSRAGSentenceChunker()
+                return false
             }
         }
 
-        var chunkerNote: String {
+        /// The chunker that usually suits this format — a starting point, not a rule.
+        ///
+        /// Record loaders emit one document per row or object, so the record normally *is* the
+        /// chunk. "Normally" is doing work there: an event log's `payload` is a record by structure
+        /// and a paragraph by length, so the default is wrong for it. Hence a picker rather than a
+        /// derivation.
+        var defaultChunker: ChunkerChoice {
             switch self {
             case .csv, .json:
-                return "identity chunker — the record is already the chunk"
+                return .identity
             case .text, .pdf:
-                return "sentence chunker — packed to \(RTSRAGLimits.defaultMaxChunkCharacters) characters"
+                return .sentence
+            }
+        }
+    }
+
+    // MARK: - Chunker
+
+    /// How documents become chunks.
+    ///
+    /// Separate from the format because the right answer depends on the *shape of the values*, not
+    /// the file type. A CSV of short cells and a JSONL of LLM transcripts are both record formats
+    /// and want opposite chunkers.
+    enum ChunkerChoice: String, CaseIterable, Identifiable {
+        case identity
+        case sentence
+
+        var id: String {
+            rawValue
+        }
+
+        var title: String {
+            switch self {
+            case .identity:
+                return "Identity"
+            case .sentence:
+                return "Sentence"
+            }
+        }
+
+        func note(maxCharacters: Int) -> String {
+            switch self {
+            case .identity:
+                return "identity — one chunk per document; over \(maxCharacters) characters is rejected, not split"
+            case .sentence:
+                return "sentence — packed to \(maxCharacters) characters on sentence boundaries"
+            }
+        }
+
+        /// - Parameter maxCharacters: the chosen embedder's input window.
+        ///
+        ///   Passed to **both**, not just the sentence one — an over-long record has to fail
+        ///   somewhere, and failing at chunk time names the right phase and costs no request.
+        ///
+        ///   This is the pairing the library expects a caller to apply and does not enforce:
+        ///   `maxInputCharacters` is published on `RTSRAGEmbedding` for exactly this, and nothing
+        ///   reads it until someone does. The demo stands in for the phase 6 runtime here.
+        func makeChunker(maxCharacters: Int) -> any RTSRAGChunker {
+            switch self {
+            case .identity:
+                return RTSRAGIdentityChunker(maxCharacters: maxCharacters)
+            case .sentence:
+                return RTSRAGSentenceChunker(maxCharacters: maxCharacters)
             }
         }
     }
 
     // MARK: - State
 
-    var format: Format = .text
+    var format: Format = .text {
+        didSet {
+            // Follow the format's usual pairing on a switch, but leave a deliberate override in
+            // place — otherwise changing format would silently undo the user's choice.
+            guard format != oldValue else {
+                return
+            }
+            chunker = format.defaultChunker
+        }
+    }
+    var chunker: ChunkerChoice = Format.text.defaultChunker
     var selectedPath: URL?
     var isShowingFileImporter = false
     var isRunning = false
@@ -220,6 +300,11 @@ class RAGViewModel {
     var failureCount = 0
     var chunkCount = 0
     var chunkFailureCount = 0
+    /// Field names found in the selected file, offered as toggles.
+    var availableKeys: [String] = []
+    /// Which of them become embedded content. Everything unselected becomes filterable metadata —
+    /// the two are exclusive, so a key cannot be both matched semantically and filtered on.
+    var selectedKeys: Set<String> = []
     var embedder: EmbedderChoice = .apple
     var embeddedCount = 0
     var embedFailureCount = 0
@@ -257,9 +342,82 @@ class RAGViewModel {
             resetRunState()
             statusLog = ""
             append(.resolve, "selected \(url.path)")
+            scanKeys(at: url)
         case .failure(let error):
             append(.resolve, "selection failed: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: - Key discovery
+
+    /// Reads the first matching file and lists its field names.
+    ///
+    /// Reads only the first source, not the corpus: the fields are a property of the schema, and a
+    /// directory whose files disagree on schema is already reported per file by the loaders.
+    func scanKeys(at path: URL) {
+        availableKeys = []
+        selectedKeys = []
+        guard format.hasSelectableKeys else {
+            return
+        }
+        let hasScope = path.startAccessingSecurityScopedResource()
+        defer {
+            if hasScope {
+                path.stopAccessingSecurityScopedResource()
+            }
+        }
+        do {
+            // `RTSRAGFileEnumeration` is public precisely so a caller can do this without
+            // re-implementing the walk, the sort and the extension filter.
+            let extensions: Set<String> = format == .csv ? ["csv"] : ["json", "jsonl"]
+            guard let first = try RTSRAGFileEnumeration.resolveSources(at: path, extensions: extensions).first else {
+                return
+            }
+            let text = try RTSRAGFileEnumeration.readText(at: first)
+            availableKeys = format == .csv ? Self.csvHeader(in: text) : Self.jsonKeys(in: text, url: first)
+            append(.resolve, "found \(availableKeys.count) field(s) in \(first.lastPathComponent)")
+        } catch {
+            append(.resolve, "could not read fields: \(error)")
+        }
+    }
+
+    /// Header names from the first line.
+    ///
+    /// Deliberately naive — a header cell containing a quoted comma would split wrongly. The
+    /// library's RFC 4180 parser is internal, and this is a convenience for picking fields, not the
+    /// parse that produces documents.
+    private static func csvHeader(in text: String) -> [String] {
+        guard let line = text.split(separator: "\n", omittingEmptySubsequences: true).first else {
+            return []
+        }
+        return line
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Keys of the first object, whether the file is one object, an array, or JSON Lines.
+    private static func jsonKeys(in text: String, url: URL) -> [String] {
+        let candidate: String
+        if url.pathExtension.lowercased() == "jsonl" {
+            guard let line = text.split(separator: "\n").first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) else {
+                return []
+            }
+            candidate = String(line)
+        } else {
+            candidate = text
+        }
+        guard let data = candidate.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) else {
+            return []
+        }
+        if let object = parsed as? [String: Any] {
+            return object.keys.sorted()
+        }
+        if let array = parsed as? [[String: Any]], let first = array.first {
+            return first.keys.sorted()
+        }
+        return []
     }
 
     // MARK: - Run
@@ -303,7 +461,11 @@ class RAGViewModel {
         }
 
         append(.resolve, "\(format.title) loader over \(path.lastPathComponent)")
-        let loader = format.makeLoader(path: path)
+        let contentKeys = availableKeys.filter { selectedKeys.contains($0) }
+        if !contentKeys.isEmpty {
+            append(.resolve, "content: \(contentKeys.joined(separator: ", ")) — the rest become metadata")
+        }
+        let loader = format.makeLoader(path: path, contentKeys: contentKeys)
         let stream: RTSRAGDocumentStream
         do {
             // `stream()` throws only for failures that make the whole run meaningless — a missing
@@ -329,13 +491,18 @@ class RAGViewModel {
             return documents
         }
 
-        let chunker = format.makeChunker()
         append(.load, "starting")
-        append(.chunk, format.chunkerNote)
         append(.embed, embedder.note)
         guard let embedding = await makeEmbedder() else {
             return
         }
+        // The chunker is sized from the embedder, not from the format — the two were chosen
+        // independently in the UI and would otherwise never meet. On-device caps at 768 characters
+        // against the chunker's 1,024 default, which is the mismatch that shows up as
+        // `invalidInput` on a page of prose.
+        let budget = embedding.maxInputCharacters ?? RTSRAGLimits.defaultMaxChunkCharacters
+        let chunking = chunker.makeChunker(maxCharacters: budget)
+        append(.chunk, chunker.note(maxCharacters: budget))
         // Each document is chunked as it arrives rather than after the whole corpus loads, which
         // is what keeps the stream's back-pressure meaningful — nothing is read ahead of what the
         // pipeline has finished with.
@@ -347,7 +514,7 @@ class RAGViewModel {
             switch element {
             case .success(let document):
                 documentCount += 1
-                await chunk(document, with: chunker, embedding: embedding)
+                await chunk(document, with: chunking, embedding: embedding)
             case .failure(let error):
                 // One unreadable file does not end the run — that is the library's departure from
                 // the Python engine, and this is where it shows.

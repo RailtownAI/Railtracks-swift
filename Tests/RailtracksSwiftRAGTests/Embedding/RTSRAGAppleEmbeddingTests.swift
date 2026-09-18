@@ -93,6 +93,46 @@ struct RTSRAGAppleEmbeddingTests {
 
     // MARK: - Limits
 
+    @Test("dense structured text fits the default budget, where prose-calibrated sizing would not")
+    func denseTextFitsTheDefaultBudget() async throws {
+        let embedder = try Self.makeEmbedder()
+        try await embedder.prepare()
+        // Résumé-shaped: bullets, dates, an email, a URL, comma-separated tech. Every one of those
+        // fragments into several tokens, so this runs at ~2.06 chars/token against clean prose's
+        // 4.13 — a 2× spread, and the reason the default is the floor of that range rather than a
+        // midpoint. A prose-calibrated 768 characters rejects this; 512 does not.
+        let unit = """
+        • Led migration of 12 microservices to Kubernetes (AWS EKS), p99 340ms→85ms
+        • Mar 2021 – Aug 2023 | Senior Engineer | mark.su@example.com | github.com/marksu
+
+        """
+        var dense = ""
+        while dense.count < (embedder.maxInputCharacters ?? 512) {
+            dense += unit
+        }
+        let chunk = RTSRAGChunk(
+            content: String(dense.prefix(embedder.maxInputCharacters ?? 512)),
+            documentID: RTSRAGDocumentID(UUID()),
+            index: 0
+        )
+
+        let outcomes = await embedder.embed([chunk])
+
+        #expect(embedder.maxInputCharacters == 512)
+        #expect(outcomes.first?.failure == nil)
+        #expect(outcomes.first?.embeddedChunks.first?.vector.count == 512)
+    }
+
+    @Test("a prose corpus can opt into double the chunk size")
+    func proseCorporaCanWidenTheBudget() throws {
+        // Two is the floor of the measured range, not a law: clean prose runs at 4.13 chars/token,
+        // so a known-prose corpus doubles its chunk size — and bigger chunks carry more context per
+        // hit, which is the whole retrieval-quality argument.
+        let prose = try RTSRAGAppleEmbedding(charactersPerToken: 4)
+
+        #expect(prose.maxInputCharacters == 1024)
+    }
+
     @Test("input that would be truncated is refused, not silently shortened")
     func overLongInputIsRefused() async throws {
         let embedder = try Self.makeEmbedder()
@@ -112,6 +152,41 @@ struct RTSRAGAppleEmbeddingTests {
         #expect(failure.kind == .invalidInput)
         #expect(failure.kind.isWorthRetrying == false)
         #expect(failure.chunks.count == 1)
+    }
+
+    @Test("the refusal suggests a smaller budget, never a larger one")
+    func refusalSuggestsASmallerBudget() async throws {
+        let embedder = try Self.makeEmbedder()
+        try await embedder.prepare()
+        // Compact JSON: ~1.2 characters per token, the densest content measured. An earlier version
+        // suggested `tokenLimit * 3` = 768 characters here — larger than the 512 that had just
+        // failed — because it read a constant instead of the input. Advice that raises the budget
+        // you are already over is worse than none.
+        let unit = #"{"flow_id":"fd69a02e6fc9b8c052212fc3dccb5706483bab8a2085a0f3cc11f93649ed2c4c","stamp":"2026-09-15T00:10:38.356913+00:00"},"#
+        var dense = ""
+        while dense.count < 900 {
+            dense += unit
+        }
+        let chunk = RTSRAGChunk(
+            content: String(dense.prefix(900)),
+            documentID: RTSRAGDocumentID(UUID()),
+            index: 0
+        )
+
+        let failure = try #require(await embedder.embed([chunk]).first?.failure)
+
+        let suggested = Self.suggestedCharacters(in: failure.underlying)
+        #expect(failure.kind == .invalidInput)
+        #expect(suggested != nil)
+        #expect((suggested ?? .max) < 900)
+    }
+
+    /// Pulls the "chunk to about N characters" figure out of the message.
+    private static func suggestedCharacters(in message: String) -> Int? {
+        guard let range = message.range(of: "chunk to about ") else {
+            return nil
+        }
+        return Int(message[range.upperBound...].prefix { $0.isNumber })
     }
 
     @Test("a chunk under the limit embeds and carries the model identity")

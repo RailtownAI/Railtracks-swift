@@ -47,8 +47,28 @@ struct RAGView: View {
             }
             .pickerStyle(.segmented)
             .disabled(viewModel.isRunning)
+            .onChange(of: viewModel.format) {
+                // Fields belong to the format that found them, so switching invalidates them.
+                if let path = viewModel.selectedPath {
+                    viewModel.scanKeys(at: path)
+                }
+            }
 
-            Text("\(viewModel.format.granularityNote)\n\(viewModel.format.chunkerNote)")
+            Text(viewModel.format.granularityNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Chunker", selection: $viewModel.chunker) {
+                ForEach(RAGViewModel.ChunkerChoice.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(viewModel.isRunning)
+
+            // The budget is the embedder's, so the note has to name it — a record that fits one
+            // embedder is rejected by the other, and the number is the whole explanation.
+            Text(viewModel.chunker.note(maxCharacters: viewModel.embedder.inputBudget))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -77,6 +97,10 @@ struct RAGView: View {
                 .truncationMode(.middle)
                 .textSelection(.enabled)
 
+            if !viewModel.availableKeys.isEmpty {
+                contentKeySection
+            }
+
             HStack(spacing: 8) {
                 Button("Start") {
                     viewModel.start()
@@ -99,6 +123,58 @@ struct RAGView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Which fields become embedded content, discovered from the selected file.
+    ///
+    /// The exclusivity is the thing worth showing: a selected key is embedded and *stops* being a
+    /// filter, so the caption states it rather than leaving it to be discovered at query time.
+    private var contentKeySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Content fields")
+                .font(.caption)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 120), alignment: .leading)],
+                alignment: .leading,
+                spacing: 4
+            ) {
+                ForEach(viewModel.availableKeys, id: \.self) { key in
+                    Toggle(key, isOn: binding(for: key))
+                        .toggleStyle(.button)
+                        .font(.caption)
+                        .disabled(viewModel.isRunning)
+                }
+            }
+
+            Text(contentKeyNote)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var contentKeyNote: String {
+        viewModel.selectedKeys.isEmpty
+            // Not "nothing is embedded" — an empty selection is the loader's default mode, which is
+            // a different thing and surprising if unstated.
+            ? "none selected — the whole record is embedded, including its field names"
+            : "selected fields are embedded; the rest become filterable metadata, not both"
+    }
+
+    private func binding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                viewModel.selectedKeys.contains(key)
+            },
+            set: { isOn in
+                if isOn {
+                    viewModel.selectedKeys.insert(key)
+                } else {
+                    viewModel.selectedKeys.remove(key)
+                }
+            }
+        )
     }
 
     private var progressText: String {

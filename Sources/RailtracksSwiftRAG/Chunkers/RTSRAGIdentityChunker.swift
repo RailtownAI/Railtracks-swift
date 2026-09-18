@@ -17,13 +17,28 @@ import Foundation
 /// Also the baseline to compare a splitting strategy against, since it is the only chunker that
 /// cannot be blamed for a boundary.
 ///
-/// - Important: it performs no size check, so a document over
-///   ``RTSRAGLimits/defaultMaxChunkCharacters`` produces an oversized chunk. That is the one place
-///   the module's "oversized chunks are impossible by construction" guarantee rests on the caller
-///   rather than on the code: pair it with loaders whose documents are records, not with prose.
+/// "Record-sized" is an assumption about the data, not a guarantee, which is why ``maxCharacters``
+/// exists: a JSON object with a long `description`, or a CSV cell holding a whole paragraph, is a
+/// record by structure and prose by length.
 public struct RTSRAGIdentityChunker: RTSRAGChunker {
 
-    public init() {
+    private let maxCharacters: Int?
+
+    /// - Parameter maxCharacters: reject a document longer than this rather than emit a chunk the
+    ///   embedder will refuse. `nil` — the default — performs no check, which is right when the
+    ///   embedder has headroom to spare: `text-embedding-3-*` accepts 8,191 tokens, so nothing a
+    ///   record loader produces will trouble it.
+    ///
+    ///   Set it from the embedder's ``RTSRAGEmbedding/maxInputCharacters`` when the embedder has a
+    ///   tight window. **Failing here rather than at embed time is the point**: it names the right
+    ///   phase, costs no request, and says what to do about it — whereas the same document reaching
+    ///   an embedder comes back as an opaque provider rejection.
+    ///
+    ///   Not splitting instead, because splitting is exactly what this chunker exists not to do. A
+    ///   record too large to embed whole needs a different chunker for that source, and that is a
+    ///   decision for the caller rather than a silent fallback.
+    public init(maxCharacters: Int? = nil) {
+        self.maxCharacters = maxCharacters
     }
 
     public func chunk(_ document: RTSRAGDocument) async throws -> [RTSRAGChunk] {
@@ -34,9 +49,17 @@ public struct RTSRAGIdentityChunker: RTSRAGChunker {
         guard !text.isEmpty else {
             return []
         }
-        return makeChunks(
+        let chunks = makeChunks(
             from: document,
             pieces: [RTSRAGChunkPiece(content: text, offsets: 0..<text.count)]
         )
+        if let maxCharacters, text.count > maxCharacters, let chunk = chunks.first {
+            throw RTSRAGError.chunkTooLarge(
+                chunkID: chunk.id,
+                characters: text.count,
+                limit: maxCharacters
+            )
+        }
+        return chunks
     }
 }

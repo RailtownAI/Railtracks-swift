@@ -292,6 +292,28 @@ struct RTSRAGLoaderTests {
         #expect(documents.count == 2)
     }
 
+    @Test("a nested object renders as sorted JSON, not a plist description")
+    func nestedContentKeyIsStableJSON() async throws {
+        let directory = try Self.makeDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = directory.appendingPathComponent("events.jsonl")
+        try #"{"kind":"a","payload":{"z":1,"a":"two","m":true}}"#
+            .write(to: url, atomically: true, encoding: .utf8)
+
+        let (documents, _) = try await Self.drain(
+            RTSRAGJSONLoader(path: url, contentKeys: ["payload"])
+        )
+
+        // Interpolating a nested value yields `NSDictionary`'s plist description — `{ "a" = 1; }` —
+        // with unspecified key order, so the same record would hash differently between runs and
+        // every re-ingest would look like a change. Sorted JSON is stable and is what the
+        // whole-object path already produces.
+        #expect(documents.count == 1)
+        #expect(documents[0].content == #"payload: {"a":"two","m":true,"z":1}"#)
+    }
+
     @Test("a JSON array yields one document per object, JSONL one per line")
     func jsonShapes() async throws {
         let directory = try Self.makeDirectory()

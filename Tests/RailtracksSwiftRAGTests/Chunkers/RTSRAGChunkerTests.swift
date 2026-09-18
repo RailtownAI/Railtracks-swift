@@ -259,6 +259,25 @@ struct RTSRAGChunkerTests {
         #expect(chunks[0].metadata["row_index"] == .integer(4))
     }
 
+    @Test("an over-long record fails at chunk time rather than at the embedder")
+    func identityChunkerHonoursItsCeiling() async throws {
+        let long = String(repeating: "x", count: 900)
+        let document = RTSRAGDocument(content: long, type: .json, source: "file:///a.jsonl#3")
+
+        // "Record-sized" is an assumption about the data, not a guarantee: one long `description`
+        // field makes a JSON object prose by length. Failing here names the right phase, costs no
+        // embedding request, and says what to do — the same document reaching the embedder comes
+        // back as an opaque provider rejection instead.
+        await #expect(throws: RTSRAGError.self) {
+            try await RTSRAGIdentityChunker(maxCharacters: 768).chunk(document)
+        }
+
+        // No ceiling is the default, and right when the embedder has headroom to spare —
+        // `text-embedding-3-*` takes 8,191 tokens, so no record loader will trouble it.
+        let unchecked = try await RTSRAGIdentityChunker().chunk(document)
+        #expect(unchecked.count == 1)
+    }
+
     // MARK: - Custom splitter
 
     @Test("a custom splitter changes boundaries without touching the packing")

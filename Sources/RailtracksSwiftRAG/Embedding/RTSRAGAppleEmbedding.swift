@@ -61,10 +61,15 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
     ///   - pooling: How per-token vectors are combined. Part of the recorded identity.
     /// - Throws: ``RTSRAGError/embeddingModelUnavailable(reason:)`` when no model matches, which on
     ///   a device missing that revision is the correct, loud outcome.
+    ///   - charactersPerToken: how densely the corpus tokenizes, used only to size
+    ///     ``maxInputCharacters``. Defaults to a pessimistic 2; pass 4 for known-prose corpora and
+    ///     get roughly double the chunk size. See ``defaultCharactersPerToken`` for the
+    ///     measurements behind both figures.
     public init(
         revision: Int = 1,
         language: NLLanguage = .english,
-        pooling: Pooling = .mean
+        pooling: Pooling = .mean,
+        charactersPerToken: Int = RTSRAGAppleEmbedding.defaultCharactersPerToken
     ) throws {
         let candidates = NLContextualEmbedding.contextualEmbeddings(
             forValues: [
@@ -85,43 +90,37 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
         // the pooling. A friendly name would let a store built under different pooling pass the
         // mismatch guard.
         self.modelIdentifier = "nl-contextual/\(model.modelIdentifier)/rev\(model.revision)/\(pooling.rawValue)"
-        self.maxInputCharacters = model.maximumSequenceLength
-            * RTSRAGAppleEmbedding.charactersPerToken(for: language)
+        self.maxInputCharacters = model.maximumSequenceLength * max(1, charactersPerToken)
     }
 
-    /// How many characters of `language` fit in one token, for sizing ``maxInputCharacters``.
+    /// How many characters fit in one token, for sizing ``maxInputCharacters``.
     ///
-    /// **Only English is measured.** 460 characters of English prose produced 141 token vectors
-    /// (~3.26 per token), with saturation arriving around 830 characters — so three is the safe
-    /// rounding. An earlier draft used four and sat *past* the real ceiling, which is the wrong
-    /// direction for a guard.
+    /// **Two is deliberately pessimistic, and the spread is why.** Measured against this model:
     ///
-    /// Every other language is a placeholder returning the same figure, and **each one should be
-    /// measured before it is trusted**. The ratio varies enormously: languages written without
-    /// spaces — Chinese, Japanese, Korean, Thai — run far denser, plausibly near one character per
-    /// token, so three would over-permit by roughly 3×. Measuring is a few lines: embed a
-    /// representative string and count the vectors `enumerateTokenVectors` yields.
+    /// | Text | chars/token | 255-token ceiling |
+    /// |---|---|---|
+    /// | clean English prose | 4.13 | ~1,050 characters |
+    /// | résumé / structured | 2.06 | ~525 characters |
     ///
-    /// Getting this wrong is **not dangerous, only wasteful**, which is why a placeholder is
-    /// acceptable in the meantime. The real guard is the post-tokenization check in
-    /// ``embed(_:)``, which counts actual tokens and is language-independent — so an
-    /// under-estimated ratio produces refusals (`.invalidInput`), never silent truncation. The
-    /// cost of a bad figure is a high rejection rate and a lot of pointless bisecting, not a
-    /// corrupt store.
+    /// A 2× spread, so **no single constant serves both** — and it is content shape, not language,
+    /// that moves it. Emails, URLs, date ranges, bullet glyphs, code identifiers and acronyms all
+    /// fragment into many tokens each, so a page of CV bullets is twice as dense as a page of
+    /// narrative. An earlier default of three sat between the two and was wrong for both: it wasted
+    /// half the window on prose and still rejected résumé text.
     ///
-    /// Whatever value lands here, the chunker has to be paired to match:
-    /// `RTSRAGSentenceChunker(maxCharacters:)` at or below this number.
-    private static func charactersPerToken(for language: NLLanguage) -> Int {
-        switch language {
-        case .english:
-            return 3
-        default:
-            // Unmeasured. Kept at the English figure so behaviour is unchanged until someone
-            // measures the language they actually need, rather than guessing lower and silently
-            // rejecting text that would have fitted.
-            return 3
-        }
-    }
+    /// Two is therefore the floor of the measured range, chosen because the asymmetry favours it —
+    /// under-estimating costs chunk size, which degrades retrieval a little; over-estimating costs
+    /// whole chunks, which lose content entirely. Callers whose corpus is known-prose should pass
+    /// `charactersPerToken: 4` and get roughly double the chunk size.
+    ///
+    /// Non-English is unmeasured and takes the same figure. Space-less scripts — Chinese,
+    /// Japanese, Korean, Thai — plausibly run denser still; measuring is a few lines, embedding a
+    /// representative string and counting what `enumerateTokenVectors` yields.
+    ///
+    /// Whatever value is used, this is only a pre-filter. The real guard is the post-tokenization
+    /// check in ``embed(_:)``, which counts actual tokens and cannot be fooled by content shape —
+    /// so a bad figure costs refusals, never a silently truncated vector.
+    public static let defaultCharactersPerToken = 2
 
     /// Downloads the model assets if the device does not already have them.
     ///
@@ -234,11 +233,22 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
         // is refused too, which is the safe direction: the caller is told to chunk smaller rather
         // than handed a vector representing only part of the text.
         guard tokenCount < tokenLimit - 1 else {
+            // Measured from *this* input rather than a constant. An earlier version suggested
+            // `tokenLimit * 3` characters, which on dense content advised a budget **larger** than
+            // the one already failing — a 512-character chunk was told to try 768. No fixed number
+            // can be right across the measured range: clean prose runs at 4.1 characters per
+            // token, résumé text at 2.1, compact JSON at 1.2. Only the offending text knows.
+            let density = Double(text.count) / Double(tokenCount)
+            // A margin below the ceiling, since the next chunk of the same source will not have
+            // exactly this density.
+            let suggested = Int(Double(tokenLimit - 32) * density)
             throw RTSRAGEmbeddingError(
                 kind: .invalidInput,
                 message: """
-                input reached the \(tokenLimit)-token limit and would be truncated; \
-                chunk to about \(tokenLimit * 3) characters for this model
+                \(text.count) characters produced \(tokenCount) tokens, reaching the \
+                \(tokenLimit)-token limit, so the tail would be dropped; this content runs at \
+                \(String(format: "%.1f", density)) characters per token, so chunk to about \
+                \(suggested) characters
                 """
             )
         }
