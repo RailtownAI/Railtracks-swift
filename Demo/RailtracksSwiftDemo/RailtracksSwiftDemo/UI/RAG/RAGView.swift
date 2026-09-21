@@ -24,6 +24,8 @@ struct RAGView: View {
                 inputSection
                 Divider()
                 statusSection
+                Divider()
+                querySection
             }
             .padding()
         }
@@ -211,6 +213,64 @@ struct RAGView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Ask the stored corpus a question — the first point at which the whole pipeline is visible
+    /// end to end rather than as counters.
+    ///
+    /// The question is embedded by the *same* embedder that filled the store, which the view model
+    /// holds onto for exactly this reason: a store is only queryable by the model that wrote it.
+    private var querySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ask:")
+
+            HStack(spacing: 8) {
+                TextField("what does the document say about…", text: $viewModel.question)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        viewModel.search()
+                    }
+
+                Button("Search") {
+                    viewModel.search()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canSearch)
+
+                if viewModel.isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if let note = viewModel.searchNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(viewModel.results, id: \.entry.id) { hit in
+                resultRow(hit)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func resultRow(_ hit: RTSRAGRetrievedEntry) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            // The score is worth showing: it is the only signal separating a confident match from
+            // the best of a bad set, and retrieval always returns *something*.
+            Text("#\(hit.rank + 1)  score \(String(format: "%.3f", hit.score))  ·  \(hit.entry.content.count) chars")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(hit.entry.content.prefix(300) + (hit.entry.content.count > 300 ? "…" : ""))
+                .font(.system(.caption, design: .monospaced))
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .textSelection(.enabled)
+        }
     }
 
     /// A scrolling log rather than a `TextField`.

@@ -55,23 +55,16 @@ class RAGViewModel {
         }
 
         /// Whether the library implements this phase yet.
+        /// Every phase is implemented now, so nothing is stamped pending. Kept rather than deleted
+        /// because phase 6 adds the runtime that ties them together, and a phase that has landed
+        /// but is not yet *orchestrated* is the same shape of note.
         var isImplemented: Bool {
-            switch self {
-            case .resolve, .load, .chunk, .embed:
-                return true
-            case .store:
-                return false
-            }
+            true
         }
 
         /// What the phase is waiting on, for the placeholder line.
         var pendingNote: String {
-            switch self {
-            case .store:
-                return "pending — RTSRAGVectorStore (phase 5) not implemented"
-            case .resolve, .load, .chunk, .embed:
-                return ""
-            }
+            ""
         }
     }
 
@@ -309,6 +302,20 @@ class RAGViewModel {
     var embeddedCount = 0
     var embedFailureCount = 0
     var embeddedTokens = 0
+    var storedCount = 0
+    var storeFailureCount = 0
+    /// The query box, and what it found. Live only once something has been stored.
+    var question: String = ""
+    var isSearching = false
+    var results: [RTSRAGRetrievedEntry] = []
+    var searchNote: String?
+
+    /// Built once per run and kept afterwards, so a query can be asked of what the run stored.
+    ///
+    /// Held alongside the embedder that filled it: a store is only queryable by the embedder that
+    /// wrote it, since two models put the same text in different places.
+    private var store: RTSRAGFileStore?
+    private var searchEmbedder: (any RTSRAGEmbedding)?
     /// Dimension of the first vector produced, which is the most visible difference between the
     /// two embedders.
     var vectorDimension: Int?
@@ -503,6 +510,21 @@ class RAGViewModel {
         let budget = embedding.maxInputCharacters ?? RTSRAGLimits.defaultMaxChunkCharacters
         let chunking = chunker.makeChunker(maxCharacters: budget)
         append(.chunk, chunker.note(maxCharacters: budget))
+        // A fresh store directory per run, so repeated runs over different corpora do not stack up
+        // in one index — and so the model guard is not tripped by switching embedder between runs.
+        let storeDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RailtracksSwiftDemoRAGStore", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let writing: RTSRAGFileStore
+        do {
+            writing = try RTSRAGFileStore(directory: storeDirectory)
+        } catch {
+            append(.store, "❌ \(error)")
+            return
+        }
+        store = writing
+        searchEmbedder = embedding
+        append(.store, "file store at \(storeDirectory.lastPathComponent)")
         // Each document is chunked as it arrives rather than after the whole corpus loads, which
         // is what keeps the stream's back-pressure meaningful — nothing is read ahead of what the
         // pipeline has finished with.
@@ -515,7 +537,7 @@ class RAGViewModel {
             case .success(let document):
                 documentCount += 1
                 do {
-                    try await chunk(document, with: chunking, embedding: embedding)
+                    try await chunk(document, with: chunking, embedding: embedding, store: writing)
                 } catch {
                     // The embedder itself is unusable — an exhausted account, or a model that
                     // cannot load. The embedder is built once for the whole run, so every
@@ -549,6 +571,11 @@ class RAGViewModel {
                 + (vectorDimension.map { ", \($0) dimensions" } ?? "")
                 + (embeddedTokens > 0 ? ", \(embeddedTokens) tokens billed" : "")
         )
+        append(
+            .store,
+            "stored \(storedCount) chunk(s), \(storeFailureCount) failure(s)"
+                + (storedCount > 0 ? " — ask a question below" : "")
+        )
         appendPendingPhases()
     }
 
@@ -557,7 +584,8 @@ class RAGViewModel {
     private func chunk(
         _ document: RTSRAGDocument,
         with chunker: any RTSRAGChunker,
-        embedding: any RTSRAGEmbedding
+        embedding: any RTSRAGEmbedding,
+        store: any RTSRAGVectorStore
     ) async throws {
         let chunks: [RTSRAGChunk]
         do {
@@ -574,7 +602,7 @@ class RAGViewModel {
             previewDocument = document
             previewChunks = chunks
         }
-        try await embed(chunks, from: document, with: embedding)
+        try await embed(chunks, from: document, with: embedding, store: store)
     }
 
     /// Embeds one document's chunks, which is the pipeline's real unit: a document is embedded
@@ -583,21 +611,31 @@ class RAGViewModel {
     private func embed(
         _ chunks: [RTSRAGChunk],
         from document: RTSRAGDocument,
-        with embedding: any RTSRAGEmbedding
+        with embedding: any RTSRAGEmbedding,
+        store: any RTSRAGVectorStore
     ) async throws {
         guard !chunks.isEmpty else {
             return
         }
+        var embeddedChunks: [RTSRAGEmbeddedChunk] = []
+        var permanentFailures = 0
+        var transientFailures = 0
         for outcome in try await embedding.embed(chunks) {
             switch outcome {
             case .embedded(let embedded, let metrics):
                 embeddedCount += embedded.count
                 embeddedTokens += metrics.inputTokens ?? 0
+                embeddedChunks.append(contentsOf: embedded)
                 if vectorDimension == nil {
                     vectorDimension = embedded.first?.vector.count
                 }
             case .failed(let failure):
                 embedFailureCount += failure.chunks.count
+                if failure.kind == .invalidInput {
+                    permanentFailures += failure.chunks.count
+                } else {
+                    transientFailures += failure.chunks.count
+                }
                 append(
                     .embed,
                     "⚠️ \(sourceLabel(document.source)) [\(failure.kind)] "
@@ -606,6 +644,89 @@ class RAGViewModel {
                 )
             }
         }
+        await commit(
+            embeddedChunks,
+            from: document,
+            to: store,
+            permanentFailures: permanentFailures,
+            transientFailures: transientFailures
+        )
+    }
+
+    /// The commit rule phase 6 will own, exercised here for the first time.
+    ///
+    /// Splits on *why* chunks are missing, because a single "commit only if every chunk embedded"
+    /// rule is pathological: `.invalidInput` is permanent, so that rule would leave a document that
+    /// is 511/512 fine permanently absent, re-chunked and re-failed on every run. A transient
+    /// failure is the opposite — next run succeeds, so not committing is exactly right.
+    private func commit(
+        _ embedded: [RTSRAGEmbeddedChunk],
+        from document: RTSRAGDocument,
+        to store: any RTSRAGVectorStore,
+        permanentFailures: Int,
+        transientFailures: Int
+    ) async {
+        guard transientFailures == 0 else {
+            append(
+                .store,
+                "⚠️ \(sourceLabel(document.source)) not committed — \(transientFailures) chunk(s) "
+                    + "failed transiently; the previous version stays intact and the next run retries"
+            )
+            return
+        }
+        guard !embedded.isEmpty else {
+            return
+        }
+        do {
+            try await store.replaceDocument(id: document.id, with: embedded.map { RTSRAGStoreEntry(embedded: $0) })
+            storedCount += embedded.count
+            if permanentFailures > 0 {
+                append(
+                    .store,
+                    "\(sourceLabel(document.source)) committed with \(permanentFailures) chunk(s) "
+                        + "dropped — those are permanently unembeddable, so waiting changes nothing"
+                )
+            }
+        } catch {
+            storeFailureCount += 1
+            append(.store, "⚠️ \(sourceLabel(document.source)): \(error)")
+        }
+    }
+
+    // MARK: - Retrieval
+
+    /// Embeds the question with the run's own embedder and searches what it stored.
+    ///
+    /// The same embedder deliberately: a store is only queryable by the model that wrote it, since
+    /// two models place the same text in different parts of the space and the scores would look
+    /// perfectly reasonable while meaning nothing.
+    func search() {
+        guard let store, let searchEmbedder, !question.isEmpty else {
+            return
+        }
+        isSearching = true
+        results = []
+        searchNote = nil
+        let question = self.question
+        Task { [weak self] in
+            defer {
+                self?.isSearching = false
+            }
+            do {
+                let vector = try await searchEmbedder.embed([question]).vectors[0]
+                let hits = try await store.search(
+                    RTSRAGStoreQuery(text: question, embedding: vector, topK: 5)
+                )
+                self?.results = hits
+                self?.searchNote = hits.isEmpty ? "no matches" : nil
+            } catch {
+                self?.searchNote = "\(error)"
+            }
+        }
+    }
+
+    var canSearch: Bool {
+        store != nil && !question.isEmpty && !isSearching && !isRunning
     }
 
     private func noteSourceFinished(_ documents: [RTSRAGDocument]) {
@@ -664,6 +785,10 @@ class RAGViewModel {
         embeddedCount = 0
         embedFailureCount = 0
         embeddedTokens = 0
+        storedCount = 0
+        storeFailureCount = 0
+        results = []
+        searchNote = nil
         vectorDimension = nil
         previewDocument = nil
         previewChunks = []
