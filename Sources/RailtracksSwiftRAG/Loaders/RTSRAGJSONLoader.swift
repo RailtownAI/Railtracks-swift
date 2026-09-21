@@ -186,6 +186,12 @@ public struct RTSRAGJSONLoader: RTSRAGDocumentLoader {
 
     /// Renders a JSON value for use in content or metadata, without the `Optional(…)` wrapper a
     /// plain interpolation would produce.
+    ///
+    /// Nested objects and arrays are re-serialized as JSON with **sorted keys**, not interpolated.
+    /// Interpolating one yields `NSDictionary`'s plist-style description — `{ "a" = 1; }` — whose
+    /// key order is unspecified, so the same record would hash differently between runs and every
+    /// re-ingest would look like a change. The whole-object path already sorts for that reason;
+    /// this makes the per-key path agree.
     private static func describe(_ value: Any?) -> String {
         guard let value, !(value is NSNull) else {
             return ""
@@ -195,6 +201,11 @@ public struct RTSRAGJSONLoader: RTSRAGDocumentLoader {
         }
         if let number = value as? NSNumber {
             return number.stringValue
+        }
+        if JSONSerialization.isValidJSONObject(value),
+           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            return json
         }
         return "\(value)"
     }

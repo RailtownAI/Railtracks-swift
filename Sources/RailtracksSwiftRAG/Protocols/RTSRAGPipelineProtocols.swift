@@ -49,27 +49,46 @@ public protocol RTSRAGChunker: Sendable {
 // MARK: - RTSRAGEmbedding
 
 /// Turns text into vectors. Phase 4.
+///
+/// Conformers implement only ``embed(_:)-(\[String\])`` — the single-call primitive. Batching,
+/// per-batch failure isolation and the bounded retry come from a protocol extension, so a custom
+/// embedder inherits them rather than re-deriving them. See ``embed(_:batchSize:)``.
+///
+/// - Note: nothing throttle-shaped appears here, deliberately. Rate limiting is a property of some
+///   implementations and not others: an HTTP embedder composes an ``RTSRAGRateGovernor``, while
+///   ``RTSRAGAppleEmbedding`` runs on-device with no quota and needs actor isolation instead. They
+///   are two different problems, not one policy configured differently.
 public protocol RTSRAGEmbedding: Sendable {
-    /// The model these vectors come from, recorded on every entry so a later query can verify it
-    /// is searching an index built by the same embedder.
+    /// The full identity of the model, recorded on every entry so a later query can refuse an
+    /// index built by a different one.
+    ///
+    /// **Not a friendly name.** Anything that changes the vector space belongs in it — the model,
+    /// its revision, and for models returning per-token vectors, the pooling strategy. Two
+    /// embedders differing only in pooling produce incomparable vectors from identical weights, so
+    /// a name that omitted it would let ``RTSRAGError/embeddingModelMismatch`` pass a store it
+    /// should have refused.
     var modelIdentifier: String { get }
+    /// The model's own version, when it has one distinct from the identifier.
+    var embeddingVersion: String? { get }
     /// How many texts to send per request, when the provider supports batching.
     var defaultBatchSize: Int { get }
+    /// The longest single input this model accepts, or `nil` when effectively unbounded.
+    ///
+    /// Declared so a mismatch with the chunker's budget is *detectable* rather than silently
+    /// truncated — on-device embedding caps at 256 tokens, which is roughly the same 1,024
+    /// characters the sentence chunker defaults to.
+    var maxInputCharacters: Int? { get }
 
-    func embed(_ texts: [String]) async throws -> [RTSRAGEmbeddingVector]
+    func embed(_ texts: [String]) async throws -> RTSRAGTextEmbeddings
 }
 
-/// One embedding result: the vector and the model that produced it.
-public struct RTSRAGEmbeddingVector: Sendable, Hashable {
-    public let vector: [Float]
-    public let model: String
+public extension RTSRAGEmbedding {
+    var embeddingVersion: String? {
+        nil
+    }
 
-    public init(
-        vector: [Float],
-        model: String
-    ) {
-        self.vector = vector
-        self.model = model
+    var maxInputCharacters: Int? {
+        nil
     }
 }
 

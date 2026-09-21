@@ -61,9 +61,9 @@ let package = Package(
             url: "https://github.com/RailtownAI/railtown-swift-logger.git",
             .upToNextMinor(from: "0.3.1")
         ),
-        // Declared rather than relied on transitively through Conduit: RailtracksSwiftRAG hashes
-        // document sources and content, and an undeclared import would break the moment that
-        // module is lifted into its own package.
+        // Declared directly rather than inherited: RailtracksSwiftRAG hashes document sources and
+        // content, and it is now one of only two dependencies that module has — an undeclared
+        // import would break it the moment the folder is lifted into its own package.
         .package(
             url: "https://github.com/apple/swift-crypto.git",
             from: "4.5.0"
@@ -98,16 +98,21 @@ let package = Package(
             ]
         ),
         // Retrieval / RAG. Deliberately **does not depend on RailtracksSwift**: nothing in the
-        // pipeline needs agent orchestration. Embedding goes straight to Conduit, and even the
-        // semantic chunker splits on embedding distance rather than asking a model. The Python
-        // engine's `railtracks/retrieval` is standalone for the same reason — it imports the
-        // agent runtime nowhere, leaving the tool wrapper to user code.
+        // pipeline needs agent orchestration. Even the semantic chunker splits on embedding
+        // distance rather than asking a model. The Python engine's `railtracks/retrieval` is
+        // standalone for the same reason — it imports the agent runtime nowhere, leaving the tool
+        // wrapper to user code.
         //
-        // That keeps the module liftable into its own package by moving the folder.
+        // **It no longer depends on Conduit either.** That dependency was declared for the
+        // embedder and never imported. Conduit's `embedBatch` issues one HTTP request per text and
+        // discards the response's `usage` block, so `RTSRAGOpenAIEmbedding` calls `/v1/embeddings`
+        // directly — the array form in one request, with the provider's own token count read back.
+        //
+        // What is left is Foundation plus two leaf libraries, so lifting the module into its own
+        // package is moving the folder.
         .target(
             name: "RailtracksSwiftRAG",
             dependencies: [
-                .product(name: "Conduit", package: "Conduit"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Crypto", package: "swift-crypto"),
             ]

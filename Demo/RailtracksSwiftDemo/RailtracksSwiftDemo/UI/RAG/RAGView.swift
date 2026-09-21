@@ -17,12 +17,16 @@ struct RAGView: View {
     @State private var viewModel = RAGViewModel()
 
     var body: some View {
-        VStack(spacing: 16) {
-            inputSection
-            Divider()
-            statusSection
+        // The whole page scrolls: an expanded preview of a long document plus its chunks runs well
+        // past the window, and the status log's own scroll view only covers the log.
+        ScrollView {
+            VStack(spacing: 16) {
+                inputSection
+                Divider()
+                statusSection
+            }
+            .padding()
         }
-        .padding()
         .fileImporter(
             isPresented: $viewModel.isShowingFileImporter,
             allowedContentTypes: viewModel.format.contentTypes,
@@ -43,8 +47,40 @@ struct RAGView: View {
             }
             .pickerStyle(.segmented)
             .disabled(viewModel.isRunning)
+            .onChange(of: viewModel.format) {
+                // Fields belong to the format that found them, so switching invalidates them.
+                if let path = viewModel.selectedPath {
+                    viewModel.scanKeys(at: path)
+                }
+            }
 
             Text(viewModel.format.granularityNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Chunker", selection: $viewModel.chunker) {
+                ForEach(RAGViewModel.ChunkerChoice.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(viewModel.isRunning)
+
+            // The budget is the embedder's, so the note has to name it — a record that fits one
+            // embedder is rejected by the other, and the number is the whole explanation.
+            Text(viewModel.chunker.note(maxCharacters: viewModel.embedder.inputBudget))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Embedder", selection: $viewModel.embedder) {
+                ForEach(RAGViewModel.EmbedderChoice.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(viewModel.isRunning)
+
+            Text(viewModel.embedder.note)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -60,6 +96,10 @@ struct RAGView: View {
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
+
+            if !viewModel.availableKeys.isEmpty {
+                contentKeySection
+            }
 
             HStack(spacing: 8) {
                 Button("Start") {
@@ -85,8 +125,63 @@ struct RAGView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Which fields become embedded content, discovered from the selected file.
+    ///
+    /// The exclusivity is the thing worth showing: a selected key is embedded and *stops* being a
+    /// filter, so the caption states it rather than leaving it to be discovered at query time.
+    private var contentKeySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Content fields")
+                .font(.caption)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 120), alignment: .leading)],
+                alignment: .leading,
+                spacing: 4
+            ) {
+                ForEach(viewModel.availableKeys, id: \.self) { key in
+                    Toggle(key, isOn: binding(for: key))
+                        .toggleStyle(.button)
+                        .font(.caption)
+                        .disabled(viewModel.isRunning)
+                }
+            }
+
+            Text(contentKeyNote)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var contentKeyNote: String {
+        viewModel.selectedKeys.isEmpty
+            // Not "nothing is embedded" — an empty selection is the loader's default mode, which is
+            // a different thing and surprising if unstated.
+            ? "none selected — the whole record is embedded, including its field names"
+            : "selected fields are embedded; the rest become filterable metadata, not both"
+    }
+
+    private func binding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                viewModel.selectedKeys.contains(key)
+            },
+            set: { isOn in
+                if isOn {
+                    viewModel.selectedKeys.insert(key)
+                } else {
+                    viewModel.selectedKeys.remove(key)
+                }
+            }
+        )
+    }
+
     private var progressText: String {
-        "file \(viewModel.sourcesProcessed)/\(viewModel.sourceTotal) · \(viewModel.documentCount) document(s)"
+        "file \(viewModel.sourcesProcessed)/\(viewModel.sourceTotal)"
+            + " · \(viewModel.documentCount) doc(s)"
+            + " · \(viewModel.chunkCount) chunk(s)"
+            + " · \(viewModel.embeddedCount) embedded"
     }
 
     // MARK: - Status
@@ -160,17 +255,39 @@ struct RAGView: View {
                 previewRow("type", document.type.rawValue)
                 previewRow("id", document.id.description)
                 previewRow("metadata", document.metadata.isEmpty ? "none" : "\(document.metadata.count) key(s)")
-                Text(document.content.prefix(400) + (document.content.count > 400 ? "…" : ""))
-                    .font(.system(.caption, design: .monospaced))
-                    .padding(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .textSelection(.enabled)
+                excerpt(document.content)
+
+                // The chunks this document produced, which is where the two chunkers visibly
+                // differ: identity returns the document unchanged, sentence returns slices.
+                if !viewModel.previewChunks.isEmpty {
+                    Divider()
+                    previewRow("chunks", "\(viewModel.previewChunks.count)")
+                    ForEach(viewModel.previewChunks.prefix(3), id: \.id) { chunk in
+                        Text("[\(chunk.index)] \(chunk.content.count) chars")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        excerpt(chunk.content)
+                    }
+                    if viewModel.previewChunks.count > 3 {
+                        Text("…\(viewModel.previewChunks.count - 3) more")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.top, 4)
         }
         .font(.caption)
+    }
+
+    private func excerpt(_ content: String) -> some View {
+        Text(content.prefix(400) + (content.count > 400 ? "…" : ""))
+            .font(.system(.caption, design: .monospaced))
+            .padding(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .textSelection(.enabled)
     }
 
     private func previewRow(_ label: String, _ value: String) -> some View {

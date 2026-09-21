@@ -33,6 +33,13 @@ public enum RTSRAGError: Error, Sendable, Equatable {
     /// The embedding provider failed for a batch.
     case embeddingFailed(reason: String)
 
+    /// The embedding model itself cannot be used: assets missing, revision absent, load failed.
+    ///
+    /// Distinct from ``embeddingFailed(reason:)``, which is about one batch. This is about the
+    /// embedder, so no batch can succeed until it is resolved — and on-device embedding is the
+    /// only path that has it, since a hosted model is either reachable or a network failure.
+    case embeddingModelUnavailable(reason: String)
+
     /// The store could not complete an operation.
     case storeFailed(reason: String)
 }
@@ -54,6 +61,8 @@ extension RTSRAGError: CustomStringConvertible {
             return "could not load \(source): \(reason)"
         case .embeddingFailed(let reason):
             return "embedding failed: \(reason)"
+        case .embeddingModelUnavailable(let reason):
+            return "embedding model unavailable: \(reason)"
         case .storeFailed(let reason):
             return "store operation failed: \(reason)"
         }
