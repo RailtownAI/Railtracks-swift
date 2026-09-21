@@ -603,14 +603,32 @@ class RAGViewModel {
             .embed,
             "embedded \(stats.chunksEmbedded) chunk(s), \(stats.batchesFailed) batch failure(s)"
                 + (vectorDimension.map { ", \($0) dimensions" } ?? "")
+                // Tokens and latency are the two halves of what a run cost, and which half exists
+                // depends on the path: a metered provider reports tokens, an on-device run reports
+                // none and only latency says anything at all.
                 + (stats.inputTokens.map { ", \($0) tokens billed" } ?? "")
+                + String(format: ", %.1fs in the embedder", stats.embeddingLatency)
         )
         append(
             .store,
             "stored \(stats.chunksStored) chunk(s) across \(stats.documentsCommitted) document(s)"
                 + (stats.chunksDropped > 0 ? ", \(stats.chunksDropped) dropped" : "")
+                // Withheld documents belong in the totals, not only in the per-event lines: they
+                // are precisely what a re-run will pick up, so a reader deciding whether to run
+                // again needs the number without scrolling.
+                + (stats.documentsWithheld > 0 ? ", \(stats.documentsWithheld) withheld for retry" : "")
                 + (stats.chunksStored > 0 ? " — ask a question below" : "")
         )
+        // One verdict rather than a wall of scrollback. `needsAttention` is true only for things a
+        // re-run will *not* fix — dropped chunks and recorded failures — so a withheld document
+        // deliberately does not trigger it.
+        if stats.needsAttention {
+            append(
+                .store,
+                "⚠️ this run needs a look: \(stats.chunksDropped) chunk(s) dropped, "
+                    + "\(stats.failures.count) failure(s) recorded — a re-run will not fix these"
+            )
+        }
     }
 
 

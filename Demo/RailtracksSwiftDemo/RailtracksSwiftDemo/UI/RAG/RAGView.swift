@@ -184,6 +184,7 @@ struct RAGView: View {
             + " · \(viewModel.documentCount) doc(s)"
             + " · \(viewModel.chunkCount) chunk(s)"
             + " · \(viewModel.embeddedCount) embedded"
+            + " · \(viewModel.storedCount) stored"
     }
 
     // MARK: - Status
