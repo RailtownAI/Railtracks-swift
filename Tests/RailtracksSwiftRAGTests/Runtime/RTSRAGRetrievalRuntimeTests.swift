@@ -1,0 +1,442 @@
+//
+//  RTSRAGRetrievalRuntimeTests.swift
+//  RailtracksSwiftRAGTests
+//
+//  Created by Mark Su on 2026-09-21.
+//
+
+import Combine
+import Foundation
+import Synchronization
+import Testing
+@testable import RailtracksSwiftRAG
+
+/// Phase 6: the runtime that assembles the other four.
+///
+/// Driven with the in-memory store and the on-device embedder, so the whole suite runs offline and
+/// costs nothing — and so the end-to-end case asserts on real vectors rather than a mock's return
+/// value.
+@Suite("RailtracksSwiftRAG retrieval runtime")
+struct RTSRAGRetrievalRuntimeTests {
+
+    // MARK: - End to end
+
+    @Test("a corpus can be ingested and then asked a question")
+    func endToEnd() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("refunds.txt", "Refunds are processed within thirty days of receipt.")
+        try corpus.write("hours.txt", "Our offices are closed on public holidays.")
+        let runtime = try await corpus.makeRuntime()
+
+        let stats = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        let result = try await runtime.retrieve("how long until I get my money back?")
+
+        // The claim the whole port exists for, now in two calls: a question sharing almost no words
+        // with the passage still finds it.
+        #expect(stats.documentsLoaded == 2)
+        #expect(stats.documentsCommitted == 2)
+        #expect(result.entries.first?.entry.content.contains("Refunds") == true)
+    }
+
+    // MARK: - Staleness
+
+    @Test("an unchanged document is skipped without being embedded")
+    func unchangedDocumentIsSkipped() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "The warehouse is near the airport.")
+        let counting = CountingEmbedder(wrapping: try await corpus.makeEmbedder())
+        let runtime = RTSRAGRetrievalRuntime(embedder: counting, store: corpus.store)
+
+        _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        let afterFirst = await counting.callCount
+        let second = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+
+        // Measured, not assumed: the embedder is asked for nothing the second time. Skipping is
+        // only worth having because it avoids the *cost*, so counting calls is the assertion that
+        // matters rather than counting events.
+        #expect(second.documentsSkipped == 1)
+        #expect(second.documentsCommitted == 0)
+        #expect(await counting.callCount == afterFirst)
+    }
+
+    @Test("an edited document replaces what was stored")
+    func editedDocumentIsReIngested() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "The refund window is thirty days.")
+        let runtime = try await corpus.makeRuntime()
+        _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+
+        try corpus.write("a.txt", "The refund window is ninety days.")
+        let second = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        let result = try await runtime.retrieve("how long is the refund window?", topK: 10)
+
+        // The content hash changed, so the source is not a duplicate; `replaceDocument` then swaps
+        // the old chunks out rather than adding to them.
+        #expect(second.documentsSkipped == 0)
+        #expect(second.documentsCommitted == 1)
+        #expect(result.entries.count == 1)
+        #expect(result.entries[0].entry.content.contains("ninety"))
+    }
+
+    @Test("a document that chunks to nothing leaves the store untouched")
+    func emptyChunkingDoesNotDelete() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "Refunds take thirty days.")
+        let runtime = try await corpus.makeRuntime()
+        _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+
+        // A sanitizer that drops everything, which is the realistic way a document reaches the
+        // chunker empty.
+        let dropping = RTSRAGSanitizingLoader(wrapping: corpus.loader, sanitizer: DroppingSanitizer())
+        _ = try await runtime.ingest(loader: dropping, chunker: RTSRAGSentenceChunker())
+        let result = try await runtime.retrieve("refunds", topK: 10)
+
+        // `replaceDocument(id:, with: [])` is a *delete* to the store, so the obvious
+        // implementation would quietly destroy the previous version whenever chunking yielded
+        // nothing. Python returns early instead, and so does this.
+        #expect(result.entries.count == 1)
+    }
+
+    // MARK: - The commit rule
+
+    @Test("a permanently unembeddable chunk is dropped and the rest committed")
+    func permanentFailureCommitsTheRest() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        let store = RTSRAGInMemoryStore()
+        let embedder = FailingEmbedder(failing: .invalidInput, onChunkContaining: "poison")
+        let runtime = RTSRAGRetrievalRuntime(embedder: embedder, store: store)
+        try corpus.write("a.txt", "Alpha here. poison here. Gamma here.")
+
+        let stats = try await runtime.ingest(
+            loader: corpus.loader,
+            chunker: RTSRAGSentenceChunker(maxCharacters: 20, overlapSentences: 0)
+        )
+
+        // `.invalidInput` is permanent, so withholding the document would leave it absent for ever,
+        // re-chunked and re-failed on every run. Committing what works is the terminating choice.
+        #expect(stats.documentsCommitted == 1)
+        #expect(stats.chunksDropped == 1)
+        #expect(stats.needsAttention)
+    }
+
+    @Test("a transient failure withholds the document entirely")
+    func transientFailureWithholds() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        let store = RTSRAGInMemoryStore()
+        let embedder = FailingEmbedder(failing: .transient, onChunkContaining: "poison")
+        let runtime = RTSRAGRetrievalRuntime(embedder: embedder, store: store)
+        try corpus.write("a.txt", "Alpha here. poison here. Gamma here.")
+
+        let stats = try await runtime.ingest(
+            loader: corpus.loader,
+            chunker: RTSRAGSentenceChunker(maxCharacters: 20, overlapSentences: 0)
+        )
+        let stored = try await store.count(matching: [:])
+
+        // Next run may succeed, so nothing is written and the previous version — here, nothing —
+        // stays as it was. Committing part would reproduce the half-replaced state the atomic
+        // `replaceDocument` exists to prevent.
+        #expect(stats.documentsWithheld == 1)
+        #expect(stats.documentsCommitted == 0)
+        #expect(stored == 0)
+    }
+
+    @Test("a partially committed document is not re-ingested for ever")
+    func partialCommitTerminates() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        let store = RTSRAGInMemoryStore()
+        let embedder = FailingEmbedder(failing: .invalidInput, onChunkContaining: "poison")
+        let runtime = RTSRAGRetrievalRuntime(embedder: embedder, store: store)
+        try corpus.write("a.txt", "Alpha here. poison here. Gamma here.")
+        let chunker = RTSRAGSentenceChunker(maxCharacters: 20, overlapSentences: 0)
+
+        _ = try await runtime.ingest(loader: corpus.loader, chunker: chunker)
+        let second = try await runtime.ingest(loader: corpus.loader, chunker: chunker)
+
+        // The detail that makes the rule above correct, and the one easiest to get backwards:
+        // `documentChunkCount` records what was **stored**, not what was chunked. Stamping the
+        // larger number would make the completeness check false for ever, so this unchanged
+        // document would re-chunk, re-embed and re-fail on every single run.
+        #expect(second.documentsSkipped == 1)
+        #expect(second.documentsCommitted == 0)
+    }
+
+    // MARK: - Guards
+
+    @Test("a foreign embedder is refused before the loader reads anything")
+    func modelGuardPreflights() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "Refunds take thirty days.")
+        let store = RTSRAGInMemoryStore()
+        let first = RTSRAGRetrievalRuntime(embedder: try await corpus.makeEmbedder(), store: store)
+        _ = try await first.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+
+        let counting = CountingLoader(wrapping: corpus.loader)
+        let second = RTSRAGRetrievalRuntime(embedder: StubEmbedder(), store: store)
+
+        await #expect(throws: RTSRAGError.self) {
+            _ = try await second.ingest(loader: counting, chunker: RTSRAGSentenceChunker())
+        }
+
+        // The store would refuse the first *write* anyway — but only after a document had been
+        // read, chunked and paid for. Asserting the loader was never asked is what pins that the
+        // check happens first.
+        #expect(await counting.streamCount == 0)
+    }
+
+    @Test("a repeated document id inside one ingest is warned about")
+    func duplicateIdsAreNoticed() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        // `name` is not unique, so both rows derive the same source and therefore the same id.
+        try corpus.write("people.csv", "name,city\nAmy,Vancouver\nAmy,Toronto\n")
+        let store = RTSRAGInMemoryStore()
+        let runtime = RTSRAGRetrievalRuntime(embedder: try await corpus.makeEmbedder(), store: store)
+
+        let stats = try await runtime.ingest(
+            loader: RTSRAGCSVLoader(path: corpus.directory, idColumn: "name"),
+            chunker: RTSRAGIdentityChunker()
+        )
+        let stored = try await store.count(matching: [:])
+
+        // Both rows load and embed, and the second overwrites the first — so one person is
+        // unretrievable and nothing errors. The warning is the only signal, which is why it exists.
+        #expect(stats.documentsLoaded == 2)
+        #expect(stored == 1)
+    }
+
+    // MARK: - Events
+
+    @Test("the event stream accounts for the run on its own")
+    func eventsReconstructTheStats() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "Refunds take thirty days.")
+        try corpus.write("b.txt", "The warehouse is near the airport.")
+        let runtime = try await corpus.makeRuntime()
+        let collector = EventCollector()
+        let subscription = runtime.eventPublisher.sink { event in
+            collector.record(event)
+        }
+        defer {
+            subscription.cancel()
+        }
+
+        // `ingest` drains the emitter before returning, so no sleep is needed: the drain is a
+        // barrier on the same serial queue the sinks run on.
+        let stats = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        let derived = collector.derived
+
+        // Python's own events cannot rebuild its own `IngestionStats` — `documents_loaded` and
+        // `chunks_created` are counted internally and no event reports either. Emitting both means
+        // the returned value is a convenience rather than a second source of truth that can drift.
+        #expect(derived.documentsLoaded == stats.documentsLoaded)
+        #expect(derived.chunksCreated == stats.chunksCreated)
+        #expect(derived.chunksEmbedded == stats.chunksEmbedded)
+        #expect(derived.chunksStored == stats.chunksStored)
+        #expect(derived.documentsCommitted == stats.documentsCommitted)
+    }
+
+    // MARK: - Fixtures
+
+    private struct Corpus {
+        let directory: URL
+        let store = RTSRAGInMemoryStore()
+
+        init() throws {
+            directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("rts-rag-runtime-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        var loader: RTSRAGTextLoader {
+            RTSRAGTextLoader(path: directory)
+        }
+
+        func write(_ name: String, _ contents: String) throws {
+            try contents.write(
+                to: directory.appendingPathComponent(name),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        func makeEmbedder() async throws -> RTSRAGAppleEmbedding {
+            let embedder = try RTSRAGAppleEmbedding()
+            try await embedder.prepare()
+            return embedder
+        }
+
+        func makeRuntime() async throws -> RTSRAGRetrievalRuntime {
+            RTSRAGRetrievalRuntime(embedder: try await makeEmbedder(), store: store)
+        }
+
+        func clean() {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+}
+
+// MARK: - Test doubles
+
+/// Counts how often the embedder is actually asked, so "skipping saves cost" is measured.
+private actor CountingEmbedder: RTSRAGEmbedding {
+    private let wrapped: any RTSRAGEmbedding
+    private(set) var callCount = 0
+
+    init(wrapping wrapped: any RTSRAGEmbedding) {
+        self.wrapped = wrapped
+    }
+
+    nonisolated var modelIdentifier: String {
+        "counting"
+    }
+
+    nonisolated var defaultBatchSize: Int {
+        8
+    }
+
+    func embed(_ texts: [String]) async throws -> RTSRAGTextEmbeddings {
+        callCount += 1
+        return try await wrapped.embed(texts)
+    }
+}
+
+/// Counts `stream()` calls, so "the guard runs before the loader" is provable.
+private actor CountingLoader: RTSRAGDocumentLoader {
+    private let wrapped: any RTSRAGDocumentLoader
+    private(set) var streamCount = 0
+
+    init(wrapping wrapped: any RTSRAGDocumentLoader) {
+        self.wrapped = wrapped
+    }
+
+    nonisolated func stream() throws -> RTSRAGDocumentStream {
+        Task {
+            await self.note()
+        }
+        return try wrapped.stream()
+    }
+
+    private func note() {
+        streamCount += 1
+    }
+}
+
+/// Fails any batch containing a marker, with a configurable kind.
+private struct FailingEmbedder: RTSRAGEmbedding {
+    let failing: RTSRAGEmbeddingFailureKind
+    let onChunkContaining: String
+
+    var modelIdentifier: String {
+        "stub/failing"
+    }
+
+    var defaultBatchSize: Int {
+        1
+    }
+
+    func embed(_ texts: [String]) async throws -> RTSRAGTextEmbeddings {
+        if texts.contains(where: { $0.contains(onChunkContaining) }) {
+            throw RTSRAGEmbeddingError(kind: failing, message: "stubbed \(failing)")
+        }
+        return RTSRAGTextEmbeddings(
+            vectors: texts.map { _ in [1, 0, 0] },
+            metrics: RTSRAGEmbeddingMetrics(vectorCount: texts.count)
+        )
+    }
+}
+
+/// A different model identity, for the guard.
+private struct StubEmbedder: RTSRAGEmbedding {
+    var modelIdentifier: String {
+        "stub/other"
+    }
+
+    var defaultBatchSize: Int {
+        8
+    }
+
+    func embed(_ texts: [String]) async throws -> RTSRAGTextEmbeddings {
+        RTSRAGTextEmbeddings(vectors: texts.map { _ in [1, 0, 0] })
+    }
+}
+
+private struct DroppingSanitizer: RTSRAGSanitizer {
+    func sanitize(_ document: RTSRAGDocument) async throws -> RTSRAGDocument? {
+        nil
+    }
+}
+
+/// Rebuilds the stats from nothing but the event stream.
+///
+/// Records **synchronously** inside the sink rather than hopping onto an actor. `ingest` drains the
+/// emitter before returning, and drain is a barrier on the same serial queue the sinks run on — so
+/// once it returns, every event has been recorded. An actor hop would break that chain and force
+/// the test to sleep and hope.
+private final class EventCollector: @unchecked Sendable {
+    private let state = Mutex(RTSRAGIngestionStats())
+
+    var derived: RTSRAGIngestionStats {
+        state.withLock { $0 }
+    }
+
+    func record(_ event: RTSRAGIngestEvent) {
+        state.withLock { derived in
+            EventCollector.apply(event, to: &derived)
+        }
+    }
+
+    private static func apply(_ event: RTSRAGIngestEvent, to derived: inout RTSRAGIngestionStats) {
+        switch event {
+        case .documentLoaded:
+            derived.documentsLoaded += 1
+        case .documentSkipped:
+            derived.documentsSkipped += 1
+        case .documentChunked(_, let chunks):
+            derived.chunksCreated += chunks
+        case .batchEmbedded(_, let chunks, let metrics):
+            derived.chunksEmbedded += chunks
+            derived.record(metrics)
+        case .batchFailed(let failure):
+            derived.batchesFailed += 1
+            derived.failures.append(failure)
+        case .documentCommitted(_, let stored, let dropped):
+            derived.documentsCommitted += 1
+            derived.chunksStored += stored
+            derived.chunksDropped += dropped
+        case .documentWithheld:
+            derived.documentsWithheld += 1
+        case .loadFailed:
+            break
+        }
+    }
+}
