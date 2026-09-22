@@ -49,10 +49,10 @@ public enum RTSRAGIngestEvent: Sendable {
 public enum RTSRAGWithholdReason: Sendable {
     /// An embedding failure a later run may well clear — a rate limit, a 5xx. Retrying is the
     /// right response.
-    case transient(String)
+    case transient(reason: String)
     /// The chunker refused the document. A chunker is a pure function of its input, so every later
     /// run refuses it identically; only a different chunker for that source helps.
-    case unchunkable(String)
+    case unchunkable(reason: String)
     /// Every chunk was permanently rejected by the embedder, leaving nothing to write. Carries the
     /// chunk count so the event stream can still account for the run on its own.
     case unembeddable(chunksDropped: Int)

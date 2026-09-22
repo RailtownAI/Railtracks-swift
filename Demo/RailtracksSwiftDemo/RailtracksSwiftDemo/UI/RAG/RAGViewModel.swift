@@ -566,7 +566,7 @@ class RAGViewModel {
             case .transient(let detail):
                 append(.store, "⚠️ not committed — \(detail); the previous version stays intact, retry may clear it")
             case .unchunkable(let detail):
-                append(.store, "⚠️ not committed — \(detail); re-running will fail identically, pick another chunker")
+                append(.chunk, "⚠️ not committed — \(detail); re-running will fail identically, pick another chunker")
             case .unembeddable(let dropped):
                 append(
                     .store,
@@ -575,7 +575,9 @@ class RAGViewModel {
                 )
             }
         case .documentEmpty(_, let source):
-            append(.load, "\(sourceLabel(source)) produced no chunks — nothing to index, stored version untouched")
+            // Chunk, not Load: the document arrived intact and it is the *chunker* that produced
+            // nothing. Attributing it to Load would point at the wrong phase to go and fix.
+            append(.chunk, "\(sourceLabel(source)) produced no chunks — nothing to index, stored version untouched")
         case .loadFailed(let error):
             failureCount += 1
             append(.load, "⚠️ \(error)")
@@ -624,17 +626,18 @@ class RAGViewModel {
                     + "\(stats.documentsAccountedFor) accounted for — please report this"
             )
         }
-        // One verdict rather than a wall of scrollback, covering dropped chunks, unchunkable
-        // documents and recorded failures. A withheld document reaches it too, through the batch
-        // failure that caused it — what the separate count buys is the *advice*, since "run it
-        // again" and "change the chunker" are opposite instructions.
+        // One verdict rather than a wall of scrollback. `needsAttention` means "something went
+        // wrong", not "a re-run will not fix it" — some of these clear on their own and some never
+        // will, so the line reports the numbers and lets the per-document lines above give the
+        // advice, each of which already names its own remedy.
         if stats.needsAttention {
             append(
                 .store,
                 "⚠️ this run needs a look: \(stats.chunksDropped) chunk(s) dropped, "
                     + "\(stats.documentsUnchunkable) document(s) no chunker would take, "
                     + "\(stats.documentsUnembeddable) no embedder would take, "
-                    + "\(stats.failures.count) failure(s) recorded — a re-run will not fix these"
+                    + "\(stats.documentsWithheld) withheld, "
+                    + "\(stats.failures.count) failure(s) recorded"
             )
         }
     }

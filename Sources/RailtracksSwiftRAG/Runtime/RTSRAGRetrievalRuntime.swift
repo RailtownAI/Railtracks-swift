@@ -235,10 +235,10 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
             emitter.emit(.documentCommitted(id: document.id, stored: stored, dropped: dropped))
         case .withheld(let reason):
             stats.documentsWithheld += 1
-            emitter.emit(.documentWithheld(id: document.id, reason: .transient(reason)))
+            emitter.emit(.documentWithheld(id: document.id, reason: .transient(reason: reason)))
         case .unchunkable(let reason):
             stats.documentsUnchunkable += 1
-            emitter.emit(.documentWithheld(id: document.id, reason: .unchunkable(reason)))
+            emitter.emit(.documentWithheld(id: document.id, reason: .unchunkable(reason: reason)))
         case .unembeddable(let dropped):
             stats.documentsUnembeddable += 1
             stats.chunksDropped += dropped

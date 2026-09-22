@@ -73,28 +73,42 @@ public struct RTSRAGIngestionStats: Sendable {
     public init() {
     }
 
-    /// Whether anything in this run needs a human.
+    /// Whether **anything went wrong** in this run.
     ///
-    /// ``documentsWithheld`` is not a term here, and not because a withheld document is benign: the
-    /// batch failure that caused it is already in ``failures``, so such a run flags through that
-    /// term regardless. Adding it would change nothing.
+    /// Not "retrying will not help", which an earlier version of this comment claimed and the
+    /// expression never implemented: `failures` holds transient failures too, so a run that merely
+    /// exhausted its retries on one batch has always flagged. Reading it as the weaker, honest
+    /// claim is what makes it true.
     ///
-    /// ``documentsUnchunkable`` *is* a term, because nothing else covers it. A chunker refusal
-    /// records no failure, so before it existed a run whose every document was too large to chunk
-    /// reported that it needed no attention at all.
+    /// ``documentsEmpty`` is the one outcome deliberately absent, because nothing went wrong: a
+    /// source with no content is legitimate, and it is indistinguishable from a misconfigured
+    /// sanitizer — flagging the first to catch the second would cry wolf on every empty file.
+    ///
+    /// The remaining terms are an **enumeration, not a minimal expression**. Several imply each
+    /// other — `chunksDropped` and `documentsUnembeddable` both arise from failures that were
+    /// appended to ``failures`` in the same breath, so neither can be the deciding term. They are
+    /// listed anyway so that this reads as what counts as "wrong", rather than as the shortest
+    /// expression that happens to compute it today. ``documentsUnchunkable`` is the one that is not
+    /// redundant: a chunker refusal records no failure at all.
     public var needsAttention: Bool {
         chunksDropped > 0
             || documentsUnchunkable > 0
             || documentsUnembeddable > 0
+            || documentsWithheld > 0
             || !failures.isEmpty
     }
 
-    /// The six terminal outcomes, which **must** sum to ``documentsLoaded``.
+    /// The six terminal outcomes, which **must** sum to ``documentsLoaded`` for a run that
+    /// completes.
     ///
-    /// Every loaded document reaches exactly one of them, so a shortfall means a path returned
-    /// without recording anything — which is precisely the defect this invariant was added to
-    /// catch. Two such paths existed: a document that chunked to nothing and one whose every chunk
-    /// was rejected both vanished from the accounting entirely.
+    /// The qualifier matters: when the embedder turns out to be unusable, ``ingest`` throws with a
+    /// document already counted as loaded and no outcome yet reached. Nothing observes that — the
+    /// throw means no stats are returned — but the invariant is about completed runs, and asserting
+    /// it anywhere else would be wrong.
+    ///
+    /// A shortfall in a completed run means a path returned without recording anything, which is
+    /// precisely the defect this was added to catch. Two such paths existed: a document that chunked
+    /// to nothing and one whose every chunk was rejected both vanished from the accounting entirely.
     public var documentsAccountedFor: Int {
         documentsSkipped
             + documentsCommitted
