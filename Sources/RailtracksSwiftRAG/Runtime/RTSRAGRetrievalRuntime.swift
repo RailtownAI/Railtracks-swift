@@ -7,6 +7,7 @@
 
 import Combine
 import Foundation
+import Synchronization
 
 /// Runs the pipeline: loader → chunker → embedder → store, one document at a time.
 ///
@@ -32,17 +33,35 @@ import Foundation
 /// independent ingests where a repeat is a *legitimate update*, while two entries in one list would
 /// silently double-embed and let the last one win.
 ///
-/// ## No per-run state
+/// ## One ingest per runtime; concurrency comes from a second runtime
 ///
-/// A `final class` rather than an `actor`, holding only the embedder, the store and the emitter —
-/// all immutable. Everything a run accumulates lives in its own call frame. That is what lets two
-/// ingests proceed as genuinely independent runs sharing two actors, instead of serialising on the
-/// runtime or racing its counters.
+/// ``ingest(loader:chunker:scope:)`` refuses a second concurrent call on the same instance. Two
+/// ingests at once on one runtime would interleave their events on one publisher with nothing to
+/// tell them apart — the events carry a document id, not a run id — and nobody gains anything from
+/// it, because a second runtime is a plain object over the same embedder and store.
+///
+/// So concurrency is expressed by building two runtimes, which also puts the question of what they
+/// share where the caller can see it. The store is an actor and `replaceDocument` is one operation,
+/// so writes cannot interleave within a document. **Sharing one embedder is the correct choice, not
+/// merely a safe one**: a metered provider's limit is per key, so two embedders would each own a
+/// rate governor, each probe upward independently, and collectively exceed a budget neither can
+/// observe.
+///
+/// A `final class` rather than an `actor` — an actor would not serialise anything here, since
+/// actors are reentrant and an ingest suspends constantly. Everything a run accumulates still lives
+/// in its own call frame, which is what keeps two runtimes genuinely independent.
 public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
 
     private let embedder: any RTSRAGEmbedding
     private let store: any RTSRAGVectorStore
     private let emitter = RTSRAGIngestEventEmitter()
+    /// Held for the duration of one ``ingest(loader:chunker:scope:)``.
+    ///
+    /// A `Mutex` over a flag rather than making the runtime an `actor`, because an actor would not
+    /// serialise these calls at all: actors are **reentrant**, so isolation is released at every
+    /// `await` — and an ingest awaits the loader, the embedder and the store constantly. A second
+    /// call would enter at the first suspension and interleave exactly as it does without one.
+    private let isIngesting = Mutex(false)
 
     /// Live progress. Subscribe before calling ``ingest(loader:chunker:scope:)``.
     ///
@@ -65,15 +84,29 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
 
     /// Reads, chunks, embeds and stores everything `loader` produces.
     ///
-    /// - Throws: when the *embedder* is unusable — an exhausted account, an unavailable model — or
-    ///   when the store was built by a different embedder. Per-document problems are reported as
-    ///   events and counted in the returned stats; they do not end the run.
+    /// **One ingest at a time per runtime.** A second concurrent call throws
+    /// ``RTSRAGError/ingestAlreadyRunning`` without touching the loader, the embedder, the store or
+    /// the event stream — it cannot disturb the run already in progress. Concurrency comes from a
+    /// second runtime over the same embedder and store.
+    ///
+    /// - Throws: ``RTSRAGError/ingestAlreadyRunning`` if this runtime is already ingesting; or,
+    ///   once running, when the *embedder* is unusable — an exhausted account, an unavailable
+    ///   model — or when the store was built by a different embedder. Per-document problems are
+    ///   reported as events and counted in the returned stats; they do not end the run.
     @discardableResult
     public func ingest(
         loader: any RTSRAGDocumentLoader,
         chunker: any RTSRAGChunker,
         scope: RTSRAGStoreScope? = nil
     ) async throws -> RTSRAGIngestionStats {
+        // Ordering is load-bearing: the claim throws *before* the `defer` is installed, so a
+        // refused second call cannot release the slot the first one holds. Written the other way
+        // round, losing the race would end the running ingest's exclusivity.
+        try claimIngestSlot()
+        defer {
+            isIngesting.withLock { $0 = false }
+        }
+
         // Before the loader opens a file. The store would reject a foreign embedder on its first
         // write anyway, but by then a document has been read, chunked and *paid to embed* — and on
         // a metered provider that is real money for a run that cannot succeed.
@@ -308,6 +341,18 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
     }
 
     // MARK: - Internals
+
+    /// Takes the ingest slot, or throws because someone else holds it.
+    ///
+    /// Test and set inside one lock acquisition, so two calls racing to start cannot both claim it.
+    private func claimIngestSlot() throws {
+        try isIngesting.withLock { running in
+            guard !running else {
+                throw RTSRAGError.ingestAlreadyRunning
+            }
+            running = true
+        }
+    }
 
     /// Fails before any work when the store holds vectors from a different embedder.
     private func verifyEmbedderMatchesStore() async throws {

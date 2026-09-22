@@ -344,6 +344,69 @@ struct RTSRAGRetrievalRuntimeTests {
         #expect(stats.documentsAccountedFor == stats.documentsLoaded)
     }
 
+    @Test("a refused second ingest leaves the first one running and correct")
+    func concurrentIngestIsRefusedWithoutDisturbingTheFirst() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "Refunds take thirty days.")
+        try corpus.write("b.txt", "The warehouse is near the airport.")
+        // Slow enough that the second call lands while the first is still inside the embedder.
+        let slow = SlowEmbedder(wrapped: try await corpus.makeEmbedder(), delay: .milliseconds(150))
+        let runtime = RTSRAGRetrievalRuntime(embedder: slow, store: corpus.store)
+
+        async let first = runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        try await Task.sleep(for: .milliseconds(50))
+
+        // Refused **twice**, and the second refusal is the one that matters. A refusal must not
+        // release the slot it failed to take — written with the `defer` installed before the claim,
+        // the first refusal would free the running ingest's exclusivity and this third call would
+        // be admitted to run concurrently with it. One refusal alone cannot tell the two apart.
+        await #expect(throws: RTSRAGError.ingestAlreadyRunning) {
+            _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        }
+        await #expect(throws: RTSRAGError.ingestAlreadyRunning) {
+            _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        }
+        let stats = try await first
+
+        // The refusals are otherwise inert: they touch no loader, embedder or store, so the first
+        // run finishes exactly as it would have alone.
+        #expect(stats.documentsLoaded == 2)
+        #expect(stats.documentsCommitted == 2)
+        #expect(stats.needsAttention == false)
+
+        // And the slot is released afterwards, so the runtime is reusable rather than poisoned.
+        let second = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        #expect(second.documentsSkipped == 2)
+    }
+
+    @Test("a runtime is reusable after an ingest that threw")
+    func ingestSlotIsReleasedAfterAThrow() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        let embedder = FailingEmbedder(failing: .quotaExhausted, onChunkContaining: "poison")
+        let runtime = RTSRAGRetrievalRuntime(embedder: embedder, store: corpus.store)
+        let chunker = RTSRAGSentenceChunker(maxCharacters: 20, overlapSentences: 0)
+        try corpus.write("a.txt", "Alpha here. poison here.")
+
+        await #expect(throws: RTSRAGEmbeddingError.self) {
+            _ = try await runtime.ingest(loader: corpus.loader, chunker: chunker)
+        }
+
+        // The slot is released in a `defer`, so it survives every exit — a thrown run, and
+        // cancellation, which leaves by the same path. Releasing at the end of the body instead
+        // would poison the runtime permanently the first time an ingest failed, and every other
+        // test here would still pass: they all reuse a runtime only after a *successful* run.
+        try corpus.write("a.txt", "Alpha here. Beta here.")
+        let recovered = try await runtime.ingest(loader: corpus.loader, chunker: chunker)
+
+        #expect(recovered.documentsCommitted == 1)
+    }
+
     // MARK: - Guards
 
     @Test("a foreign embedder is refused before the loader reads anything")
@@ -597,6 +660,25 @@ private struct FailingEmbedder: RTSRAGEmbedding {
             vectors: texts.map { _ in [1, 0, 0] },
             metrics: RTSRAGEmbeddingMetrics(vectorCount: texts.count)
         )
+    }
+}
+
+/// Holds each call open long enough for a second ingest to arrive mid-run.
+private struct SlowEmbedder: RTSRAGEmbedding {
+    let wrapped: any RTSRAGEmbedding
+    let delay: Duration
+
+    var modelIdentifier: String {
+        wrapped.modelIdentifier
+    }
+
+    var defaultBatchSize: Int {
+        1
+    }
+
+    func embed(_ texts: [String]) async throws -> RTSRAGTextEmbeddings {
+        try await Task.sleep(for: delay)
+        return try await wrapped.embed(texts)
     }
 }
 
