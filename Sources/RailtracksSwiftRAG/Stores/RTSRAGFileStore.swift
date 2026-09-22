@@ -76,19 +76,14 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
         id: RTSRAGDocumentID,
         with entries: [RTSRAGStoreEntry]
     ) async throws {
-        // The index validates first, so a rejected document neither enters memory nor reaches the
-        // log — and the previous version survives a rejected replacement.
-        try index.replace(documentID: id, with: entries)
-        try append(Record(documentID: id, entries: entries))
-        try compactIfNeeded()
+        try apply(entries, to: id)
     }
 
     public func deleteDocument(id: RTSRAGDocumentID) async throws {
-        index.remove(documentID: id)
         // A tombstone rather than rewriting the file: the delete has to survive a replay, and an
-        // empty entry list is how a replay learns the document is gone.
-        try append(Record(documentID: id, entries: []))
-        try compactIfNeeded()
+        // empty entry list is how a replay learns the document is gone. The index reads an empty
+        // replacement as a removal, so a delete is the same operation with nothing in it.
+        try apply([], to: id)
     }
 
     public func search(_ query: RTSRAGStoreQuery) async throws -> [RTSRAGRetrievedEntry] {
@@ -108,6 +103,31 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
     }
 
     // MARK: - Log
+
+    /// Writes `entries` to the index and the log together, or to neither.
+    ///
+    /// Two guards, in order, because they fail at different moments:
+    ///
+    /// - **The index validates first**, so a document from a foreign embedder neither enters memory
+    ///   nor reaches the log, and the previous version survives a rejected replacement.
+    /// - **A failed append is rolled back.** Reads answer from the index, so leaving the new
+    ///   document there after the log refused it would make ``RTSRAGRetrievalRuntime`` report the
+    ///   document as uncommitted and then *skip* it on every later run in this process — its
+    ///   staleness check would find the write that never happened. Worse, compaction serialises the
+    ///   index, so a later compaction would quietly persist it.
+    private func apply(_ entries: [RTSRAGStoreEntry], to id: RTSRAGDocumentID) throws {
+        let previous = index.documents[id]
+        try index.replace(documentID: id, with: entries)
+        do {
+            try append(Record(documentID: id, entries: entries))
+        } catch {
+            // Cannot itself fail validation: these entries were already in the store, and an empty
+            // restoration — the no-previous-version case — removes the document instead.
+            try? index.replace(documentID: id, with: previous ?? [])
+            throw error
+        }
+        try compactIfNeeded()
+    }
 
     /// Reads the log back into a document map, last write winning.
     private static func replay(
@@ -139,18 +159,25 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
         return (documents, lines)
     }
 
+    /// Appends one line, or throws having written nothing.
+    ///
+    /// **Never falls back to a whole-file write.** An earlier version opened the handle with `try?`
+    /// and, when that failed, wrote the single line with `.atomic` — intending "the file does not
+    /// exist yet". `try?` does not ask that question: it fires on *any* open failure, so a
+    /// permissions change or an exhausted descriptor table replaced the entire log with one line.
+    /// Creating the file explicitly asks what was meant, and leaves the open failure as a real error.
     private func append(_ record: Record) throws {
         var line = try JSONEncoder().encode(record)
         line.append(0x0A)
-        if let handle = try? FileHandle(forWritingTo: fileURL) {
-            defer {
-                try? handle.close()
-            }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: line)
-        } else {
-            try line.write(to: fileURL, options: .atomic)
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         }
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer {
+            try? handle.close()
+        }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: line)
         lineCount += 1
     }
 

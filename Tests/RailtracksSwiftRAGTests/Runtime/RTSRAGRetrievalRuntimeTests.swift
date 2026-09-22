@@ -293,6 +293,45 @@ struct RTSRAGRetrievalRuntimeTests {
         #expect(derived.documentsCommitted == stats.documentsCommitted)
     }
 
+    @Test("a thrown ingest still delivers the events that explain it")
+    func eventsAreDrainedWhenIngestThrows() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        // One document, two chunks: the first embeds, the second ends the run. Keeping both inside
+        // one file makes the ordering the enumerator's business rather than the test's.
+        try corpus.write("a.txt", "Alpha here. poison here.")
+        let embedder = FailingEmbedder(failing: .quotaExhausted, onChunkContaining: "poison")
+        let runtime = RTSRAGRetrievalRuntime(embedder: embedder, store: corpus.store)
+        let collector = EventCollector(delay: 0.05)
+        let subscription = runtime.eventPublisher.sink { event in
+            collector.record(event)
+        }
+        defer {
+            subscription.cancel()
+        }
+
+        await #expect(throws: RTSRAGEmbeddingError.self) {
+            _ = try await runtime.ingest(
+                loader: corpus.loader,
+                chunker: RTSRAGSentenceChunker(maxCharacters: 20, overlapSentences: 0)
+            )
+        }
+        let derived = collector.derived
+
+        // Read the instant the throw is caught, with no sleep — that is the assertion. Delivery is
+        // asynchronous, so a drain only on the success path lets the error overtake the events that
+        // explain it, and a subscriber sees the run stop with the reason still in flight behind it.
+        //
+        // `documentChunked` is the *last* event before the call that throws, so it is the one a
+        // missing drain is likeliest to strand. Deliberately not `batchEmbedded`: the batching
+        // layer discards its accumulated outcomes when a kind that `endsTheRun` appears, so the
+        // runtime never learns about the batches that succeeded first.
+        #expect(derived.documentsLoaded == 1)
+        #expect(derived.chunksCreated >= 1)
+    }
+
     // MARK: - Fixtures
 
     private struct Corpus {
@@ -432,12 +471,25 @@ private struct DroppingSanitizer: RTSRAGSanitizer {
 /// the test to sleep and hope.
 private final class EventCollector: @unchecked Sendable {
     private let state = Mutex(RTSRAGIngestionStats())
+    /// Held per event, to make a *missing* barrier observable.
+    ///
+    /// A real sink is fast, so a test that merely reads after the throw wins the race by luck and
+    /// passes with or without the drain. Blocking the emitter's serial queue for longer than the
+    /// remaining call takes turns "delivery is asynchronous" from a fact into a visible one.
+    private let delay: TimeInterval
+
+    init(delay: TimeInterval = 0) {
+        self.delay = delay
+    }
 
     var derived: RTSRAGIngestionStats {
         state.withLock { $0 }
     }
 
     func record(_ event: RTSRAGIngestEvent) {
+        if delay > 0 {
+            Thread.sleep(forTimeInterval: delay)
+        }
         state.withLock { derived in
             EventCollector.apply(event, to: &derived)
         }

@@ -301,6 +301,86 @@ struct RTSRAGStoreTests {
         #expect(hits.map { $0.entry.content } == ["revision 29"])
     }
 
+    @Test("a refused append costs one document, not the log")
+    func fileStoreSurvivesARefusedAppend() async throws {
+        guard getuid() != 0 else {
+            // Root ignores the read-only bit, so the failure cannot be provoked and a pass would
+            // mean nothing.
+            return
+        }
+        let scratch = try Scratch()
+        defer {
+            scratch.clean()
+        }
+        let url = scratch.directory.appendingPathComponent("entries.jsonl")
+        let store = try RTSRAGFileStore(directory: scratch.directory)
+        let first = RTSRAGDocumentID(UUID())
+        let second = RTSRAGDocumentID(UUID())
+        try await store.replaceDocument(id: first, with: [Self.entry(documentID: first, index: 0, content: "one", vector: [1, 0, 0])])
+        try await store.replaceDocument(id: second, with: [Self.entry(documentID: second, index: 0, content: "two", vector: [1, 0, 0])])
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        let blocked = RTSRAGDocumentID(UUID())
+        await #expect(throws: (any Error).self) {
+            try await store.replaceDocument(
+                id: blocked,
+                with: [Self.entry(documentID: blocked, index: 0, content: "three", vector: [1, 0, 0])]
+            )
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+
+        // An earlier version opened the handle with `try?` and, on failure, wrote the single line
+        // with `.atomic` — meaning to say "the file does not exist yet". Any open failure therefore
+        // replaced the entire log with one document, which is what this pins.
+        let reopened = try RTSRAGFileStore(directory: scratch.directory)
+        let hits = try await reopened.search(Self.query([1, 0, 0], topK: 10))
+
+        #expect(Set(hits.map { $0.entry.content }) == ["one", "two"])
+    }
+
+    @Test("a refused append leaves no phantom document in memory")
+    func fileStoreRollsBackARefusedAppend() async throws {
+        guard getuid() != 0 else {
+            return
+        }
+        let scratch = try Scratch()
+        defer {
+            scratch.clean()
+        }
+        let url = scratch.directory.appendingPathComponent("entries.jsonl")
+        let store = try RTSRAGFileStore(directory: scratch.directory)
+        let kept = RTSRAGDocumentID(UUID())
+        let blocked = RTSRAGDocumentID(UUID())
+        let keptMetadata: RTSRAGMetadata = [RTSRAGChunk.MetadataKey.sourcePath: .string("file:///kept.txt")]
+        let blockedMetadata: RTSRAGMetadata = [RTSRAGChunk.MetadataKey.sourcePath: .string("file:///blocked.txt")]
+        try await store.replaceDocument(
+            id: kept,
+            with: [Self.entry(documentID: kept, index: 0, content: "kept", vector: [1, 0, 0], metadata: keptMetadata)]
+        )
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        await #expect(throws: (any Error).self) {
+            try await store.replaceDocument(
+                id: blocked,
+                with: [Self.entry(documentID: blocked, index: 0, content: "blocked", vector: [1, 0, 0], metadata: blockedMetadata)]
+            )
+        }
+        await #expect(throws: (any Error).self) {
+            try await store.deleteDocument(id: kept)
+        }
+        let phantom = try await store.count(matching: blockedMetadata)
+        let survivor = try await store.count(matching: keptMetadata)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+
+        // Reads answer from the index, not the file — so a write left in memory after the log
+        // refused it is exactly what makes `RTSRAGRetrievalRuntime`'s staleness check skip a
+        // document it just reported as failed, for the rest of the process. The tombstone has the
+        // same requirement in the other direction: a delete the log refused must not take the
+        // document out of memory.
+        #expect(phantom == 0)
+        #expect(survivor == 1)
+    }
+
     // MARK: - Helpers
 
     /// A throwaway directory, so the file store never touches a developer's own files.

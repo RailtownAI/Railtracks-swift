@@ -82,25 +82,34 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
         var stats = RTSRAGIngestionStats()
         var seen = Set<RTSRAGDocumentID>()
 
-        for await element in try loader.stream() {
-            try Task.checkCancellation()
-            switch element {
-            case .failure(let error):
-                emitter.emit(.loadFailed(error))
-            case .success(let document):
-                stats.documentsLoaded += 1
-                emitter.emit(.documentLoaded(id: document.id, source: document.source))
-                // A repeat inside one call means a non-unique `idColumn` or `idKey`: every record
-                // sharing that value collapses onto one id, and all but the last are embedded and
-                // then overwritten. A legitimate update arrives in a *later* call, never this one,
-                // so this is unambiguous.
-                if !seen.insert(document.id).inserted {
-                    ragLog.warning(
-                        "📚 \(document.source ?? "a document") repeats id \(document.id) in one ingest — check the id column; earlier copies will be overwritten"
-                    )
+        do {
+            for await element in try loader.stream() {
+                try Task.checkCancellation()
+                switch element {
+                case .failure(let error):
+                    emitter.emit(.loadFailed(error))
+                case .success(let document):
+                    stats.documentsLoaded += 1
+                    emitter.emit(.documentLoaded(id: document.id, source: document.source))
+                    // A repeat inside one call means a non-unique `idColumn` or `idKey`: every
+                    // record sharing that value collapses onto one id, and all but the last are
+                    // embedded and then overwritten. A legitimate update arrives in a *later* call,
+                    // never this one, so this is unambiguous.
+                    if !seen.insert(document.id).inserted {
+                        ragLog.warning(
+                            "📚 \(document.source ?? "a document") repeats id \(document.id) in one ingest — check the id column; earlier copies will be overwritten"
+                        )
+                    }
+                    try await ingestOne(document, chunker: chunker, scope: scope, into: &stats)
                 }
-                try await ingestOne(document, chunker: chunker, scope: scope, into: &stats)
             }
+        } catch {
+            // Drained on the way out too, not only on success — and `defer` cannot `await`.
+            // Delivery is asynchronous, so without this the throw overtakes the events that explain
+            // it and a subscriber sees the run stop with the failure still in flight behind it.
+            // The failing path is the one where that ordering matters most.
+            await emitter.drain()
+            throw error
         }
         await emitter.drain()
         return stats
