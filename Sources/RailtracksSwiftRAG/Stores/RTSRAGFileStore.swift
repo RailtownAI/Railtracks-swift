@@ -92,7 +92,7 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
     }
 
     public func search(_ query: RTSRAGStoreQuery) async throws -> [RTSRAGRetrievedEntry] {
-        try index.validateQuery(query, expecting: nil)
+        try index.validateQuery(query)
         return index.search(query)
     }
 

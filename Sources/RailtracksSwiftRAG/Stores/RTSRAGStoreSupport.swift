@@ -103,16 +103,21 @@ struct RTSRAGStoreIndex {
         }
     }
 
-    /// Rejects a query that cannot be compared with what is stored.
+    /// Rejects a query whose vector is the wrong width for what is stored.
     ///
-    /// The same check as a write, applied at read time, because a store queried by a *different*
-    /// embedder is the more likely mistake: the ingest is long finished and the query looks fine.
-    func validateQuery(_ query: RTSRAGStoreQuery, expecting model: String?) throws {
+    /// **Width only.** An earlier version took an `expecting model:` parameter and compared model
+    /// identities too — but every caller passed `nil`, so that branch never ran, and a parameter
+    /// that is permanently nil reads as protection which is not there. Removed rather than wired,
+    /// because a `RTSRAGStoreQuery` does not carry the identity of the embedder that produced it
+    /// and giving it one would land in the same state: an optional field, nil by default.
+    ///
+    /// The identity check lives in ``RTSRAGRetrievalRuntime`` instead, which is the only component
+    /// that knows *both* the embedder's identity and the store's. It matters because width alone
+    /// is a weak proxy: an on-device 512 and `text-embedding-3-small` truncated to 512 pass this
+    /// check and mean entirely different things.
+    func validateQuery(_ query: RTSRAGStoreQuery) throws {
         guard let dimension else {
             return
-        }
-        if let model, let embeddingModel, model != embeddingModel {
-            throw RTSRAGError.embeddingModelMismatch(expected: embeddingModel, found: model)
         }
         guard query.embedding.count == dimension else {
             throw RTSRAGError.storeFailed(

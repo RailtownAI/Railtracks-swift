@@ -208,6 +208,34 @@ struct RTSRAGRetrievalRuntimeTests {
         #expect(await counting.streamCount == 0)
     }
 
+    @Test("querying with a foreign embedder is refused even at matching width")
+    func retrieveRefusesAForeignEmbedder() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "Refunds take thirty days.")
+        let store = RTSRAGInMemoryStore()
+        // Both stubs produce **three-dimension** vectors under different identities, which is the
+        // whole point: the store's width check cannot tell them apart, and in the real world the
+        // pair is an on-device 512 against `text-embedding-3-small` truncated to 512.
+        let written = RTSRAGRetrievalRuntime(
+            embedder: FailingEmbedder(failing: .transient, onChunkContaining: "never matches"),
+            store: store
+        )
+        _ = try await written.ingest(loader: corpus.loader, chunker: RTSRAGIdentityChunker())
+
+        let foreign = RTSRAGRetrievalRuntime(embedder: StubEmbedder(), store: store)
+
+        // Without the identity check this returns confident nonsense — well-formed scores over a
+        // vector space the query was never in. Querying with the wrong embedder is also the likelier
+        // of the two mistakes, since the ingest is long finished and nothing about the query looks
+        // wrong.
+        await #expect(throws: RTSRAGError.self) {
+            _ = try await foreign.retrieve("refunds")
+        }
+    }
+
     @Test("a repeated document id inside one ingest is warned about")
     func duplicateIdsAreNoticed() async throws {
         let corpus = try Corpus()

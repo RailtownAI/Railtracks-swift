@@ -218,14 +218,20 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
 
     /// Embeds `query` and returns the closest stored chunks.
     ///
-    /// Thin by design: the store already refuses a query whose vector came from a different model
-    /// or has the wrong width, so there is nothing to re-check here.
+    /// The identity guard runs here too, and not only on ingest. The store rejects a query vector
+    /// of the wrong *width*, but width is a weak proxy for the vector space: an on-device 512 and
+    /// `text-embedding-3-small` truncated to 512 dimensions pass that check and mean completely
+    /// different things, producing scores that look reasonable and rank nothing.
+    ///
+    /// Querying with the wrong embedder is also the *likelier* mistake of the two — the ingest is
+    /// long finished, and nothing about the query looks wrong.
     public func retrieve(
         _ query: String,
         topK: Int = 5,
         filters: RTSRAGMetadata? = nil,
         scope: RTSRAGStoreScope? = nil
     ) async throws -> RTSRAGRetrievalResult {
+        try await verifyEmbedderMatchesStore()
         let vectors = try await embedder.embed([query]).vectors
         guard let embedding = vectors.first else {
             throw RTSRAGError.embeddingFailed(reason: "the embedder returned no vector for the query")
