@@ -43,9 +43,8 @@ public enum RTSRAGIngestEvent: Sendable {
 
 /// Why a document was not written — three outcomes that call for different responses.
 ///
-/// Replaced an `isPermanent: Bool`, which could separate two of these but not three. The
-/// distinction is not academic: telling someone to retry a document no chunker will ever accept is
-/// the advice that wastes the most time.
+/// The distinction is not academic: telling someone to retry a document no chunker will ever
+/// accept is the advice that wastes the most time.
 public enum RTSRAGWithholdReason: Sendable {
     /// An embedding failure a later run may well clear — a rate limit, a 5xx. Retrying is the
     /// right response.

@@ -123,12 +123,9 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
 
     /// What happened to one document — one case per way `ingestOne` can end.
     ///
-    /// Returned rather than recorded in place, so that **every** exit has to name an outcome: a
-    /// bare `return` no longer compiles. That is not stylistic. Two paths previously returned
-    /// having recorded nothing at all — a document that chunked to nothing, and one whose every
-    /// chunk the embedder rejected — so both vanished from the stats, and the second reported
-    /// zero dropped chunks while permanently losing all of them. A single `switch` in
-    /// ``record(_:for:into:)`` now applies the counter and emits the event for all six.
+    /// Returned rather than recorded in place, so that **every** exit has to name an outcome and a
+    /// bare `return` does not compile. ``record(_:for:into:)`` is then the single place a counter
+    /// is applied and an event emitted, so the two cannot drift.
     private enum DocumentOutcome {
         case skipped
         case empty
@@ -203,9 +200,8 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
             return .withheld(reason: withheldReason)
         }
         // The degenerate end of the commit rule: every chunk was permanently rejected, so there is
-        // no reduced document to commit. Carries the drop count because `commit` — the only place
-        // that used to record one — is never reached, which is why this path reported losing
-        // nothing while losing everything.
+        // no reduced document to commit. Carries its own drop count, since `commit` — the only
+        // other place one is recorded — is never reached from here.
         guard !embedded.isEmpty else {
             return .unembeddable(dropped: droppedChunks)
         }

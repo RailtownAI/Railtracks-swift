@@ -99,8 +99,8 @@ struct RTSRAGRetrievalRuntimeTests {
 
         // A sanitizer returning `nil` removes the document from the *stream*, so it never reaches
         // the runtime at all — the previous version survives because nothing was asked about it.
-        // Named accordingly: this used to claim it covered a document reaching the chunker empty,
-        // which it never did. That path is `emptyDocumentIsAccountedFor`.
+        // A document that reaches the chunker and yields nothing is a different path, covered by
+        // `emptyDocumentIsAccountedFor`.
         let dropping = RTSRAGSanitizingLoader(wrapping: corpus.loader, sanitizer: DroppingSanitizer())
         let stats = try await runtime.ingest(loader: dropping, chunker: RTSRAGSentenceChunker())
         let result = try await runtime.retrieve("refunds", topK: 10)
@@ -204,21 +204,18 @@ struct RTSRAGRetrievalRuntimeTests {
         let first = try await runtime.ingest(loader: corpus.loader, chunker: chunker)
         let second = try await runtime.ingest(loader: corpus.loader, chunker: chunker)
 
-        // The flag used to be *false* here while being true for a rate limit — exactly backwards,
-        // since this is the failure another run cannot change.
         #expect(first.documentsUnchunkable == 1)
         #expect(first.needsAttention)
         // Disjoint, so "withheld for retry" never names a document that will never pass.
         #expect(first.documentsWithheld == 0)
         #expect(first.documentsCommitted == 0)
 
-        // Measured rather than asserted in a comment: nothing was stored, so the staleness check
-        // cannot skip it, and a chunker is a pure function of its input — so the second run
-        // re-chunks and re-fails identically, for ever.
+        // Nothing was stored, so the staleness check cannot skip it, and a chunker is a pure
+        // function of its input — the second run re-chunks and re-fails identically, for ever.
         #expect(second.documentsUnchunkable == 1)
         #expect(second.needsAttention)
 
-        // And the event stream says so on its own, which is what the `isPermanent` flag is for.
+        // And the event stream says so on its own, which is what the withhold reason is for.
         #expect(collector.derived.documentsUnchunkable == 2)
         #expect(collector.derived.documentsWithheld == 0)
     }
@@ -244,16 +241,15 @@ struct RTSRAGRetrievalRuntimeTests {
             chunker: RTSRAGSentenceChunker(maxCharacters: 20, overlapSentences: 0)
         )
 
-        // This path used to return having recorded nothing: every outcome counter zero, and
-        // `chunksDropped` reporting 0 while all three chunks were permanently lost — because the
-        // only place a drop was recorded, `commit`, is never reached here.
+        // `chunksDropped` is the one to watch: `commit` is the only other place a drop is recorded
+        // and this path never reaches it, so the count has to come from the outcome itself.
         #expect(stats.chunksCreated == 3)
         #expect(stats.documentsUnembeddable == 1)
         #expect(stats.chunksDropped == 3)
         #expect(stats.documentsCommitted == 0)
         #expect(stats.needsAttention)
-        // And the stream still accounts for the run on its own, which is why the drop count rides
-        // on the event rather than being inferred.
+        // And the stream accounts for the run on its own, which is why the drop count rides on the
+        // event rather than being inferred.
         #expect(collector.derived.documentsUnembeddable == 1)
         #expect(collector.derived.chunksDropped == 3)
     }
@@ -264,12 +260,12 @@ struct RTSRAGRetrievalRuntimeTests {
         defer {
             corpus.clean()
         }
-        // Whitespace only: it is *not* empty content, so the chunker's first guard lets it past,
-        // and it yields no sentences. A sanitizer returning `nil` would not exercise this — that
-        // drops the document at the loader, so it never reaches the runtime at all.
         try corpus.write("a.txt", "Refunds take thirty days.")
         let runtime = try await corpus.makeRuntime()
         _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        // Whitespace only: *not* empty content, so the chunker's first guard lets it past, and it
+        // yields no sentences. A sanitizer returning `nil` would not reach this — that drops the
+        // document at the loader.
         try corpus.write("a.txt", "   \n\n\t\n  ")
 
         let stats = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
@@ -277,13 +273,11 @@ struct RTSRAGRetrievalRuntimeTests {
 
         // `replaceDocument(id:, with: [])` is a *delete* to the store, so the obvious
         // implementation would destroy the previous version whenever chunking yielded nothing —
-        // an unrelated sanitizer change becoming quietly destructive. The real coverage for that
-        // rule, which `droppedDocumentDoesNotDelete` was wrongly credited with.
+        // an unrelated sanitizer change becoming quietly destructive.
         #expect(result.entries.count == 1)
 
-        // Not a failure — an empty source is legitimate — so it stays out of `needsAttention`. But
-        // it must be *visible*: before this, such a document was loaded and then vanished, leaving
-        // a run that reported documents in and nothing out with no explanation anywhere.
+        // Not a failure — an empty source is legitimate — so it stays out of `needsAttention`,
+        // but it still has to be counted rather than vanishing.
         #expect(stats.documentsLoaded == 1)
         #expect(stats.documentsEmpty == 1)
         #expect(stats.needsAttention == false)
@@ -345,8 +339,7 @@ struct RTSRAGRetrievalRuntimeTests {
         }
 
         // The invariant the outcome enum exists to keep, checked across every ending a document
-        // has. A shortfall means some path returned without naming an outcome — which is exactly
-        // how the two cases above went unnoticed for a whole phase.
+        // has. A shortfall means some path returned without naming an outcome.
         #expect(stats.documentsLoaded == 1)
         #expect(stats.documentsAccountedFor == stats.documentsLoaded)
     }
@@ -491,12 +484,8 @@ struct RTSRAGRetrievalRuntimeTests {
 
         // Read the instant the throw is caught, with no sleep — that is the assertion. Delivery is
         // asynchronous, so a drain only on the success path lets the error overtake the events that
-        // explain it, and a subscriber sees the run stop with the reason still in flight behind it.
-        //
-        // `documentChunked` is the *last* event before the call that throws, so it is the one a
-        // missing drain is likeliest to strand. Deliberately not `batchEmbedded`: the batching
-        // layer discards its accumulated outcomes when a kind that `endsTheRun` appears, so the
-        // runtime never learns about the batches that succeeded first.
+        // explain it. Deliberately not `batchEmbedded`: the batching layer discards its accumulated
+        // outcomes when a kind that `endsTheRun` appears, so the runtime never sees them.
         #expect(derived.documentsLoaded == 1)
         #expect(derived.chunksCreated >= 1)
     }

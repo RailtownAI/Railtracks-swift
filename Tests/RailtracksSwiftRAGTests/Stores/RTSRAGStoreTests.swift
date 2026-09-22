@@ -329,9 +329,9 @@ struct RTSRAGStoreTests {
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
 
-        // An earlier version opened the handle with `try?` and, on failure, wrote the single line
-        // with `.atomic` — meaning to say "the file does not exist yet". Any open failure therefore
-        // replaced the entire log with one document, which is what this pins.
+        // An append that falls back to writing its single line with `.atomic` — the tempting way to
+        // handle "the file does not exist yet" — replaces the entire log with one document on any
+        // open failure. That is what this pins.
         let reopened = try RTSRAGFileStore(directory: scratch.directory)
         let hits = try await reopened.search(Self.query([1, 0, 0], topK: 10))
 
@@ -406,10 +406,9 @@ struct RTSRAGStoreTests {
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
 
-        // The store holds nothing, so it must behave like the empty store it is. An earlier
-        // rollback put the document back but not the identity fields the same write had latched,
-        // leaving an empty store that refused this with "store was built with model/ALPHA" — about
-        // a document that was never written, in a store with no entries at all.
+        // The store holds nothing, so it must behave like the empty store it is. A rollback that
+        // restores the document but not the identity fields the same write latched leaves this
+        // refused with "store was built with model/ALPHA" — naming a document never written.
         let accepted = RTSRAGDocumentID(UUID())
         try await store.replaceDocument(
             id: accepted,

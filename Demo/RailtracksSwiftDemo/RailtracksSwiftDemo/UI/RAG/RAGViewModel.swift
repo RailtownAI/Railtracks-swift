@@ -503,9 +503,8 @@ class RAGViewModel {
         }
         append(.store, "file store at \(storeDirectory.lastPathComponent)")
 
-        // Everything below used to live here as hand-written orchestration — the document loop, the
-        // chunk/embed calls, and a commit rule copied from the design doc. Phase 6 absorbed all of
-        // it, so the demo now does what an app does: build the pieces, subscribe, call one method.
+        // What an app does: build the pieces, subscribe, call one method. The document loop, the
+        // chunk/embed calls and the commit rule all live in the runtime.
         let runtime = RTSRAGRetrievalRuntime(embedder: embedding, store: writing)
         self.runtime = runtime
         subscribe(to: runtime)

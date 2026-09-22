@@ -26,28 +26,21 @@ public struct RTSRAGIngestionStats: Sendable {
     ///
     /// **Disjoint from ``documentsWithheld``**, which counts the transient refusals. A chunker is a
     /// pure function of its input, so a document it rejects is rejected the same way for ever — the
-    /// fix is a different chunker for that source, not another attempt, and the two therefore call
-    /// for opposite advice.
-    ///
-    /// Counted at all because nothing else counts it. A withheld document always carries the batch
-    /// failure that caused it, so it reaches ``needsAttention`` through ``failures``; a chunker
-    /// refusal produces no failure record, and before this field existed it raised nothing.
+    /// fix is a different chunker for that source, not another attempt. It needs its own count
+    /// because a chunker refusal records no ``failures`` entry, so nothing else would notice it.
     public var documentsUnchunkable = 0
-    /// Chunked, but every chunk was permanently rejected by the embedder, so there was nothing to
+    /// Chunked, but every chunk was permanently rejected by the embedder, so nothing was left to
     /// write.
     ///
-    /// The degenerate end of the commit rule: one unembeddable chunk in 512 is dropped and the
-    /// document committed without it, but when *all* of them are rejected there is no document
-    /// left to commit. Permanent, and it churns — nothing is stored, so the staleness check cannot
-    /// skip it and every later run re-chunks, re-embeds and re-fails identically.
+    /// The degenerate end of the commit rule: one bad chunk in 512 is dropped and the document
+    /// committed without it, but when *all* of them are rejected there is no reduced document to
+    /// commit. Permanent, and it churns — nothing is stored, so the staleness check cannot skip it.
     public var documentsUnembeddable = 0
     /// Produced no chunks at all — an emptied file, or a sanitizer that dropped everything.
     ///
     /// Not a failure, which is why it stays out of ``needsAttention``: a legitimately empty source
     /// is indistinguishable from a misconfigured sanitizer, and flagging the first to catch the
-    /// second would cry wolf. Counted so the second is at least *visible* — without it, a sanitizer
-    /// that ate an entire corpus reported a thousand documents loaded, none committed, and no
-    /// explanation anywhere.
+    /// second would cry wolf on every blank file. Counted so the second is at least visible.
     public var documentsEmpty = 0
 
     public var chunksCreated = 0
@@ -73,23 +66,14 @@ public struct RTSRAGIngestionStats: Sendable {
     public init() {
     }
 
-    /// Whether **anything went wrong** in this run.
+    /// Whether **anything went wrong** in this run — not the stronger "retrying will not help",
+    /// since ``failures`` holds transient failures too.
     ///
-    /// Not "retrying will not help", which an earlier version of this comment claimed and the
-    /// expression never implemented: `failures` holds transient failures too, so a run that merely
-    /// exhausted its retries on one batch has always flagged. Reading it as the weaker, honest
-    /// claim is what makes it true.
+    /// ``documentsEmpty`` is the deliberate omission: an empty source is legitimate, and is
+    /// indistinguishable from a misconfigured sanitizer.
     ///
-    /// ``documentsEmpty`` is the one outcome deliberately absent, because nothing went wrong: a
-    /// source with no content is legitimate, and it is indistinguishable from a misconfigured
-    /// sanitizer — flagging the first to catch the second would cry wolf on every empty file.
-    ///
-    /// The remaining terms are an **enumeration, not a minimal expression**. Several imply each
-    /// other — `chunksDropped` and `documentsUnembeddable` both arise from failures that were
-    /// appended to ``failures`` in the same breath, so neither can be the deciding term. They are
-    /// listed anyway so that this reads as what counts as "wrong", rather than as the shortest
-    /// expression that happens to compute it today. ``documentsUnchunkable`` is the one that is not
-    /// redundant: a chunker refusal records no failure at all.
+    /// The terms are an enumeration rather than a minimal expression — only ``documentsUnchunkable``
+    /// can be the deciding one, since every other outcome here also left an entry in ``failures``.
     public var needsAttention: Bool {
         chunksDropped > 0
             || documentsUnchunkable > 0
@@ -101,14 +85,11 @@ public struct RTSRAGIngestionStats: Sendable {
     /// The six terminal outcomes, which **must** sum to ``documentsLoaded`` for a run that
     /// completes.
     ///
-    /// The qualifier matters: when the embedder turns out to be unusable, ``ingest`` throws with a
-    /// document already counted as loaded and no outcome yet reached. Nothing observes that — the
-    /// throw means no stats are returned — but the invariant is about completed runs, and asserting
-    /// it anywhere else would be wrong.
+    /// The qualifier matters: a run-ending embedder failure throws with a document already counted
+    /// as loaded and no outcome reached. Nothing observes that, since the throw means no stats are
+    /// returned — but asserting the invariant anywhere but a completed run would be wrong.
     ///
-    /// A shortfall in a completed run means a path returned without recording anything, which is
-    /// precisely the defect this was added to catch. Two such paths existed: a document that chunked
-    /// to nothing and one whose every chunk was rejected both vanished from the accounting entirely.
+    /// A shortfall means some path returned without recording an outcome.
     public var documentsAccountedFor: Int {
         documentsSkipped
             + documentsCommitted

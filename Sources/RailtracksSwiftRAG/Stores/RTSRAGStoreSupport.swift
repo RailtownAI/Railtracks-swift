@@ -27,12 +27,10 @@ struct RTSRAGStoreIndex {
     private(set) var embeddingModel: String?
     private(set) var dimension: Int?
 
-    /// Visits every stored entry without building an array of them.
+    /// Visits every stored entry without building an array of them — all three readers below are on
+    /// the query path, where flattening the whole store per call is not free.
     ///
-    /// Replaces a `var entries` that was `documents.values.flatMap { $0 }` — correct, but it
-    /// allocated a copy of the **whole store** on every read, and all three reads below are on the
-    /// query path. Returning `false` stops the walk, which is what gives ``find(matching:limit:)``
-    /// an early exit.
+    /// Returning `false` stops the walk, which is what gives ``find(matching:limit:)`` an early exit.
     private func forEachEntry(_ body: (RTSRAGStoreEntry) -> Bool) {
         for entries in documents.values {
             for entry in entries {
