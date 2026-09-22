@@ -59,6 +59,58 @@ struct RTSRAGRateGovernorManagerTests {
         #expect(manager.budgetCount == 4)
     }
 
+    @Test("one endpoint spelled two ways is one budget")
+    func endpointSpellingIsCanonical() {
+        let manager = RTSRAGRateGovernorManager()
+        let plain = manager.governor(
+            for: RTSRAGRateBudget(endpoint: Self.endpoint, model: "m", apiKey: "sk-a")
+        )
+        let trailingSlash = manager.governor(
+            for: RTSRAGRateBudget(
+                endpoint: URL(string: "https://api.openai.com/v1/")!,
+                model: "m",
+                apiKey: "sk-a"
+            )
+        )
+        let mixedCaseHost = manager.governor(
+            for: RTSRAGRateBudget(
+                endpoint: URL(string: "https://API.OpenAI.com/v1")!,
+                model: "m",
+                apiKey: "sk-a"
+            )
+        )
+
+        // Raw `absoluteString` made these three separate budgets — one quota split three ways, by
+        // the type whose entire job is preventing exactly that. Scheme and host are
+        // case-insensitive per RFC 3986 and a trailing slash on a base URL means nothing here.
+        #expect(plain === trailingSlash)
+        #expect(plain === mixedCaseHost)
+        #expect(manager.budgetCount == 1)
+    }
+
+    @Test("a query string still separates endpoints")
+    func queryIsPartOfTheEndpoint() {
+        let manager = RTSRAGRateGovernorManager()
+        _ = manager.governor(
+            for: RTSRAGRateBudget(
+                endpoint: URL(string: "https://x.openai.azure.com/v1?api-version=2024-02-01")!,
+                model: "m",
+                apiKey: "sk-a"
+            )
+        )
+        _ = manager.governor(
+            for: RTSRAGRateBudget(
+                endpoint: URL(string: "https://x.openai.azure.com/v1?api-version=2023-05-15")!,
+                model: "m",
+                apiKey: "sk-a"
+            )
+        )
+
+        // Canonicalising must not go so far as to drop the query: Azure's mandatory `api-version`
+        // is part of which endpoint this is.
+        #expect(manager.budgetCount == 2)
+    }
+
     @Test("the API key is fingerprinted, not retained")
     func apiKeyIsNotStored() {
         let budget = RTSRAGRateBudget(endpoint: Self.endpoint, model: "text-embedding-3-small", apiKey: "sk-secret-value")

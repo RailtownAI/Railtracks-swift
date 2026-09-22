@@ -39,7 +39,7 @@ public struct RTSRAGRateBudget: Hashable, Sendable {
         model: String,
         apiKey: String
     ) {
-        self.endpoint = endpoint.absoluteString
+        self.endpoint = RTSRAGRateBudget.canonical(endpoint)
         self.model = model
         // Truncated because this only has to separate keys within one process, and a shorter value
         // keeps the type cheap to hash and log.
@@ -49,6 +49,32 @@ public struct RTSRAGRateBudget: Hashable, Sendable {
                 .joined()
                 .prefix(16)
         )
+    }
+}
+
+extension RTSRAGRateBudget {
+
+    /// Canonical spelling of an endpoint, so two ways of writing one URL are one budget.
+    ///
+    /// Raw `absoluteString` made `…/v1` and `…/v1/` distinct budgets, and lower-cased a host into a
+    /// third — silently splitting one quota in exactly the way this type exists to prevent. Scheme
+    /// and host are case-insensitive per RFC 3986, and a trailing slash on a base URL carries no
+    /// meaning here.
+    ///
+    /// The query is **kept**: Azure OpenAI's mandatory `?api-version=` is part of which endpoint
+    /// this is, not decoration.
+    private static func canonical(_ endpoint: URL) -> String {
+        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+            return endpoint.absoluteString.lowercased()
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        var path = components.path
+        while path.hasSuffix("/") {
+            path.removeLast()
+        }
+        components.path = path
+        return components.string ?? endpoint.absoluteString
     }
 }
 
@@ -87,10 +113,13 @@ extension RTSRAGRateBudget: CustomStringConvertible {
 ///
 /// ## Growth
 ///
-/// Entries are never evicted. A governor is a few integers and a waiter queue, and the number of
-/// distinct (endpoint, model, key) triples an app uses is small and fixed at startup, so eviction
-/// would add a lifetime question to solve a problem that does not arise.
-public final class RTSRAGRateGovernorManager: @unchecked Sendable {
+/// Entries are never evicted, which suits the shape this is built for: an app with a handful of
+/// (endpoint, model, key) triples fixed at startup, each governor a few integers and a waiter
+/// queue. **A process minting budgets at runtime is the case it does not suit** — a multi-tenant
+/// service holding one key per customer, or a long-lived process rotating keys, would grow this
+/// map without bound. Hold a manager per tenant there, or evict around it; this type deliberately
+/// has no opinion, because a lifetime policy guessed in advance is worse than none.
+public final class RTSRAGRateGovernorManager: Sendable {
 
     private let governors = Mutex<[RTSRAGRateBudget: RTSRAGRateGovernor]>([:])
     private let makeGovernor: @Sendable () -> RTSRAGRateGovernor
@@ -103,23 +132,29 @@ public final class RTSRAGRateGovernorManager: @unchecked Sendable {
 
     /// The governor for `budget`, created on first ask and returned unchanged after that.
     ///
-    /// Synchronous, so it can be called from an embedder's `init`, which cannot `await`. The lookup
-    /// and the insert happen under one lock acquisition, so two threads racing on a new budget
-    /// cannot each build a governor and leave one of them orphaned — which would be precisely the
-    /// duplicate this type exists to prevent.
+    /// Synchronous, so it can be called from an embedder's `init`, which cannot `await`.
     public func governor(for budget: RTSRAGRateBudget) -> RTSRAGRateGovernor {
-        governors.withLock { governors in
-            if let existing = governors[budget] {
-                return existing
+        if let existing = governors.withLock({ $0[budget] }) {
+            return existing
+        }
+        // Built **outside** the lock. `makeGovernor` is the caller's closure, and holding a lock
+        // across someone else's code is the habit that eventually deadlocks — a factory that
+        // reached back into this manager would hang on a non-reentrant `Mutex`. The same rule
+        // ``RTSRAGRateGovernor`` follows when it resumes a continuation.
+        let created = makeGovernor()
+        return governors.withLock { governors in
+            // Another caller may have won while this one was building. Theirs is already visible,
+            // so it wins and ours is dropped — one instance per budget is the invariant, and a
+            // governor nobody acquires from is inert.
+            if let raced = governors[budget] {
+                return raced
             }
-            let created = makeGovernor()
             governors[budget] = created
             return created
         }
     }
 
-    /// How many distinct budgets have been asked for. Diagnostics, and what a test asserts on to
-    /// prove two embedders shared rather than duplicated.
+    /// How many distinct budgets this manager holds, for an app that wants to log or assert on it.
     public var budgetCount: Int {
         governors.withLock { $0.count }
     }
