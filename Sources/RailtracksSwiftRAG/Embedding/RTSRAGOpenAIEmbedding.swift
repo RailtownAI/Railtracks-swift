@@ -16,9 +16,11 @@ import Foundation
 /// always `nil` and cost cannot be reported at all. Both are worth fixing upstream; neither should
 /// block this module, which now depends on no provider SDK.
 ///
-/// The rate limiter is composed, not built in: see ``RTSRAGRateGovernor``. Passing one governor to
-/// several embedders that share an API key is deliberate — the limit is enforced per key, so two
-/// embedders discovering it independently would each pay for the discovery.
+/// The rate limiter is composed, not built in: see ``RTSRAGRateGovernor``, which documents when to
+/// share one. In short — **one governor per (API key, model)**, because that pair is what OpenAI
+/// meters. Two embedders on the same pair must share one or they will each probe the same budget
+/// independently and together exceed it; two on *different* models must not, or one model's 429
+/// would throttle the other.
 ///
 /// `baseURL` reaches **OpenAI-compatible gateways** — Together, Groq, vLLM, a LiteLLM proxy —
 /// without a second type, since they take the same body, the same `/embeddings` path and the same
@@ -46,6 +48,16 @@ public struct RTSRAGOpenAIEmbedding: RTSRAGEmbedding {
     private let session: URLSession
     private let governor: RTSRAGRateGovernor
 
+    /// - Parameter governor: The rate limiter this embedder acquires a permit from.
+    ///
+    ///   **The default builds a new one, which is right for a single embedder and wrong as soon as
+    ///   there are two on the same API key and model** — each would climb on its own successes and
+    ///   back off only on its own 429s, and together they would exceed a budget neither can
+    ///   observe, silently.
+    ///
+    ///   Prefer ``init(apiKey:model:baseURL:dimensions:batchSize:governors:session:)``, which takes
+    ///   a ``RTSRAGRateGovernorManager`` and works out the sharing itself. Pass a governor directly
+    ///   only when you are deliberately scoping one by hand.
     public init(
         apiKey: String,
         model: String = "text-embedding-3-small",
@@ -65,6 +77,45 @@ public struct RTSRAGOpenAIEmbedding: RTSRAGEmbedding {
         // The requested dimension count is part of the vector space: the same model truncated to
         // 256 dimensions produces vectors incomparable with its full-width output.
         self.modelIdentifier = dimensions.map { "openai/\(model)/d\($0)" } ?? "openai/\(model)"
+    }
+
+    /// Builds an embedder that shares a rate governor with every other embedder on the same
+    /// provider budget.
+    ///
+    /// The budget is **derived** here rather than supplied, which is the point: the sharing rule is
+    /// (endpoint, model, key), and a caller keying a registry by hand can get that wrong in ways
+    /// nothing detects — keying by model alone silently merges two accounts, keying by
+    /// ``RTSRAGEmbedding/modelIdentifier`` silently splits one budget in two because it carries
+    /// `dimensions`.
+    ///
+    /// ```swift
+    /// let governors = RTSRAGRateGovernorManager()
+    /// let small = RTSRAGOpenAIEmbedding(apiKey: key, governors: governors)
+    /// let narrow = RTSRAGOpenAIEmbedding(apiKey: key, dimensions: 256, governors: governors)
+    /// ```
+    ///
+    /// Those two write to different stores — `dimensions` changes the vector space — while sharing
+    /// one governor, because truncating a vector does not earn it a second quota.
+    public init(
+        apiKey: String,
+        model: String = "text-embedding-3-small",
+        baseURL: URL = URL(string: "https://api.openai.com/v1")!,
+        dimensions: Int? = nil,
+        batchSize: Int = 512,
+        governors: RTSRAGRateGovernorManager,
+        session: URLSession = .shared
+    ) {
+        self.init(
+            apiKey: apiKey,
+            model: model,
+            baseURL: baseURL,
+            dimensions: dimensions,
+            batchSize: batchSize,
+            governor: governors.governor(
+                for: RTSRAGRateBudget(endpoint: baseURL, model: model, apiKey: apiKey)
+            ),
+            session: session
+        )
     }
 
     public func embed(_ texts: [String]) async throws -> RTSRAGTextEmbeddings {

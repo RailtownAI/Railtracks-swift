@@ -42,10 +42,14 @@ import Synchronization
 ///
 /// So concurrency is expressed by building two runtimes, which also puts the question of what they
 /// share where the caller can see it. The store is an actor and `replaceDocument` is one operation,
-/// so writes cannot interleave within a document. **Sharing one embedder is the correct choice, not
-/// merely a safe one**: a metered provider's limit is per key, so two embedders would each own a
-/// rate governor, each probe upward independently, and collectively exceed a budget neither can
-/// observe.
+/// so writes cannot interleave within a document.
+///
+/// The throttle needs more than safety: **anything drawing on one provider budget must share one
+/// ``RTSRAGRateGovernor``**, or each copy probes upward on its own 429s and together they exceed a
+/// budget neither can see. Sharing the whole embedder achieves that, but the governor is the actual
+/// unit and it is injectable — two embedders differing only in `dimensions` or `batchSize` draw on
+/// one budget and should share one governor while keeping their own identities. See that type for
+/// why the scope is (key, model) rather than the key.
 ///
 /// A `final class` rather than an `actor` — an actor would not serialise anything here, since
 /// actors are reentrant and an ingest suspends constantly. Everything a run accumulates still lives
