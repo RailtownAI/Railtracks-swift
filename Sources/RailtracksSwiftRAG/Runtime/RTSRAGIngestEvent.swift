@@ -30,15 +30,32 @@ public enum RTSRAGIngestEvent: Sendable {
     /// unembeddable — the document is complete as it can be, not as it was chunked.
     case documentCommitted(id: RTSRAGDocumentID, stored: Int, dropped: Int)
     /// Not written. The previous version stays intact rather than being half-replaced.
-    ///
-    /// `isPermanent` separates two outcomes that call for opposite responses: `false` is an
-    /// embedding failure a later run may well clear, `true` is a chunker refusing the document —
-    /// deterministic, so every later run refuses it identically and only a different chunker helps.
-    /// Without the flag a subscriber cannot tell them apart, and neither can
-    /// ``RTSRAGIngestionStats/needsAttention``.
-    case documentWithheld(id: RTSRAGDocumentID, reason: String, isPermanent: Bool)
+    case documentWithheld(id: RTSRAGDocumentID, reason: RTSRAGWithholdReason)
+    /// Chunked to nothing, so there was never anything to write — an emptied file, or a sanitizer
+    /// that dropped the whole document. Not a failure, and distinct from
+    /// ``documentSkipped(id:source:)``, which means the store already holds it.
+    case documentEmpty(id: RTSRAGDocumentID, source: String?)
     /// A source the loader could not read. One file, not the run.
     case loadFailed(RTSRAGError)
+}
+
+// MARK: - RTSRAGWithholdReason
+
+/// Why a document was not written — three outcomes that call for different responses.
+///
+/// Replaced an `isPermanent: Bool`, which could separate two of these but not three. The
+/// distinction is not academic: telling someone to retry a document no chunker will ever accept is
+/// the advice that wastes the most time.
+public enum RTSRAGWithholdReason: Sendable {
+    /// An embedding failure a later run may well clear — a rate limit, a 5xx. Retrying is the
+    /// right response.
+    case transient(String)
+    /// The chunker refused the document. A chunker is a pure function of its input, so every later
+    /// run refuses it identically; only a different chunker for that source helps.
+    case unchunkable(String)
+    /// Every chunk was permanently rejected by the embedder, leaving nothing to write. Carries the
+    /// chunk count so the event stream can still account for the run on its own.
+    case unembeddable(chunksDropped: Int)
 }
 
 // MARK: - RTSRAGIngestEventEmitter

@@ -115,15 +115,18 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
     ///   document as uncommitted and then *skip* it on every later run in this process — its
     ///   staleness check would find the write that never happened. Worse, compaction serialises the
     ///   index, so a later compaction would quietly persist it.
+    ///
+    ///   The rollback goes through ``RTSRAGStoreIndex/DocumentSnapshot`` rather than re-replacing
+    ///   the document, because a write changes more than the document: the *first* one also latches
+    ///   the store's model and dimension, and undoing only the document left an empty store pinned
+    ///   to a model whose single document was never written.
     private func apply(_ entries: [RTSRAGStoreEntry], to id: RTSRAGDocumentID) throws {
-        let previous = index.documents[id]
+        let snapshot = index.snapshot(of: id)
         try index.replace(documentID: id, with: entries)
         do {
             try append(Record(documentID: id, entries: entries))
         } catch {
-            // Cannot itself fail validation: these entries were already in the store, and an empty
-            // restoration — the no-previous-version case — removes the document instead.
-            try? index.replace(documentID: id, with: previous ?? [])
+            index.restore(snapshot, for: id)
             throw error
         }
         try compactIfNeeded()

@@ -27,10 +27,6 @@ struct RTSRAGStoreIndex {
     private(set) var embeddingModel: String?
     private(set) var dimension: Int?
 
-    var isEmpty: Bool {
-        documents.isEmpty
-    }
-
     /// Visits every stored entry without building an array of them.
     ///
     /// Replaces a `var entries` that was `documents.values.flatMap { $0 }` — correct, but it
@@ -71,6 +67,41 @@ struct RTSRAGStoreIndex {
 
     mutating func remove(documentID: RTSRAGDocumentID) {
         documents.removeValue(forKey: documentID)
+    }
+
+    /// Everything one ``replace(documentID:with:)`` can change, so a store whose own write then
+    /// fails can put the index back exactly as it was.
+    ///
+    /// Three fields, not one, and that is the whole reason this type exists. A first write latches
+    /// ``embeddingModel`` and ``dimension`` alongside the document, and they are never cleared —
+    /// so undoing only the document leaves an **empty** store permanently pinned to a model it
+    /// never held, which then refuses a different embedder with "store was built with …" about a
+    /// document that was never written.
+    struct DocumentSnapshot {
+        fileprivate let entries: [RTSRAGStoreEntry]?
+        fileprivate let embeddingModel: String?
+        fileprivate let dimension: Int?
+    }
+
+    func snapshot(of documentID: RTSRAGDocumentID) -> DocumentSnapshot {
+        DocumentSnapshot(
+            entries: documents[documentID],
+            embeddingModel: embeddingModel,
+            dimension: dimension
+        )
+    }
+
+    /// Puts back what ``snapshot(of:)`` captured. Deliberately does not validate: this state was
+    /// already in the index, so it is valid by construction and a throw here would have no
+    /// meaningful recovery.
+    mutating func restore(_ snapshot: DocumentSnapshot, for documentID: RTSRAGDocumentID) {
+        if let entries = snapshot.entries {
+            documents[documentID] = entries
+        } else {
+            documents.removeValue(forKey: documentID)
+        }
+        embeddingModel = snapshot.embeddingModel
+        dimension = snapshot.dimension
     }
 
     /// Replaces everything, for a file store replaying its log.

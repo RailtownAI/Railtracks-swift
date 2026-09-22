@@ -558,16 +558,24 @@ class RAGViewModel {
             if dropped > 0 {
                 append(.store, "committed with \(dropped) chunk(s) dropped — permanently unembeddable")
             }
-        case .documentWithheld(_, let reason, let isPermanent):
-            // The two need opposite responses, so they must not read the same. Telling someone to
-            // retry a document no chunker will ever take is the advice that wasted the most time
-            // while this screen was being built.
-            append(
-                .store,
-                isPermanent
-                    ? "⚠️ not committed — \(reason); re-running will fail identically, pick another chunker"
-                    : "⚠️ not committed — \(reason); the previous version stays intact, retry may clear it"
-            )
+        case .documentWithheld(_, let reason):
+            // Three outcomes needing three different responses, so they must not read the same.
+            // Telling someone to retry a document nothing will ever accept is the advice that
+            // wasted the most time while this screen was being built.
+            switch reason {
+            case .transient(let detail):
+                append(.store, "⚠️ not committed — \(detail); the previous version stays intact, retry may clear it")
+            case .unchunkable(let detail):
+                append(.store, "⚠️ not committed — \(detail); re-running will fail identically, pick another chunker")
+            case .unembeddable(let dropped):
+                append(
+                    .store,
+                    "⚠️ not committed — all \(dropped) chunk(s) permanently rejected; "
+                        + "re-running will fail identically, the content cannot be embedded as chunked"
+                )
+            }
+        case .documentEmpty(_, let source):
+            append(.load, "\(sourceLabel(source)) produced no chunks — nothing to index, stored version untouched")
         case .loadFailed(let error):
             failureCount += 1
             append(.load, "⚠️ \(error)")
@@ -600,10 +608,22 @@ class RAGViewModel {
                 // again needs the number without scrolling.
                 + (stats.documentsWithheld > 0 ? ", \(stats.documentsWithheld) withheld for retry" : "")
                 // Kept apart from the line above rather than added to it: one number is an
-                // invitation to run again and the other is an instruction to change the chunker.
+                // invitation to run again and the others are instructions to change something.
                 + (stats.documentsUnchunkable > 0 ? ", \(stats.documentsUnchunkable) unchunkable" : "")
+                + (stats.documentsUnembeddable > 0 ? ", \(stats.documentsUnembeddable) unembeddable" : "")
+                + (stats.documentsEmpty > 0 ? ", \(stats.documentsEmpty) empty" : "")
                 + (stats.chunksStored > 0 ? " — ask a question below" : "")
         )
+        // The invariant made visible. A shortfall means a document reached no outcome at all, which
+        // is a library bug rather than anything the corpus did — worth saying out loud on the one
+        // screen that watches whole runs.
+        if stats.documentsAccountedFor != stats.documentsLoaded {
+            append(
+                .store,
+                "⚠️ \(stats.documentsLoaded) document(s) loaded but only "
+                    + "\(stats.documentsAccountedFor) accounted for — please report this"
+            )
+        }
         // One verdict rather than a wall of scrollback, covering dropped chunks, unchunkable
         // documents and recorded failures. A withheld document reaches it too, through the batch
         // failure that caused it — what the separate count buys is the *advice*, since "run it
@@ -613,6 +633,7 @@ class RAGViewModel {
                 .store,
                 "⚠️ this run needs a look: \(stats.chunksDropped) chunk(s) dropped, "
                     + "\(stats.documentsUnchunkable) document(s) no chunker would take, "
+                    + "\(stats.documentsUnembeddable) no embedder would take, "
                     + "\(stats.failures.count) failure(s) recorded — a re-run will not fix these"
             )
         }

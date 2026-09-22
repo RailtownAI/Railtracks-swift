@@ -33,6 +33,22 @@ public struct RTSRAGIngestionStats: Sendable {
     /// failure that caused it, so it reaches ``needsAttention`` through ``failures``; a chunker
     /// refusal produces no failure record, and before this field existed it raised nothing.
     public var documentsUnchunkable = 0
+    /// Chunked, but every chunk was permanently rejected by the embedder, so there was nothing to
+    /// write.
+    ///
+    /// The degenerate end of the commit rule: one unembeddable chunk in 512 is dropped and the
+    /// document committed without it, but when *all* of them are rejected there is no document
+    /// left to commit. Permanent, and it churns — nothing is stored, so the staleness check cannot
+    /// skip it and every later run re-chunks, re-embeds and re-fails identically.
+    public var documentsUnembeddable = 0
+    /// Produced no chunks at all — an emptied file, or a sanitizer that dropped everything.
+    ///
+    /// Not a failure, which is why it stays out of ``needsAttention``: a legitimately empty source
+    /// is indistinguishable from a misconfigured sanitizer, and flagging the first to catch the
+    /// second would cry wolf. Counted so the second is at least *visible* — without it, a sanitizer
+    /// that ate an entire corpus reported a thousand documents loaded, none committed, and no
+    /// explanation anywhere.
+    public var documentsEmpty = 0
 
     public var chunksCreated = 0
     public var chunksEmbedded = 0
@@ -67,7 +83,25 @@ public struct RTSRAGIngestionStats: Sendable {
     /// records no failure, so before it existed a run whose every document was too large to chunk
     /// reported that it needed no attention at all.
     public var needsAttention: Bool {
-        chunksDropped > 0 || documentsUnchunkable > 0 || !failures.isEmpty
+        chunksDropped > 0
+            || documentsUnchunkable > 0
+            || documentsUnembeddable > 0
+            || !failures.isEmpty
+    }
+
+    /// The six terminal outcomes, which **must** sum to ``documentsLoaded``.
+    ///
+    /// Every loaded document reaches exactly one of them, so a shortfall means a path returned
+    /// without recording anything — which is precisely the defect this invariant was added to
+    /// catch. Two such paths existed: a document that chunked to nothing and one whose every chunk
+    /// was rejected both vanished from the accounting entirely.
+    public var documentsAccountedFor: Int {
+        documentsSkipped
+            + documentsCommitted
+            + documentsWithheld
+            + documentsUnchunkable
+            + documentsUnembeddable
+            + documentsEmpty
     }
 
     mutating func record(_ metrics: RTSRAGEmbeddingMetrics) {

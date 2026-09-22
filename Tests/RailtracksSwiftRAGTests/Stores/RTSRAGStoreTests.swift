@@ -381,6 +381,45 @@ struct RTSRAGStoreTests {
         #expect(survivor == 1)
     }
 
+    @Test("a refused first write does not pin the store to a model it never held")
+    func fileStoreRollsBackIdentity() async throws {
+        guard getuid() != 0 else {
+            return
+        }
+        let scratch = try Scratch()
+        defer {
+            scratch.clean()
+        }
+        // The log has to *exist* to be made unwritable — `append` creates it when absent, so an
+        // absent file would simply succeed.
+        let url = scratch.directory.appendingPathComponent("entries.jsonl")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let store = try RTSRAGFileStore(directory: scratch.directory)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        let refused = RTSRAGDocumentID(UUID())
+        await #expect(throws: (any Error).self) {
+            try await store.replaceDocument(
+                id: refused,
+                with: [Self.entry(documentID: refused, index: 0, content: "a", vector: [1, 0, 0], model: "model/ALPHA")]
+            )
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+
+        // The store holds nothing, so it must behave like the empty store it is. An earlier
+        // rollback put the document back but not the identity fields the same write had latched,
+        // leaving an empty store that refused this with "store was built with model/ALPHA" — about
+        // a document that was never written, in a store with no entries at all.
+        let accepted = RTSRAGDocumentID(UUID())
+        try await store.replaceDocument(
+            id: accepted,
+            with: [Self.entry(documentID: accepted, index: 0, content: "b", vector: [1, 0, 0, 0, 0], model: "model/BETA")]
+        )
+        let hits = try await store.search(Self.query([1, 0, 0, 0, 0]))
+
+        #expect(hits.map { $0.entry.content } == ["b"])
+    }
+
     // MARK: - Helpers
 
     /// A throwaway directory, so the file store never touches a developer's own files.

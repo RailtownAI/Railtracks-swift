@@ -87,8 +87,8 @@ struct RTSRAGRetrievalRuntimeTests {
         #expect(result.entries[0].entry.content.contains("ninety"))
     }
 
-    @Test("a document that chunks to nothing leaves the store untouched")
-    func emptyChunkingDoesNotDelete() async throws {
+    @Test("a document the sanitizer drops leaves the store untouched")
+    func droppedDocumentDoesNotDelete() async throws {
         let corpus = try Corpus()
         defer {
             corpus.clean()
@@ -97,15 +97,15 @@ struct RTSRAGRetrievalRuntimeTests {
         let runtime = try await corpus.makeRuntime()
         _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
 
-        // A sanitizer that drops everything, which is the realistic way a document reaches the
-        // chunker empty.
+        // A sanitizer returning `nil` removes the document from the *stream*, so it never reaches
+        // the runtime at all — the previous version survives because nothing was asked about it.
+        // Named accordingly: this used to claim it covered a document reaching the chunker empty,
+        // which it never did. That path is `emptyDocumentIsAccountedFor`.
         let dropping = RTSRAGSanitizingLoader(wrapping: corpus.loader, sanitizer: DroppingSanitizer())
-        _ = try await runtime.ingest(loader: dropping, chunker: RTSRAGSentenceChunker())
+        let stats = try await runtime.ingest(loader: dropping, chunker: RTSRAGSentenceChunker())
         let result = try await runtime.retrieve("refunds", topK: 10)
 
-        // `replaceDocument(id:, with: [])` is a *delete* to the store, so the obvious
-        // implementation would quietly destroy the previous version whenever chunking yielded
-        // nothing. Python returns early instead, and so does this.
+        #expect(stats.documentsLoaded == 0)
         #expect(result.entries.count == 1)
     }
 
@@ -221,6 +221,134 @@ struct RTSRAGRetrievalRuntimeTests {
         // And the event stream says so on its own, which is what the `isPermanent` flag is for.
         #expect(collector.derived.documentsUnchunkable == 2)
         #expect(collector.derived.documentsWithheld == 0)
+    }
+
+    @Test("a document whose every chunk is rejected is counted, and its losses reported")
+    func fullyUnembeddableDocumentIsAccountedFor() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "Alpha here. Beta here. Gamma here.")
+        let runtime = RTSRAGRetrievalRuntime(embedder: RejectingEmbedder(), store: corpus.store)
+        let collector = EventCollector()
+        let subscription = runtime.eventPublisher.sink { event in
+            collector.record(event)
+        }
+        defer {
+            subscription.cancel()
+        }
+
+        let stats = try await runtime.ingest(
+            loader: corpus.loader,
+            chunker: RTSRAGSentenceChunker(maxCharacters: 20, overlapSentences: 0)
+        )
+
+        // This path used to return having recorded nothing: every outcome counter zero, and
+        // `chunksDropped` reporting 0 while all three chunks were permanently lost — because the
+        // only place a drop was recorded, `commit`, is never reached here.
+        #expect(stats.chunksCreated == 3)
+        #expect(stats.documentsUnembeddable == 1)
+        #expect(stats.chunksDropped == 3)
+        #expect(stats.documentsCommitted == 0)
+        #expect(stats.needsAttention)
+        // And the stream still accounts for the run on its own, which is why the drop count rides
+        // on the event rather than being inferred.
+        #expect(collector.derived.documentsUnembeddable == 1)
+        #expect(collector.derived.chunksDropped == 3)
+    }
+
+    @Test("a document that chunks to nothing is counted rather than vanishing")
+    func emptyDocumentIsAccountedFor() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        // Whitespace only: it is *not* empty content, so the chunker's first guard lets it past,
+        // and it yields no sentences. A sanitizer returning `nil` would not exercise this — that
+        // drops the document at the loader, so it never reaches the runtime at all.
+        try corpus.write("a.txt", "Refunds take thirty days.")
+        let runtime = try await corpus.makeRuntime()
+        _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        try corpus.write("a.txt", "   \n\n\t\n  ")
+
+        let stats = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        let result = try await runtime.retrieve("refunds", topK: 10)
+
+        // `replaceDocument(id:, with: [])` is a *delete* to the store, so the obvious
+        // implementation would destroy the previous version whenever chunking yielded nothing —
+        // an unrelated sanitizer change becoming quietly destructive. The real coverage for that
+        // rule, which `droppedDocumentDoesNotDelete` was wrongly credited with.
+        #expect(result.entries.count == 1)
+
+        // Not a failure — an empty source is legitimate — so it stays out of `needsAttention`. But
+        // it must be *visible*: before this, such a document was loaded and then vanished, leaving
+        // a run that reported documents in and nothing out with no explanation anywhere.
+        #expect(stats.documentsLoaded == 1)
+        #expect(stats.documentsEmpty == 1)
+        #expect(stats.needsAttention == false)
+    }
+
+    /// Every way a document can end, so the reconciliation below is checked against all of them
+    /// rather than the happy path.
+    enum AccountingCase: String, CaseIterable, Sendable {
+        case committed
+        case skipped
+        case unchunkable
+        case empty
+        case fullyUnembeddable
+        case partiallyDropped
+        case transientlyWithheld
+    }
+
+    @Test("every loaded document reaches exactly one outcome", arguments: AccountingCase.allCases)
+    func statsAlwaysReconcile(scenario: AccountingCase) async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        let sentences = RTSRAGSentenceChunker(maxCharacters: 20, overlapSentences: 0)
+        let stats: RTSRAGIngestionStats
+
+        switch scenario {
+        case .committed:
+            try corpus.write("a.txt", "Refunds take thirty days.")
+            stats = try await corpus.makeRuntime().ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        case .skipped:
+            try corpus.write("a.txt", "Refunds take thirty days.")
+            let runtime = try await corpus.makeRuntime()
+            _ = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+            stats = try await runtime.ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        case .unchunkable:
+            try corpus.write("a.txt", String(repeating: "long ", count: 200))
+            stats = try await corpus.makeRuntime().ingest(
+                loader: corpus.loader,
+                chunker: RTSRAGIdentityChunker(maxCharacters: 50)
+            )
+        case .empty:
+            try corpus.write("a.txt", "   \n\n\t\n  ")
+            stats = try await corpus.makeRuntime().ingest(loader: corpus.loader, chunker: RTSRAGSentenceChunker())
+        case .fullyUnembeddable:
+            try corpus.write("a.txt", "Alpha here. Beta here.")
+            let runtime = RTSRAGRetrievalRuntime(embedder: RejectingEmbedder(), store: corpus.store)
+            stats = try await runtime.ingest(loader: corpus.loader, chunker: sentences)
+        case .partiallyDropped:
+            try corpus.write("a.txt", "Alpha here. poison here. Gamma here.")
+            let embedder = FailingEmbedder(failing: .invalidInput, onChunkContaining: "poison")
+            let runtime = RTSRAGRetrievalRuntime(embedder: embedder, store: corpus.store)
+            stats = try await runtime.ingest(loader: corpus.loader, chunker: sentences)
+        case .transientlyWithheld:
+            try corpus.write("a.txt", "Alpha here. poison here. Gamma here.")
+            let embedder = FailingEmbedder(failing: .transient, onChunkContaining: "poison")
+            let runtime = RTSRAGRetrievalRuntime(embedder: embedder, store: corpus.store)
+            stats = try await runtime.ingest(loader: corpus.loader, chunker: sentences)
+        }
+
+        // The invariant the outcome enum exists to keep, checked across every ending a document
+        // has. A shortfall means some path returned without naming an outcome — which is exactly
+        // how the two cases above went unnoticed for a whole phase.
+        #expect(stats.documentsLoaded == 1)
+        #expect(stats.documentsAccountedFor == stats.documentsLoaded)
     }
 
     // MARK: - Guards
@@ -483,6 +611,21 @@ private struct FailingEmbedder: RTSRAGEmbedding {
     }
 }
 
+/// Rejects every batch as permanently unembeddable, so a document ends with nothing to commit.
+private struct RejectingEmbedder: RTSRAGEmbedding {
+    var modelIdentifier: String {
+        "stub/rejecting"
+    }
+
+    var defaultBatchSize: Int {
+        1
+    }
+
+    func embed(_ texts: [String]) async throws -> RTSRAGTextEmbeddings {
+        throw RTSRAGEmbeddingError(kind: .invalidInput, message: "stubbed rejection")
+    }
+}
+
 /// A different model identity, for the guard.
 private struct StubEmbedder: RTSRAGEmbedding {
     var modelIdentifier: String {
@@ -554,11 +697,19 @@ private final class EventCollector: @unchecked Sendable {
             derived.documentsCommitted += 1
             derived.chunksStored += stored
             derived.chunksDropped += dropped
-        case .documentWithheld(_, _, let isPermanent):
-            if isPermanent {
-                derived.documentsUnchunkable += 1
-            } else {
+        case .documentEmpty:
+            derived.documentsEmpty += 1
+        case .documentWithheld(_, let reason):
+            switch reason {
+            case .transient:
                 derived.documentsWithheld += 1
+            case .unchunkable:
+                derived.documentsUnchunkable += 1
+            case .unembeddable(let dropped):
+                derived.documentsUnembeddable += 1
+                // Carried on the event precisely so this line can exist: `commit` is the only other
+                // place a drop is recorded, and this path never reaches it.
+                derived.chunksDropped += dropped
             }
         case .loadFailed:
             break

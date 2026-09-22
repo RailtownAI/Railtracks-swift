@@ -100,7 +100,13 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
                             "📚 \(document.source ?? "a document") repeats id \(document.id) in one ingest — check the id column; earlier copies will be overwritten"
                         )
                     }
-                    try await ingestOne(document, chunker: chunker, scope: scope, into: &stats)
+                    let outcome = try await ingestOne(
+                        document,
+                        chunker: chunker,
+                        scope: scope,
+                        into: &stats
+                    )
+                    record(outcome, for: document, into: &stats)
                 }
             }
         } catch {
@@ -115,32 +121,41 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
         return stats
     }
 
+    /// What happened to one document — one case per way `ingestOne` can end.
+    ///
+    /// Returned rather than recorded in place, so that **every** exit has to name an outcome: a
+    /// bare `return` no longer compiles. That is not stylistic. Two paths previously returned
+    /// having recorded nothing at all — a document that chunked to nothing, and one whose every
+    /// chunk the embedder rejected — so both vanished from the stats, and the second reported
+    /// zero dropped chunks while permanently losing all of them. A single `switch` in
+    /// ``record(_:for:into:)`` now applies the counter and emits the event for all six.
+    private enum DocumentOutcome {
+        case skipped
+        case empty
+        case committed(stored: Int, dropped: Int)
+        case withheld(reason: String)
+        case unchunkable(reason: String)
+        case unembeddable(dropped: Int)
+    }
+
     private func ingestOne(
         _ document: RTSRAGDocument,
         chunker: any RTSRAGChunker,
         scope: RTSRAGStoreScope?,
         into stats: inout RTSRAGIngestionStats
-    ) async throws {
+    ) async throws -> DocumentOutcome {
         var document = document
         document.contentHash = RTSRAGContentHash.of(document.content)
 
         if try await isStoredAndComplete(document) {
-            stats.documentsSkipped += 1
-            emitter.emit(.documentSkipped(id: document.id, source: document.source))
-            return
+            return .skipped
         }
 
         let chunks: [RTSRAGChunk]
         do {
             chunks = try await chunker.chunk(document)
         } catch {
-            // Permanent by construction, and counted apart from `documentsWithheld` for it: a
-            // chunker is a pure function of its input, so re-running produces this same throw. The
-            // document needs a different chunker for its source, not another attempt — which is
-            // what `needsAttention` exists to say.
-            stats.documentsUnchunkable += 1
-            emitter.emit(.documentWithheld(id: document.id, reason: "\(error)", isPermanent: true))
-            return
+            return .unchunkable(reason: "\(error)")
         }
         // **Not** a `replaceDocument` with an empty array, which the store reads as a delete. A
         // document that chunks to nothing — an emptied file, a sanitizer that dropped everything —
@@ -148,7 +163,7 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
         // absence would make an unrelated sanitizer change quietly destructive; an intentional
         // delete goes through `deleteDocument`, which says so.
         guard !chunks.isEmpty else {
-            return
+            return .empty
         }
         stats.chunksCreated += chunks.count
         emitter.emit(.documentChunked(id: document.id, chunks: chunks.count))
@@ -185,23 +200,58 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
             // Transient by elimination: `.invalidInput` became a dropped chunk above, and the two
             // kinds that `endsTheRun` threw out of `embed` rather than reaching this loop — so what
             // is left is a rate limit or a 5xx, which a later run may well clear.
-            stats.documentsWithheld += 1
-            emitter.emit(.documentWithheld(id: document.id, reason: withheldReason, isPermanent: false))
-            return
+            return .withheld(reason: withheldReason)
         }
+        // The degenerate end of the commit rule: every chunk was permanently rejected, so there is
+        // no reduced document to commit. Carries the drop count because `commit` — the only place
+        // that used to record one — is never reached, which is why this path reported losing
+        // nothing while losing everything.
         guard !embedded.isEmpty else {
-            return
+            return .unembeddable(dropped: droppedChunks)
         }
-        try await commit(embedded, of: document, dropped: droppedChunks, scope: scope, into: &stats)
+        return try await commit(embedded, of: document, dropped: droppedChunks, scope: scope)
+    }
+
+    /// Applies one document's outcome to the stats and announces it.
+    ///
+    /// The single place either happens, so the two cannot drift apart and no outcome can be
+    /// recorded in one but not the other.
+    private func record(
+        _ outcome: DocumentOutcome,
+        for document: RTSRAGDocument,
+        into stats: inout RTSRAGIngestionStats
+    ) {
+        switch outcome {
+        case .skipped:
+            stats.documentsSkipped += 1
+            emitter.emit(.documentSkipped(id: document.id, source: document.source))
+        case .empty:
+            stats.documentsEmpty += 1
+            emitter.emit(.documentEmpty(id: document.id, source: document.source))
+        case .committed(let stored, let dropped):
+            stats.documentsCommitted += 1
+            stats.chunksStored += stored
+            stats.chunksDropped += dropped
+            emitter.emit(.documentCommitted(id: document.id, stored: stored, dropped: dropped))
+        case .withheld(let reason):
+            stats.documentsWithheld += 1
+            emitter.emit(.documentWithheld(id: document.id, reason: .transient(reason)))
+        case .unchunkable(let reason):
+            stats.documentsUnchunkable += 1
+            emitter.emit(.documentWithheld(id: document.id, reason: .unchunkable(reason)))
+        case .unembeddable(let dropped):
+            stats.documentsUnembeddable += 1
+            stats.chunksDropped += dropped
+            emitter.emit(.documentWithheld(id: document.id, reason: .unembeddable(chunksDropped: dropped)))
+        }
     }
 
     private func commit(
         _ embedded: [RTSRAGEmbeddedChunk],
         of document: RTSRAGDocument,
         dropped: Int,
-        scope: RTSRAGStoreScope?,
-        into stats: inout RTSRAGIngestionStats
-    ) async throws {
+        scope: RTSRAGStoreScope?
+    ) async throws -> DocumentOutcome {
         // Stamped as the number **stored**, not the number chunked. Recording the larger figure
         // would make the completeness check below false for ever, so an unchanged document with one
         // permanently-unembeddable chunk would re-ingest and re-fail on every single run. This one
@@ -224,10 +274,7 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
             )
         }
         try await store.replaceDocument(id: document.id, with: entries)
-        stats.documentsCommitted += 1
-        stats.chunksStored += total
-        stats.chunksDropped += dropped
-        emitter.emit(.documentCommitted(id: document.id, stored: total, dropped: dropped))
+        return .committed(stored: total, dropped: dropped)
     }
 
     // MARK: - Retrieve
