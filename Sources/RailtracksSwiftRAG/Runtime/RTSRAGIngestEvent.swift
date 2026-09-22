@@ -29,9 +29,14 @@ public enum RTSRAGIngestEvent: Sendable {
     /// Written to the store. `dropped` counts chunks left out because they were permanently
     /// unembeddable — the document is complete as it can be, not as it was chunked.
     case documentCommitted(id: RTSRAGDocumentID, stored: Int, dropped: Int)
-    /// Not written, because something failed in a way a later run may not. The previous version
-    /// stays intact rather than being half-replaced.
-    case documentWithheld(id: RTSRAGDocumentID, reason: String)
+    /// Not written. The previous version stays intact rather than being half-replaced.
+    ///
+    /// `isPermanent` separates two outcomes that call for opposite responses: `false` is an
+    /// embedding failure a later run may well clear, `true` is a chunker refusing the document —
+    /// deterministic, so every later run refuses it identically and only a different chunker helps.
+    /// Without the flag a subscriber cannot tell them apart, and neither can
+    /// ``RTSRAGIngestionStats/needsAttention``.
+    case documentWithheld(id: RTSRAGDocumentID, reason: String, isPermanent: Bool)
     /// A source the loader could not read. One file, not the run.
     case loadFailed(RTSRAGError)
 }

@@ -134,8 +134,12 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
         do {
             chunks = try await chunker.chunk(document)
         } catch {
-            stats.documentsWithheld += 1
-            emitter.emit(.documentWithheld(id: document.id, reason: "\(error)"))
+            // Permanent by construction, and counted apart from `documentsWithheld` for it: a
+            // chunker is a pure function of its input, so re-running produces this same throw. The
+            // document needs a different chunker for its source, not another attempt — which is
+            // what `needsAttention` exists to say.
+            stats.documentsUnchunkable += 1
+            emitter.emit(.documentWithheld(id: document.id, reason: "\(error)", isPermanent: true))
             return
         }
         // **Not** a `replaceDocument` with an empty array, which the store reads as a delete. A
@@ -178,8 +182,11 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
         // reproduce the state Python leaves behind, where a failed batch mid-document has already
         // deleted the old version and written half the new one.
         if let withheldReason {
+            // Transient by elimination: `.invalidInput` became a dropped chunk above, and the two
+            // kinds that `endsTheRun` threw out of `embed` rather than reaching this loop — so what
+            // is left is a rate limit or a 5xx, which a later run may well clear.
             stats.documentsWithheld += 1
-            emitter.emit(.documentWithheld(id: document.id, reason: withheldReason))
+            emitter.emit(.documentWithheld(id: document.id, reason: withheldReason, isPermanent: false))
             return
         }
         guard !embedded.isEmpty else {

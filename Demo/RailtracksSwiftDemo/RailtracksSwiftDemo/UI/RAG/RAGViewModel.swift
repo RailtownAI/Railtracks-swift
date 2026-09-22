@@ -19,9 +19,10 @@ import AppKit
 /// A harness for the RAG ingest pipeline: pick a format, pick a file or folder, and watch each
 /// phase report as it runs.
 ///
-/// Built ahead of the pipeline it drives. Only **Load** exists today (`RailtracksSwiftRAG` phase 2);
-/// Chunk, Embed and Store are listed as pending so each one fills in its own lines here as it
-/// lands, rather than needing this screen rebuilt.
+/// Built ahead of the pipeline it drives, one phase at a time, which is why the status log is
+/// organised by **phase** rather than by loader. All five now exist, and phase 6's runtime drives
+/// them — so this screen no longer orchestrates anything. It builds the pieces, subscribes to
+/// ``RTSRAGRetrievalRuntime/eventPublisher`` and calls one method, which is what an app does.
 @MainActor
 @Observable
 class RAGViewModel {
@@ -53,19 +54,6 @@ class RAGViewModel {
             case .store:
                 return "Store"
             }
-        }
-
-        /// Whether the library implements this phase yet.
-        /// Every phase is implemented now, so nothing is stamped pending. Kept rather than deleted
-        /// because phase 6 adds the runtime that ties them together, and a phase that has landed
-        /// but is not yet *orchestrated* is the same shape of note.
-        var isImplemented: Bool {
-            true
-        }
-
-        /// What the phase is waiting on, for the placeholder line.
-        var pendingNote: String {
-            ""
         }
     }
 
@@ -300,10 +288,7 @@ class RAGViewModel {
     var selectedKeys: Set<String> = []
     var embedder: EmbedderChoice = .apple
     var embeddedCount = 0
-    var embedFailureCount = 0
-    var embeddedTokens = 0
     var storedCount = 0
-    var storeFailureCount = 0
     /// The query box, and what it found. Live only once something has been stored.
     var question: String = ""
     var isSearching = false
@@ -320,13 +305,6 @@ class RAGViewModel {
     /// Dimension of the first vector produced, which is the most visible difference between the
     /// two embedders.
     var vectorDimension: Int?
-    /// First document of the run, kept so the preview can show what a "document" actually is for
-    /// the chosen format.
-    var previewDocument: RTSRAGDocument?
-    /// That document's chunks, which is where the difference between the two chunkers shows: the
-    /// identity chunker returns the document unchanged, the sentence chunker returns slices.
-    var previewChunks: [RTSRAGChunk] = []
-    var isShowingPreview = false
 
     private var runTask: Task<Void, Never>?
 
@@ -488,7 +466,6 @@ class RAGViewModel {
         append(.resolve, "\(stream.sourceCount) file(s) matched")
         guard stream.sourceCount > 0 else {
             append(.load, "nothing to load")
-            appendPendingPhases()
             return
         }
 
@@ -567,12 +544,10 @@ class RAGViewModel {
             chunkCount += chunks
         case .batchEmbedded(_, let chunks, let metrics):
             embeddedCount += chunks
-            embeddedTokens += metrics.inputTokens ?? 0
             if vectorDimension == nil {
                 vectorDimension = metrics.dimension
             }
         case .batchFailed(let failure):
-            embedFailureCount += failure.chunks.count
             append(
                 .embed,
                 "⚠️ [\(failure.kind)] \(failure.chunks.count) chunk(s) after "
@@ -583,9 +558,16 @@ class RAGViewModel {
             if dropped > 0 {
                 append(.store, "committed with \(dropped) chunk(s) dropped — permanently unembeddable")
             }
-        case .documentWithheld(_, let reason):
-            storeFailureCount += 1
-            append(.store, "⚠️ not committed — \(reason); the previous version stays intact")
+        case .documentWithheld(_, let reason, let isPermanent):
+            // The two need opposite responses, so they must not read the same. Telling someone to
+            // retry a document no chunker will ever take is the advice that wasted the most time
+            // while this screen was being built.
+            append(
+                .store,
+                isPermanent
+                    ? "⚠️ not committed — \(reason); re-running will fail identically, pick another chunker"
+                    : "⚠️ not committed — \(reason); the previous version stays intact, retry may clear it"
+            )
         case .loadFailed(let error):
             failureCount += 1
             append(.load, "⚠️ \(error)")
@@ -617,15 +599,20 @@ class RAGViewModel {
                 // are precisely what a re-run will pick up, so a reader deciding whether to run
                 // again needs the number without scrolling.
                 + (stats.documentsWithheld > 0 ? ", \(stats.documentsWithheld) withheld for retry" : "")
+                // Kept apart from the line above rather than added to it: one number is an
+                // invitation to run again and the other is an instruction to change the chunker.
+                + (stats.documentsUnchunkable > 0 ? ", \(stats.documentsUnchunkable) unchunkable" : "")
                 + (stats.chunksStored > 0 ? " — ask a question below" : "")
         )
-        // One verdict rather than a wall of scrollback. `needsAttention` is true only for things a
-        // re-run will *not* fix — dropped chunks and recorded failures — so a withheld document
-        // deliberately does not trigger it.
+        // One verdict rather than a wall of scrollback, covering dropped chunks, unchunkable
+        // documents and recorded failures. A withheld document reaches it too, through the batch
+        // failure that caused it — what the separate count buys is the *advice*, since "run it
+        // again" and "change the chunker" are opposite instructions.
         if stats.needsAttention {
             append(
                 .store,
                 "⚠️ this run needs a look: \(stats.chunksDropped) chunk(s) dropped, "
+                    + "\(stats.documentsUnchunkable) document(s) no chunker would take, "
                     + "\(stats.failures.count) failure(s) recorded — a re-run will not fix these"
             )
         }
@@ -687,12 +674,6 @@ class RAGViewModel {
         return URL(fileURLWithPath: filePart).lastPathComponent
     }
 
-    private func appendPendingPhases() {
-        for phase in Phase.allCases where !phase.isImplemented {
-            append(phase, phase.pendingNote)
-        }
-    }
-
     // MARK: - Log
 
     func clearLog() {
@@ -721,15 +702,10 @@ class RAGViewModel {
         failureCount = 0
         chunkCount = 0
         embeddedCount = 0
-        embedFailureCount = 0
-        embeddedTokens = 0
         storedCount = 0
-        storeFailureCount = 0
         results = []
         searchNote = nil
         vectorDimension = nil
-        previewDocument = nil
-        previewChunks = []
     }
 
     /// Builds the chosen embedder, or reports why it cannot be built.

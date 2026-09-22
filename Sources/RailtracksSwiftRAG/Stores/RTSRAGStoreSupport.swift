@@ -27,12 +27,24 @@ struct RTSRAGStoreIndex {
     private(set) var embeddingModel: String?
     private(set) var dimension: Int?
 
-    var entries: [RTSRAGStoreEntry] {
-        documents.values.flatMap { $0 }
-    }
-
     var isEmpty: Bool {
         documents.isEmpty
+    }
+
+    /// Visits every stored entry without building an array of them.
+    ///
+    /// Replaces a `var entries` that was `documents.values.flatMap { $0 }` — correct, but it
+    /// allocated a copy of the **whole store** on every read, and all three reads below are on the
+    /// query path. Returning `false` stops the walk, which is what gives ``find(matching:limit:)``
+    /// an early exit.
+    private func forEachEntry(_ body: (RTSRAGStoreEntry) -> Bool) {
+        for entries in documents.values {
+            for entry in entries {
+                if !body(entry) {
+                    return
+                }
+            }
+        }
     }
 
     // MARK: Mutation
@@ -137,11 +149,14 @@ struct RTSRAGStoreIndex {
     /// trip that produced the query — an approximate index is a later decision, to be made against
     /// a corpus that can be profiled rather than guessed at.
     func search(_ query: RTSRAGStoreQuery) -> [RTSRAGRetrievedEntry] {
-        let candidates = entries.filter { entry in
-            matches(entry, filters: query.metadataFilters, scope: query.scope)
+        var scored: [(entry: RTSRAGStoreEntry, score: Float)] = []
+        forEachEntry { entry in
+            if matches(entry, filters: query.metadataFilters, scope: query.scope) {
+                scored.append((entry, RTSRAGStoreIndex.cosine(entry.vector, query.embedding)))
+            }
+            return true
         }
-        return candidates
-            .map { (entry: $0, score: RTSRAGStoreIndex.cosine($0.vector, query.embedding)) }
+        return scored
             .sorted { $0.score > $1.score }
             .prefix(max(0, query.topK))
             .enumerated()
@@ -150,22 +165,34 @@ struct RTSRAGStoreIndex {
             }
     }
 
+    /// The first `limit` entries matching `filters`, stopping as soon as it has them.
+    ///
+    /// The early exit is not a micro-optimisation: ``RTSRAGRetrievalRuntime`` asks for `limit: 1`
+    /// on **every** query, to check the store's embedding identity before searching. Walking the
+    /// whole store to answer that made an identity check cost as much as the search it guards.
     func find(matching filters: RTSRAGMetadata, limit: Int) -> [RTSRAGStoreEntry] {
         guard limit > 0 else {
             return []
         }
-        return entries
-            .filter { matches($0, filters: filters, scope: nil) }
-            .prefix(limit)
-            .map { $0 }
+        var found: [RTSRAGStoreEntry] = []
+        forEachEntry { entry in
+            if matches(entry, filters: filters, scope: nil) {
+                found.append(entry)
+            }
+            return found.count < limit
+        }
+        return found
     }
 
     func count(matching filters: RTSRAGMetadata) -> Int {
-        entries.reduce(into: 0) { total, entry in
+        var total = 0
+        forEachEntry { entry in
             if matches(entry, filters: filters, scope: nil) {
                 total += 1
             }
+            return true
         }
+        return total
     }
 
     /// Flat equality, which is all the staleness check needs — `source_path` and `content_hash`.

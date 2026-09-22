@@ -22,6 +22,17 @@ public struct RTSRAGIngestionStats: Sendable {
     /// Not written, because a failure that a later run might not hit left them incomplete. Their
     /// previous versions are intact.
     public var documentsWithheld = 0
+    /// Not written, and a later run will refuse them identically: no chunks could be made of them.
+    ///
+    /// **Disjoint from ``documentsWithheld``**, which counts the transient refusals. A chunker is a
+    /// pure function of its input, so a document it rejects is rejected the same way for ever — the
+    /// fix is a different chunker for that source, not another attempt, and the two therefore call
+    /// for opposite advice.
+    ///
+    /// Counted at all because nothing else counts it. A withheld document always carries the batch
+    /// failure that caused it, so it reaches ``needsAttention`` through ``failures``; a chunker
+    /// refusal produces no failure record, and before this field existed it raised nothing.
+    public var documentsUnchunkable = 0
 
     public var chunksCreated = 0
     public var chunksEmbedded = 0
@@ -48,9 +59,15 @@ public struct RTSRAGIngestionStats: Sendable {
 
     /// Whether anything in this run needs a human.
     ///
-    /// Withheld documents resolve themselves on the next run; dropped chunks and failures do not.
+    /// ``documentsWithheld`` is not a term here, and not because a withheld document is benign: the
+    /// batch failure that caused it is already in ``failures``, so such a run flags through that
+    /// term regardless. Adding it would change nothing.
+    ///
+    /// ``documentsUnchunkable`` *is* a term, because nothing else covers it. A chunker refusal
+    /// records no failure, so before it existed a run whose every document was too large to chunk
+    /// reported that it needed no attention at all.
     public var needsAttention: Bool {
-        chunksDropped > 0 || !failures.isEmpty
+        chunksDropped > 0 || documentsUnchunkable > 0 || !failures.isEmpty
     }
 
     mutating func record(_ metrics: RTSRAGEmbeddingMetrics) {

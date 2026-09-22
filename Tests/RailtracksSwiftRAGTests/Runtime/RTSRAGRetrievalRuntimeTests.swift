@@ -182,6 +182,47 @@ struct RTSRAGRetrievalRuntimeTests {
         #expect(second.documentsCommitted == 0)
     }
 
+    @Test("a document no chunker will take asks for a human, and keeps asking")
+    func unchunkableDocumentNeedsAttention() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", String(repeating: "long ", count: 200))
+        let runtime = try await corpus.makeRuntime()
+        let collector = EventCollector()
+        let subscription = runtime.eventPublisher.sink { event in
+            collector.record(event)
+        }
+        defer {
+            subscription.cancel()
+        }
+        // The identity chunker refuses rather than splits, which is the whole reason it takes a
+        // limit — and the pairing that produced this failure repeatedly while phase 4 was landing.
+        let chunker = RTSRAGIdentityChunker(maxCharacters: 50)
+
+        let first = try await runtime.ingest(loader: corpus.loader, chunker: chunker)
+        let second = try await runtime.ingest(loader: corpus.loader, chunker: chunker)
+
+        // The flag used to be *false* here while being true for a rate limit — exactly backwards,
+        // since this is the failure another run cannot change.
+        #expect(first.documentsUnchunkable == 1)
+        #expect(first.needsAttention)
+        // Disjoint, so "withheld for retry" never names a document that will never pass.
+        #expect(first.documentsWithheld == 0)
+        #expect(first.documentsCommitted == 0)
+
+        // Measured rather than asserted in a comment: nothing was stored, so the staleness check
+        // cannot skip it, and a chunker is a pure function of its input — so the second run
+        // re-chunks and re-fails identically, for ever.
+        #expect(second.documentsUnchunkable == 1)
+        #expect(second.needsAttention)
+
+        // And the event stream says so on its own, which is what the `isPermanent` flag is for.
+        #expect(collector.derived.documentsUnchunkable == 2)
+        #expect(collector.derived.documentsWithheld == 0)
+    }
+
     // MARK: - Guards
 
     @Test("a foreign embedder is refused before the loader reads anything")
@@ -513,8 +554,12 @@ private final class EventCollector: @unchecked Sendable {
             derived.documentsCommitted += 1
             derived.chunksStored += stored
             derived.chunksDropped += dropped
-        case .documentWithheld:
-            derived.documentsWithheld += 1
+        case .documentWithheld(_, _, let isPermanent):
+            if isPermanent {
+                derived.documentsUnchunkable += 1
+            } else {
+                derived.documentsWithheld += 1
+            }
         case .loadFailed:
             break
         }
