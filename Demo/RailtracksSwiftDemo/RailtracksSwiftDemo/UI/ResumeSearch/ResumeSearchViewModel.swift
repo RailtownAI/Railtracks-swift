@@ -85,6 +85,16 @@ class ResumeSearchViewModel {
     /// Held for as long as the picked folder is in use — a security-scoped URL stops being readable
     /// the moment this is released, and the store replays its log at construction.
     private var scopedURL: URL?
+    /// Built once per (store, embedder) pair and reused for every question against it.
+    ///
+    /// **Not rebuilt per question, which is the whole point.** `RTSRAGOpenAIEmbedding` owns an
+    /// `RTSRAGRateGovernor`, and a fresh one per question would re-discover the provider's rate
+    /// limit from scratch each time, throwing away everything the last question learned — the
+    /// anti-pattern that type's own documentation warns about. The on-device path has a cheaper
+    /// version of the same problem: `prepare()` would run again on every ask.
+    private var runtime: RTSRAGRetrievalRuntime?
+    /// What ``runtime`` was built for, so a changed store or embedder invalidates it.
+    private var runtimeEmbedder: EmbedderChoice?
 
     var canAsk: Bool {
         store != nil && !question.isEmpty && !isRunning
@@ -141,6 +151,7 @@ class ResumeSearchViewModel {
     func open(_ url: URL, isSecurityScoped: Bool) {
         releaseScope()
         store = nil
+        discardRuntime()
         storeSummary = nil
         storeProblem = nil
         answer = nil
@@ -177,13 +188,21 @@ class ResumeSearchViewModel {
                 return
             }
             store = opened
+            storeSummary = "\(total) chunk(s), written by \(sample.embeddingModel)"
             // Pre-selected from what the store says wrote it. A wrong guess is not silent: the
             // runtime's own guard throws `embeddingModelMismatch` naming both models, and since
             // that check moved into `retrieve`, it fires before anything is paid to embed.
-            embedder = EmbedderChoice.allCases.first {
-                sample.embeddingModel.hasPrefix($0.identifierPrefix)
-            } ?? embedder
-            storeSummary = "\(total) chunk(s), written by \(sample.embeddingModel)"
+            if let detected = EmbedderChoice.allCases.first(
+                where: { sample.embeddingModel.hasPrefix($0.identifierPrefix) }
+            ) {
+                embedder = detected
+            } else {
+                // Neither prefix matched — a store written by an embedder this demo cannot build.
+                // Said out loud rather than silently keeping whatever was selected, because the
+                // selection below would then look like a detection.
+                storeProblem = "unrecognised embedder — pick the one that wrote this store, or "
+                    + "queries will be refused as a model mismatch."
+            }
         } catch {
             storeProblem = "could not open: \(error)"
             releaseScope()
@@ -220,8 +239,7 @@ class ResumeSearchViewModel {
                 isRunning = false
             }
             do {
-                let embedding = try await makeEmbedder()
-                let runtime = RTSRAGRetrievalRuntime(embedder: embedding, store: store)
+                let runtime = try await currentRuntime(for: store)
                 let tool = RTSKnowledgeSearchTool(
                     toolName: "SearchResumes",
                     toolDescription: """
@@ -253,6 +271,25 @@ class ResumeSearchViewModel {
                 errorText = "\(error)"
             }
         }
+    }
+
+    /// The runtime for the current store and embedder choice, built on first use and kept.
+    ///
+    /// Rebuilt only when the embedder choice changes — a different embedder is a different vector
+    /// space, so it needs its own runtime, and its own rate budget.
+    private func currentRuntime(for store: RTSRAGFileStore) async throws -> RTSRAGRetrievalRuntime {
+        if let runtime, runtimeEmbedder == embedder {
+            return runtime
+        }
+        let built = RTSRAGRetrievalRuntime(embedder: try await makeEmbedder(), store: store)
+        runtime = built
+        runtimeEmbedder = embedder
+        return built
+    }
+
+    private func discardRuntime() {
+        runtime = nil
+        runtimeEmbedder = nil
     }
 
     /// The mapping this whole phase exists to compile.
