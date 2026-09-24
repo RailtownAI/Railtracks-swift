@@ -69,52 +69,64 @@ public extension RTSAppleAIToolNode {
 
 @available(macOS 26, iOS 26, *)
 public extension RTSAppleAIToolNode where Arguments: Generable {
-    /// Derives `parameterSchema` from the `@Generable Arguments` struct by reflecting
-    /// over `GenerationSchema`, so `@Guide` descriptions double as OpenAI parameter docs.
+    /// Derives `parameterSchema` from the `@Generable Arguments` struct through `GenerationSchema`'s
+    /// public `Codable` form — a JSON Schema — so `@Guide` descriptions double as OpenAI parameter docs.
     var parameterSchema: RTSToolSchema {
         RTSToolSchema(parameters: Self.extractParameters(from: Arguments.generationSchema))
     }
 
     //TODO: return nil if failure instead of empty array?
-    /// This `extractParameters(from:)` function heavily depend on existing Apple structure stays consistent
+    /// Reads the top-level `properties` of the encoded JSON Schema, in declaration order (`x-order`).
     private static func extractParameters(from schema: GenerationSchema) -> [RTSToolSchema.Parameter] {
-        guard
-            let kindValue      = Mirror(reflecting: schema).children.first(where: { $0.label == "kind" })?.value,
-            let structureValue = Mirror(reflecting: kindValue).children.first(where: { $0.label == "structure" })?.value,
-            let propertiesAny  = Mirror(reflecting: structureValue).children.first(where: { $0.label == "properties" })?.value,
-            let propertiesArr  = propertiesAny as? [Any]
-        else {
-            log.error("☠️ unable to extract parameters from schema. Mirror reflection is broken.")
+        let jsonSchema: [String: Any]
+        do {
+            let encoded = try JSONEncoder().encode(schema)
+            jsonSchema = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+        } catch {
+            log.error("☠️ unable to encode GenerationSchema for tool parameters: \(error)")
             return []
         }
-
-        return propertiesArr.compactMap { prop in
-            let m = Mirror(reflecting: prop)
-            guard let name    = m.children.first(where: { $0.label == "name" })?.value as? String,
-                  let typeVal = m.children.first(where: { $0.label == "type" })?.value
-            else { return nil }
-            let description = (m.children.first(where: { $0.label == "description" })?.value)
-                .flatMap { $0 as? String } ?? ""
-            let valueType: RTSValueType
-            let typeStr = "\(typeVal)"
-            switch typeStr {
-            case "String":
-                valueType = .string
-            case "Double", "Int", "Float":
-                valueType = .number
-            case "Bool":
-                valueType = .bool
-            case "[String]", "Array<String>":
-                valueType = .array(.string)
-            case "[Double]", "[Int]", "[Float]",
-                 "Array<Double>", "Array<Int>", "Array<Float>":
-                valueType = .array(.number)
-            case "[Bool]", "Array<Bool>":
-                valueType = .array(.bool)
-            default:
-                valueType = .string
+        guard let properties = jsonSchema["properties"] as? [String: [String: Any]] else {
+            log.error("☠️ GenerationSchema JSON has no object `properties`: \(jsonSchema)")
+            return []
+        }
+        let order = jsonSchema["x-order"] as? [String] ?? properties.keys.sorted()
+        return order.compactMap { name in
+            guard let property = properties[name] else {
+                return nil
             }
-            return RTSToolSchema.Parameter(name: name, description: description, type: valueType)
+            return RTSToolSchema.Parameter(
+                name: name,
+                description: property["description"] as? String ?? "",
+                type: valueType(of: property)
+            )
+        }
+    }
+
+    /// Maps a JSON Schema property to `RTSValueType`. Anything without a direct equivalent — objects,
+    /// references, arrays of those — is `.string`, as before.
+    private static func valueType(of property: [String: Any]) -> RTSValueType {
+        switch property["type"] as? String {
+        case "string":
+            return .string
+        case "number", "integer":
+            return .number
+        case "boolean":
+            return .bool
+        case "array":
+            let items = property["items"] as? [String: Any] ?? [:]
+            switch items["type"] as? String {
+            case "string":
+                return .array(.string)
+            case "number", "integer":
+                return .array(.number)
+            case "boolean":
+                return .array(.bool)
+            default:
+                return .string
+            }
+        default:
+            return .string
         }
     }
 }

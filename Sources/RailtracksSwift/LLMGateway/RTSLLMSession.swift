@@ -110,12 +110,22 @@ extension RTSLLMSession {
         agentNode: any RTSAgentNode
     ) -> RTSLLMSession {
         let agentName = agentNode.agentName
+        let provider = agentNode.llmProvider
+        let providerName = provider.providerName
+        // `.appleAI` has always recorded its provider name as the model; kept so existing traces
+        // do not change. `.foundationModel` records its real model id, which is the pricing key.
+        let modelName: String
+        if case .foundationModel = provider {
+            modelName = provider.modelID
+        } else {
+            modelName = providerName
+        }
         let runIDMap = RunIDMap()
         let relay = BufferedPassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
             run: { prompt, images, runID in
                 if !images.isEmpty {
-                    log.warning("⚠️ [\(agentName)] AppleAI is text-only; ignoring \(images.count) image input(s).")
+                    log.warning("⚠️ [\(agentName)] \(providerName) via FoundationModels is text-only here; ignoring \(images.count) image input(s).")
                 }
                 let beforeCount = appleAI.messages().count
                 let publishNewMessages: (AppleAIResponse?) -> Void = { response in
@@ -124,18 +134,13 @@ extension RTSLLMSession {
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
-                    let stamped = newMessages.map { message -> RTSMessage in
-                        var m = message.stamped(runID: runID)
-                        if m.role == .assistant, let response {
-                            m = m.stampingTokenCounts(
-                                input: response.inputTokens,
-                                output: response.outputTokens,
-                                latency: response.latency,
-                                providerName: RTSLLMProvider.appleAI.providerName
-                            )
-                        }
-                        return m
-                    }
+                    let stamped = stampFoundationModelsMessages(
+                        newMessages,
+                        runID: runID,
+                        response: response,
+                        model: modelName,
+                        providerName: providerName
+                    )
                     relay.send(stamped)
                 }
                 do {
@@ -260,6 +265,36 @@ extension RTSLLMSession {
     }
 }
 
+/// Stamps the messages one FoundationModels `respond` produced.
+///
+/// Every assistant message is labelled with its model and provider, so each tool-call turn traces
+/// as this provider. Token counts and latency go on the final one only: one `respond` can span
+/// several model turns, and its usage is their aggregate — stamping it on every turn would multiply
+/// the priced cost by the number of tool-call turns. `response` is `nil` when `respond` threw.
+func stampFoundationModelsMessages(
+    _ messages: [RTSMessage],
+    runID: RTSRunID,
+    response: AppleAIResponse?,
+    model: String,
+    providerName: String
+) -> [RTSMessage] {
+    let lastAssistantIndex = messages.lastIndex { $0.role == .assistant }
+    return messages.enumerated().map { index, message in
+        let runStamped = message.stamped(runID: runID)
+        guard runStamped.role == .assistant else {
+            return runStamped
+        }
+        let usage = index == lastAssistantIndex ? response : nil
+        return runStamped.stampingTokenCounts(
+            input: usage?.inputTokens,
+            output: usage?.outputTokens,
+            latency: usage?.latency,
+            model: model,
+            providerName: providerName
+        )
+    }
+}
+
 private extension RTSMessage {
     func stamped(runID: RTSRunID?) -> RTSMessage {
         RTSMessage(
@@ -276,6 +311,7 @@ private extension RTSMessage {
         input: Int?,
         output: Int?,
         latency: Double?,
+        model: String?,
         providerName: String?
     ) -> RTSMessage {
         let existing = metadata
@@ -283,7 +319,7 @@ private extension RTSMessage {
             tokenCount: output ?? existing?.tokenCount,
             inputTokenCount: input ?? existing?.inputTokenCount,
             generationTime: latency ?? existing?.generationTime,
-            model: existing?.model ?? providerName,
+            model: existing?.model ?? model,
             providerName: providerName ?? existing?.providerName,
             tokensPerSecond: existing?.tokensPerSecond,
             providerExtra: existing?.providerExtra,

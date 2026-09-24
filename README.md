@@ -13,6 +13,7 @@ A Swift 6 library for building agentic LLM pipelines with tool-calling support. 
 |---|---|
 | OpenAI | `.openAI(modelIDString:)` |
 | Apple Intelligence (on-device) | `.appleAI` |
+| Any FoundationModels `LanguageModel`, e.g. Claude via `ClaudeForFoundationModels` (macOS/iOS 27) | `.foundationModel(RTSFoundationLanguageModel)` |
 
 ## Quick Start
 
@@ -204,6 +205,25 @@ struct MyTool: RTSToolNode {
 ### RTSAppleAIToolNode
 
 Extends `RTSToolNode` with FoundationModels' `Tool` protocol for Apple Intelligence support. Declare `@Generable struct Arguments: Encodable` with `@Guide` descriptions and the library provides `parameterSchema` and `call(arguments:)` automatically. The same `callableRoutine` runs for both OpenAI and Apple paths.
+
+### RTSFoundationLanguageModel
+
+Runs an agent on any third-party model that plugs into Apple's `LanguageModelSession`, such as Anthropic's `ClaudeLanguageModel`. Requires macOS/iOS 27; below that the gateway throws `RTSError.providerUnavailable`. The app adds the vendor package itself — RailtracksSwift depends only on Apple's `LanguageModel` protocol.
+
+```swift
+import ClaudeForFoundationModels
+
+let claude = ClaudeLanguageModel(name: .sonnet4_6, auth: .apiKey(apiKey))
+let agent = RTSAgent(
+    llmProvider: .foundationModel(
+        RTSFoundationLanguageModel(claude, kind: .anthropic, modelID: "claude-sonnet-4-6")
+    ),
+    name: "Support"
+)
+let gateway = RTSLLMGateway(apiKeys: [:])   // the model carries its own auth
+```
+
+`kind` says who serves the model, so pricing, traces and rate limiting treat it as that provider; `modelID` is the pricing key. Tools follow the `.appleAI` rules: conform to `RTSAppleAIToolNode`. Image input is not yet supported on this path.
 
 ### RTSValue
 
