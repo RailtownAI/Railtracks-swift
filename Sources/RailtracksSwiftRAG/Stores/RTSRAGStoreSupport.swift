@@ -11,6 +11,13 @@ import Foundation
 
 /// The state both shipped stores keep, and the rules they both enforce.
 ///
+/// **One embedding model and one vector width per store.** The first write sets both; a later
+/// write from a different model throws ``RTSRAGError/embeddingModelMismatch(expected:found:)`` and
+/// one of a different width throws ``RTSRAGError/storeFailed(reason:)``. The identity lasts only
+/// while the store holds entries — emptying it clears both, so the next write may come from any
+/// embedder. This is how both shipped stores meet the one-model rule ``RTSRAGVectorStore``
+/// requires.
+///
 /// Factored out rather than given a second public protocol: Python separates `VectorStore` from
 /// `VectorBackend` so its entry mapping is written once, but that split is internal reuse and not
 /// something the pipeline sees. ``RTSRAGVectorStore`` stays a single seam and each conformer owns
@@ -23,7 +30,8 @@ struct RTSRAGStoreIndex {
     /// scan, and it matches the unit the file format persists — a document's chunks land together
     /// or not at all.
     private(set) var documents: [RTSRAGDocumentID: [RTSRAGStoreEntry]] = [:]
-    /// The identity every entry must share, taken from the first one written.
+    /// The identity every entry must share, taken from the first one written. `nil` whenever the
+    /// store is empty.
     private(set) var embeddingModel: String?
     private(set) var dimension: Int?
 
@@ -55,7 +63,7 @@ struct RTSRAGStoreIndex {
     ) throws {
         try validate(entries)
         if entries.isEmpty {
-            documents.removeValue(forKey: documentID)
+            remove(documentID: documentID)
         } else {
             documents[documentID] = entries
             embeddingModel = embeddingModel ?? entries.first?.embeddingModel
@@ -65,16 +73,32 @@ struct RTSRAGStoreIndex {
 
     mutating func remove(documentID: RTSRAGDocumentID) {
         documents.removeValue(forKey: documentID)
+        clearIdentityIfEmpty()
+    }
+
+    /// Drops the store's model and width once nothing is left that they describe.
+    ///
+    /// Without this an emptied store stayed pinned to its first model: it refused a different
+    /// embedder with "store was built with …" while holding nothing, and the runtime's pre-flight
+    /// — which finds no entries and so has nothing to compare — let that embedder through to pay
+    /// for embedding a document the store then rejected.
+    private mutating func clearIdentityIfEmpty() {
+        guard documents.isEmpty else {
+            return
+        }
+        embeddingModel = nil
+        dimension = nil
     }
 
     /// Everything one ``replace(documentID:with:)`` can change, so a store whose own write then
     /// fails can put the index back exactly as it was.
     ///
     /// Three fields, not one, and that is the whole reason this type exists. A first write latches
-    /// ``embeddingModel`` and ``dimension`` alongside the document, and they are never cleared —
-    /// so undoing only the document leaves an **empty** store permanently pinned to a model it
-    /// never held, which then refuses a different embedder with "store was built with …" about a
-    /// document that was never written.
+    /// ``embeddingModel`` and ``dimension`` alongside the document, and they persist until the
+    /// store is emptied — so undoing only the document leaves an **empty** store pinned to a model
+    /// it never held, which then refuses a different embedder with "store was built with …" about
+    /// a document that was never written. Rolling back a delete of the last document is the same
+    /// in reverse: the delete cleared the identity, and restoring the document must restore it.
     struct DocumentSnapshot {
         fileprivate let entries: [RTSRAGStoreEntry]?
         fileprivate let embeddingModel: String?

@@ -154,6 +154,76 @@ struct RTSRAGStoreTests {
         }
     }
 
+    /// The two ways a store's last document can go.
+    enum Emptying: CaseIterable {
+        case delete
+        case emptyReplacement
+    }
+
+    @Test(
+        "an emptied store accepts a different embedder",
+        arguments: Kind.allCases,
+        Emptying.allCases
+    )
+    func emptiedStoreAcceptsAnotherModel(kind: Kind, emptying: Emptying) async throws {
+        let scratch = try Scratch()
+        defer {
+            scratch.clean()
+        }
+        let store = try scratch.makeStore(kind)
+        let first = RTSRAGDocumentID(UUID())
+        try await store.replaceDocument(
+            id: first,
+            with: [Self.entry(documentID: first, index: 0, content: "a", vector: [1, 0, 0], model: "model/ALPHA")]
+        )
+        switch emptying {
+        case .delete:
+            try await store.deleteDocument(id: first)
+        case .emptyReplacement:
+            try await store.replaceDocument(id: first, with: [])
+        }
+
+        // Nothing is left that the old model and width describe, so the store must not refuse a
+        // different embedder over them — the runtime's pre-flight already treats it as empty.
+        let second = RTSRAGDocumentID(UUID())
+        try await store.replaceDocument(
+            id: second,
+            with: [Self.entry(documentID: second, index: 0, content: "b", vector: [0, 0, 0, 1, 0], model: "model/BETA")]
+        )
+        let hits = try await store.search(Self.query([0, 0, 0, 1, 0]))
+
+        #expect(hits.map { $0.entry.content } == ["b"])
+    }
+
+    @Test("a store that still holds a document keeps its embedder", arguments: Kind.allCases)
+    func partlyEmptiedStoreStaysLocked(kind: Kind) async throws {
+        let scratch = try Scratch()
+        defer {
+            scratch.clean()
+        }
+        let store = try scratch.makeStore(kind)
+        let kept = RTSRAGDocumentID(UUID())
+        let deleted = RTSRAGDocumentID(UUID())
+        try await store.replaceDocument(
+            id: kept,
+            with: [Self.entry(documentID: kept, index: 0, content: "kept", vector: [1, 0, 0], model: "model/ALPHA")]
+        )
+        try await store.replaceDocument(
+            id: deleted,
+            with: [Self.entry(documentID: deleted, index: 0, content: "gone", vector: [1, 0, 0], model: "model/ALPHA")]
+        )
+        try await store.deleteDocument(id: deleted)
+
+        // The unlock is for an *empty* store only; one ALPHA document is still answering queries.
+        let foreign = RTSRAGDocumentID(UUID())
+        await #expect(throws: RTSRAGError.self) {
+            try await store.replaceDocument(
+                id: foreign,
+                with: [Self.entry(documentID: foreign, index: 0, content: "b", vector: [1, 0, 0], model: "model/BETA")]
+            )
+        }
+    }
+
     @Test("find and count agree, and match on staleness metadata", arguments: Kind.allCases)
     func findAndCountSupportTheStalenessCheck(kind: Kind) async throws {
         let scratch = try Scratch()
@@ -226,6 +296,42 @@ struct RTSRAGStoreTests {
     }
 
     // MARK: - File store only
+
+    @Test("a store reused by a new embedder reopens under that embedder")
+    func fileStoreReopensUnderTheNewModel() async throws {
+        let scratch = try Scratch()
+        defer {
+            scratch.clean()
+        }
+        let first = RTSRAGDocumentID(UUID())
+        let second = RTSRAGDocumentID(UUID())
+        do {
+            let store = try RTSRAGFileStore(directory: scratch.directory)
+            try await store.replaceDocument(
+                id: first,
+                with: [Self.entry(documentID: first, index: 0, content: "a", vector: [1, 0, 0], model: "model/ALPHA")]
+            )
+            try await store.deleteDocument(id: first)
+            try await store.replaceDocument(
+                id: second,
+                with: [Self.entry(documentID: second, index: 0, content: "b", vector: [0, 0, 0, 1, 0], model: "model/BETA")]
+            )
+        }
+
+        // The log still holds ALPHA's line and its tombstone. Replay must land on BETA, the model
+        // of the only live document — the identity is rebuilt from the log, never stored in it.
+        let reopened = try RTSRAGFileStore(directory: scratch.directory)
+        let hits = try await reopened.search(Self.query([0, 0, 0, 1, 0]))
+        #expect(hits.map { $0.entry.content } == ["b"])
+
+        let third = RTSRAGDocumentID(UUID())
+        await #expect(throws: RTSRAGError.self) {
+            try await reopened.replaceDocument(
+                id: third,
+                with: [Self.entry(documentID: third, index: 0, content: "c", vector: [1, 0, 0], model: "model/ALPHA")]
+            )
+        }
+    }
 
     @Test("a reopened store still answers queries")
     func fileStoreIsDurable() async throws {

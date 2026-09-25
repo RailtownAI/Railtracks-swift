@@ -12,6 +12,17 @@ import Foundation
 /// Reads never touch disk. Writes append one line and update the index, so a write costs one
 /// document's worth of I/O rather than the corpus's.
 ///
+/// ## One embedder per store
+///
+/// Holds vectors from exactly one embedding model and one width, both taken from the first write.
+/// A write from a different model throws ``RTSRAGError/embeddingModelMismatch(expected:found:)``;
+/// a different width throws ``RTSRAGError/storeFailed(reason:)``. Emptying the store clears both,
+/// so it can then be reused with any embedder. Several embedders means several stores.
+///
+/// The identity is never written to the file. Opening a store rebuilds it from the first live
+/// document the log replays, so an emptied store reopens unlocked, exactly as it behaves in the
+/// process that emptied it.
+///
 /// ## One line per document, not per entry
 ///
 /// ``RTSRAGVectorStore/replaceDocument(id:with:)`` is documented as **one operation**, precisely so
@@ -119,7 +130,8 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
     ///   The rollback goes through ``RTSRAGStoreIndex/DocumentSnapshot`` rather than re-replacing
     ///   the document, because a write changes more than the document: the *first* one also latches
     ///   the store's model and dimension, and undoing only the document left an empty store pinned
-    ///   to a model whose single document was never written.
+    ///   to a model whose single document was never written. A refused delete of the last document
+    ///   is the mirror image: the delete cleared the identity, and the rollback restores it.
     ///
     /// Compaction comes after the commit and cannot fail it — see ``compactIfNeeded()``.
     private func apply(_ entries: [RTSRAGStoreEntry], to id: RTSRAGDocumentID) throws {
@@ -218,7 +230,7 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
             // and the atomic write left the old log intact. Throwing would report a durable write
             // as failed — and with a lasting cause, every later write too.
             ragLog.warning(
-                "📚 compacting \(fileURL.lastPathComponent) failed, keeping the uncompacted log (\(lineCount) lines, \(live) live documents): \(error)"
+                "📚 compacting \(fileURL.lastPathComponent) failed, keeping the uncompacted log (\(lineCount) lines, \(live) live documents): \(error.localizedDescription)"
             )
             return
         }

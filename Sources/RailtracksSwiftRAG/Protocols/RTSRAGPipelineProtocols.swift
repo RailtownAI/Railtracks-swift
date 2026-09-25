@@ -95,6 +95,29 @@ public extension RTSRAGEmbedding {
 // MARK: - RTSRAGVectorStore
 
 /// Persists entries and serves similarity search. Phase 5.
+///
+/// ## One embedding model per instance
+///
+/// Every entry one conformer instance exposes must share one embedding model and one vector
+/// width. An empty instance has neither, so whichever model writes next establishes them. A write
+/// from a different model should throw ``RTSRAGError/embeddingModelMismatch(expected:found:)``.
+///
+/// The rest of the API depends on it: scores across two models are meaningless while remaining
+/// well-formed, ``replaceDocument(id:with:)`` and ``deleteDocument(id:)`` are keyed by document
+/// alone, ``RTSRAGStoreQuery`` carries no model, and ``RTSRAGRetrievalRuntime`` checks the
+/// embedder against a single sampled entry.
+///
+/// The rule is about what an **instance** exposes, not how storage is laid out. Several models may
+/// share one physical backend, provided each is exposed through its own conformer — a per-model
+/// view that keys entries by document *and* model and sees only its own:
+///
+/// ```swift
+/// let backend = SharedVectorBackend(...)
+/// let small = RTSRAGRetrievalRuntime(embedder: e1, store: backend.view(for: e1.modelIdentifier))
+/// let large = RTSRAGRetrievalRuntime(embedder: e2, store: backend.view(for: e2.modelIdentifier))
+/// ```
+///
+/// What no conformer may do is mix models behind one instance.
 public protocol RTSRAGVectorStore: Sendable {
     /// Replaces every entry for `id` with `entries`, as **one operation**.
     ///

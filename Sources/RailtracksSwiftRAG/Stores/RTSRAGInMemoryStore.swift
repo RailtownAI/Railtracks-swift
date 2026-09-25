@@ -13,6 +13,13 @@ import Foundation
 /// search, the filtering and the vector-space guards are the same code ``RTSRAGFileStore`` runs, so
 /// behaviour cannot drift between them — the file store adds durability and nothing else.
 ///
+/// ## One embedder per store
+///
+/// Holds vectors from exactly one embedding model and one width, both taken from the first write.
+/// A write from a different model throws ``RTSRAGError/embeddingModelMismatch(expected:found:)``;
+/// a different width throws ``RTSRAGError/storeFailed(reason:)``. Emptying the store clears both,
+/// so it can then be reused with any embedder. Several embedders means several stores.
+///
 /// An `actor` because a store is shared mutable state. That also serialises writes, which is what
 /// the per-document ordering rule wants: local writes are microseconds against an embedding round
 /// trip of hundreds of milliseconds, so there is no throughput to win by allowing concurrency here

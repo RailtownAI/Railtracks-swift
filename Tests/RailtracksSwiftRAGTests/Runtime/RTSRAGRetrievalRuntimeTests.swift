@@ -461,6 +461,34 @@ struct RTSRAGRetrievalRuntimeTests {
         }
     }
 
+    @Test("an emptied store can be re-ingested with a different embedder")
+    func emptiedStoreAcceptsAnotherEmbedder() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "Refunds take thirty days.")
+        let store = RTSRAGInMemoryStore()
+        let original = RTSRAGRetrievalRuntime(
+            embedder: FailingEmbedder(failing: .transient, onChunkContaining: "never matches"),
+            store: store
+        )
+        _ = try await original.ingest(loader: corpus.loader, chunker: RTSRAGIdentityChunker())
+        for documentID in Set(try await store.find(matching: [:], limit: 100).map { $0.documentID }) {
+            try await store.deleteDocument(id: documentID)
+        }
+
+        // The pre-flight sees an empty store and lets the new embedder through; the store has to
+        // agree. Before, it stayed pinned to the old model and refused the first write — after that
+        // document had already been read, chunked and paid to embed.
+        let replacement = RTSRAGRetrievalRuntime(embedder: StubEmbedder(), store: store)
+        let stats = try await replacement.ingest(loader: corpus.loader, chunker: RTSRAGIdentityChunker())
+        let result = try await replacement.retrieve("refunds")
+
+        #expect(stats.documentsCommitted == 1)
+        #expect(result.entries.map { $0.entry.embeddingModel } == ["stub/other"])
+    }
+
     @Test("a repeated document id inside one ingest is warned about")
     func duplicateIdsAreNoticed() async throws {
         let corpus = try Corpus()

@@ -360,9 +360,9 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
 
     /// Fails before any work when the store holds vectors from a different embedder.
     private func verifyEmbedderMatchesStore() async throws {
-        // One entry is enough — every entry in a store shares its model, which is exactly what the
-        // store's own write guard enforces. An empty store has nothing to compare, so the first
-        // ingest establishes the model.
+        // One entry is enough — `RTSRAGVectorStore` requires every entry an instance exposes to
+        // share one model, and both shipped stores enforce it on write. An empty store has no
+        // model at all, so there is nothing to compare and the next ingest establishes it.
         guard let existing = try await store.find(matching: [:], limit: 1).first else {
             return
         }
