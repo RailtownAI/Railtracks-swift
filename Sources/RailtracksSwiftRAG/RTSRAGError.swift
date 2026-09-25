@@ -42,6 +42,18 @@ public enum RTSRAGError: Error, Sendable, Equatable {
 
     /// The store could not complete an operation.
     case storeFailed(reason: String)
+
+    /// A second ingest was started on a runtime already running one.
+    ///
+    /// A programming error, not a runtime condition, so it fails fast rather than queueing. One
+    /// runtime is one ingest at a time, which is what makes its event stream unambiguous — the
+    /// events carry a document id but no run id, and they do not need one while this holds.
+    ///
+    /// Concurrency comes from a **second runtime**, which is a plain object over the same embedder
+    /// and store, so it costs nothing to make. Throwing rather than waiting is deliberate: a caller
+    /// who wrapped two ingests in a task group expecting parallelism would otherwise get silent
+    /// serialisation, a run that takes twice as long and looks correct.
+    case ingestAlreadyRunning
 }
 
 // MARK: - CustomStringConvertible
@@ -65,6 +77,11 @@ extension RTSRAGError: CustomStringConvertible {
             return "embedding model unavailable: \(reason)"
         case .storeFailed(let reason):
             return "store operation failed: \(reason)"
+        case .ingestAlreadyRunning:
+            return """
+            this runtime is already ingesting. One runtime runs one ingest at a time; build a \
+            second runtime over the same embedder and store to ingest concurrently.
+            """
         }
     }
 }

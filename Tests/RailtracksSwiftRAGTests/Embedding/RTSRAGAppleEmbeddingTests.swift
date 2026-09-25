@@ -61,6 +61,24 @@ struct RTSRAGAppleEmbeddingTests {
         #expect(first.vectors.first?.count == 512)
     }
 
+    @Test("two instances of the same configuration are interchangeable")
+    func separateInstancesShareAVectorSpace() async throws {
+        let first = try Self.makeEmbedder()
+        try await first.prepare()
+        let second = try Self.makeEmbedder()
+        try await second.prepare()
+
+        let a = try await first.embed(["Refunds are processed within thirty days."])
+        let b = try await second.embed(["Refunds are processed within thirty days."])
+
+        // What lets two runtimes write to one store and read each other's chunks. `modelIdentifier`
+        // is a pure function of (asset, revision, pooling) — no instance state — so the store's
+        // write guard and the runtime's preflight both accept either embedder, and the vectors are
+        // identical rather than merely close, so a cross-instance query is not approximating.
+        #expect(first.modelIdentifier == second.modelIdentifier)
+        #expect(a.vectors == b.vectors)
+    }
+
     @Test("related text scores higher than unrelated text")
     func vectorsCarryMeaning() async throws {
         let embedder = try Self.makeEmbedder()

@@ -12,11 +12,15 @@ import Testing
 /// Phase 1 of the RAG port: the module's models and identity rules. No pipeline behaviour exists
 /// yet, so these also serve as the proof that the target builds and links on its own.
 ///
-/// Deliberately *not* nested in a root suite: this target writes nothing through
-/// `RailtracksSwift.outputDirectory`, so it needs none of the main target's `.serialized` /
-/// `RedirectsOutput` machinery. A later phase adding an on-disk store or embedding cache must
-/// revisit that — Swift Testing traits do not cross target boundaries, so this target would
-/// otherwise write into the developer's `~/Documents`.
+/// Deliberately *not* nested in a root suite: this target needs none of the main target's
+/// `.serialized` / `RedirectsOutput` machinery, because nothing here can reach
+/// `RailtracksSwift.outputDirectory` — the module does not depend on that module at all, and
+/// `RTSRAGFileStore` takes its directory from the caller. Every test that touches disk names its
+/// own path under `FileManager.default.temporaryDirectory` and removes it.
+///
+/// Keep that true. Swift Testing traits do not cross target boundaries, so a component that ever
+/// *derives* an output path instead of being handed one would write into the developer's
+/// `~/Documents` with nothing here to stop it.
 @Suite("RailtracksSwiftRAG models")
 struct RTSRAGModelTests {
 

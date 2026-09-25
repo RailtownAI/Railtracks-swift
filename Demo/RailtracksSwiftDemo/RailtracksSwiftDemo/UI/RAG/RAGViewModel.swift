@@ -5,6 +5,7 @@
 //  Created by Mark Su on 2026-09-15.
 //
 
+import Combine
 import Foundation
 import RailtracksSwiftRAG
 import UniformTypeIdentifiers
@@ -18,9 +19,10 @@ import AppKit
 /// A harness for the RAG ingest pipeline: pick a format, pick a file or folder, and watch each
 /// phase report as it runs.
 ///
-/// Built ahead of the pipeline it drives. Only **Load** exists today (`RailtracksSwiftRAG` phase 2);
-/// Chunk, Embed and Store are listed as pending so each one fills in its own lines here as it
-/// lands, rather than needing this screen rebuilt.
+/// Built ahead of the pipeline it drives, one phase at a time, which is why the status log is
+/// organised by **phase** rather than by loader. All five now exist, and phase 6's runtime drives
+/// them — so this screen no longer orchestrates anything. It builds the pieces, subscribes to
+/// ``RTSRAGRetrievalRuntime/eventPublisher`` and calls one method, which is what an app does.
 @MainActor
 @Observable
 class RAGViewModel {
@@ -51,26 +53,6 @@ class RAGViewModel {
                 return "Embed"
             case .store:
                 return "Store"
-            }
-        }
-
-        /// Whether the library implements this phase yet.
-        var isImplemented: Bool {
-            switch self {
-            case .resolve, .load, .chunk, .embed:
-                return true
-            case .store:
-                return false
-            }
-        }
-
-        /// What the phase is waiting on, for the placeholder line.
-        var pendingNote: String {
-            switch self {
-            case .store:
-                return "pending — RTSRAGVectorStore (phase 5) not implemented"
-            case .resolve, .load, .chunk, .embed:
-                return ""
             }
         }
     }
@@ -299,7 +281,6 @@ class RAGViewModel {
     var documentCount = 0
     var failureCount = 0
     var chunkCount = 0
-    var chunkFailureCount = 0
     /// Field names found in the selected file, offered as toggles.
     var availableKeys: [String] = []
     /// Which of them become embedded content. Everything unselected becomes filterable metadata —
@@ -307,18 +288,23 @@ class RAGViewModel {
     var selectedKeys: Set<String> = []
     var embedder: EmbedderChoice = .apple
     var embeddedCount = 0
-    var embedFailureCount = 0
-    var embeddedTokens = 0
+    var storedCount = 0
+    /// The query box, and what it found. Live only once something has been stored.
+    var question: String = ""
+    var isSearching = false
+    var results: [RTSRAGRetrievedEntry] = []
+    var searchNote: String?
+
+    /// Built once per run and kept afterwards, so a query can be asked of what the run stored.
+    ///
+    /// Held alongside the embedder that filled it: a store is only queryable by the embedder that
+    /// wrote it, since two models put the same text in different places.
+    /// Kept after the run so a question can be asked of what it stored.
+    private var runtime: RTSRAGRetrievalRuntime?
+    private var subscription: AnyCancellable?
     /// Dimension of the first vector produced, which is the most visible difference between the
     /// two embedders.
     var vectorDimension: Int?
-    /// First document of the run, kept so the preview can show what a "document" actually is for
-    /// the chosen format.
-    var previewDocument: RTSRAGDocument?
-    /// That document's chunks, which is where the difference between the two chunkers shows: the
-    /// identity chunker returns the document unchanged, the sentence chunker returns slices.
-    var previewChunks: [RTSRAGChunk] = []
-    var isShowingPreview = false
 
     private var runTask: Task<Void, Never>?
 
@@ -480,15 +466,15 @@ class RAGViewModel {
         append(.resolve, "\(stream.sourceCount) file(s) matched")
         guard stream.sourceCount > 0 else {
             append(.load, "nothing to load")
-            appendPendingPhases()
             return
         }
 
-        // `mapDocuments` runs once per source with that source's documents, which is what turns
-        // a document-level stream into file-level progress without parsing paths.
-        let observed = stream.mapDocuments { [weak self] documents in
+        // `mapDocuments` runs once per source with that source's documents, which is what turns a
+        // document-level stream into file-level progress. Wrapped around the loader rather than
+        // done inside the run, because the runtime drives the loader itself now — and the fact
+        // that a loader can be decorated this way is the seam working as intended.
+        let progressLoader = ProgressLoader(wrapping: format.makeLoader(path: path, contentKeys: contentKeys)) { [weak self] documents in
             await self?.noteSourceFinished(documents)
-            return documents
         }
 
         append(.load, "starting")
@@ -497,115 +483,199 @@ class RAGViewModel {
             return
         }
         // The chunker is sized from the embedder, not from the format — the two were chosen
-        // independently in the UI and would otherwise never meet. On-device caps at 768 characters
+        // independently in the UI and would otherwise never meet. On-device caps at 512 characters
         // against the chunker's 1,024 default, which is the mismatch that shows up as
         // `invalidInput` on a page of prose.
         let budget = embedding.maxInputCharacters ?? RTSRAGLimits.defaultMaxChunkCharacters
         let chunking = chunker.makeChunker(maxCharacters: budget)
         append(.chunk, chunker.note(maxCharacters: budget))
-        // Each document is chunked as it arrives rather than after the whole corpus loads, which
-        // is what keeps the stream's back-pressure meaningful — nothing is read ahead of what the
-        // pipeline has finished with.
-        for await element in observed {
-            if Task.isCancelled {
-                append(.load, "cancelled after \(documentCount) document(s)")
-                return
-            }
-            switch element {
-            case .success(let document):
-                documentCount += 1
-                do {
-                    try await chunk(document, with: chunking, embedding: embedding)
-                } catch {
-                    // The embedder itself is unusable — an exhausted account, or a model that
-                    // cannot load. The embedder is built once for the whole run, so every
-                    // remaining document would fail identically on the same instance: continuing
-                    // spends a doomed request per batch across the corpus in the first case, and
-                    // reports the same error N times in the second.
-                    append(.embed, "❌ \(error)")
-                    append(.embed, "run stopped — no further documents attempted")
-                    return
-                }
-            case .failure(let error):
-                // One unreadable file does not end the run — that is the library's departure from
-                // the Python engine, and this is where it shows.
-                failureCount += 1
-                append(.load, "⚠️ \(error)")
-            }
-        }
-        append(
-            .load,
-            "loaded \(documentCount) document(s) from \(sourcesProcessed) file(s), "
-                + "\(failureCount) failure(s)"
-        )
-        append(
-            .chunk,
-            "produced \(chunkCount) chunk(s) from \(documentCount) document(s), "
-                + "\(chunkFailureCount) failure(s)"
-        )
-        append(
-            .embed,
-            "embedded \(embeddedCount) of \(chunkCount) chunk(s), \(embedFailureCount) failure(s)"
-                + (vectorDimension.map { ", \($0) dimensions" } ?? "")
-                + (embeddedTokens > 0 ? ", \(embeddedTokens) tokens billed" : "")
-        )
-        appendPendingPhases()
-    }
-
-    /// - Throws: only when the *embedder* is unusable. A chunker failing one document is caught
-    ///   here and counted, because that is a per-document problem; an exhausted account is not.
-    private func chunk(
-        _ document: RTSRAGDocument,
-        with chunker: any RTSRAGChunker,
-        embedding: any RTSRAGEmbedding
-    ) async throws {
-        let chunks: [RTSRAGChunk]
+        // A fresh store directory per run, so repeated runs over different corpora do not stack up
+        // in one index — and so the model guard is not tripped by switching embedder between runs.
+        let storeDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RailtracksSwiftDemoRAGStore", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let writing: RTSRAGFileStore
         do {
-            chunks = try await chunker.chunk(document)
+            writing = try RTSRAGFileStore(directory: storeDirectory)
         } catch {
-            // A chunker failing one document does not end the run, matching how the loader treats
-            // one unreadable file.
-            chunkFailureCount += 1
-            append(.chunk, "⚠️ \(sourceLabel(document.source)): \(error)")
+            append(.store, "❌ \(error)")
             return
         }
-        chunkCount += chunks.count
-        if previewDocument == nil {
-            previewDocument = document
-            previewChunks = chunks
+        append(.store, "file store at \(storeDirectory.lastPathComponent)")
+
+        // What an app does: build the pieces, subscribe, call one method. The document loop, the
+        // chunk/embed calls and the commit rule all live in the runtime.
+        let runtime = RTSRAGRetrievalRuntime(embedder: embedding, store: writing)
+        self.runtime = runtime
+        subscribe(to: runtime)
+
+        do {
+            let stats = try await runtime.ingest(loader: progressLoader, chunker: chunking)
+            summarise(stats)
+        } catch {
+            // Only an unusable embedder or a store built by a different one reaches here; every
+            // per-document problem arrived as an event.
+            append(.embed, "❌ \(error)")
+            append(.embed, "run stopped — no further documents attempted")
         }
-        try await embed(chunks, from: document, with: embedding)
     }
 
-    /// Embeds one document's chunks, which is the pipeline's real unit: a document is embedded
-    /// whole before anything about it is committed, so a batch that never succeeds means simply
-    /// not committing rather than storing a partial document.
-    private func embed(
-        _ chunks: [RTSRAGChunk],
-        from document: RTSRAGDocument,
-        with embedding: any RTSRAGEmbedding
-    ) async throws {
-        guard !chunks.isEmpty else {
-            return
-        }
-        for outcome in try await embedding.embed(chunks) {
-            switch outcome {
-            case .embedded(let embedded, let metrics):
-                embeddedCount += embedded.count
-                embeddedTokens += metrics.inputTokens ?? 0
-                if vectorDimension == nil {
-                    vectorDimension = embedded.first?.vector.count
-                }
-            case .failed(let failure):
-                embedFailureCount += failure.chunks.count
+    /// Mirrors the runtime's events into the status log and the counters.
+    ///
+    /// Subscribing rather than being called back is what lets the UI watch a run it does not drive.
+    /// Delivery is asynchronous and order-preserving, so lines arrive in the order the pipeline
+    /// produced them without the pipeline ever waiting on SwiftUI.
+    private func subscribe(to runtime: RTSRAGRetrievalRuntime) {
+        subscription = runtime.eventPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.record(event)
+            }
+    }
+
+    private func record(_ event: RTSRAGIngestEvent) {
+        switch event {
+        case .documentLoaded:
+            documentCount += 1
+        case .documentSkipped(_, let source):
+            append(.load, "\(sourceLabel(source)) unchanged — skipped, nothing embedded")
+        case .documentChunked(_, let chunks):
+            chunkCount += chunks
+        case .batchEmbedded(_, let chunks, let metrics):
+            embeddedCount += chunks
+            if vectorDimension == nil {
+                vectorDimension = metrics.dimension
+            }
+        case .batchFailed(let failure):
+            append(
+                .embed,
+                "⚠️ [\(failure.kind)] \(failure.chunks.count) chunk(s) after "
+                    + "\(failure.attempts) attempt(s): \(failure.underlying)"
+            )
+        case .documentCommitted(_, let stored, let dropped):
+            storedCount += stored
+            if dropped > 0 {
+                append(.store, "committed with \(dropped) chunk(s) dropped — permanently unembeddable")
+            }
+        case .documentWithheld(_, let reason):
+            // Three outcomes needing three different responses, so they must not read the same.
+            // Telling someone to retry a document nothing will ever accept is the advice that
+            // wasted the most time while this screen was being built.
+            switch reason {
+            case .transient(let detail):
+                append(.store, "⚠️ not committed — \(detail); the previous version stays intact, retry may clear it")
+            case .unchunkable(let detail):
+                append(.chunk, "⚠️ not committed — \(detail); re-running will fail identically, pick another chunker")
+            case .unembeddable(let dropped):
                 append(
-                    .embed,
-                    "⚠️ \(sourceLabel(document.source)) [\(failure.kind)] "
-                        + "\(failure.chunks.count) chunk(s) after \(failure.attempts) attempt(s): "
-                        + failure.underlying
+                    .store,
+                    "⚠️ not committed — all \(dropped) chunk(s) permanently rejected; "
+                        + "re-running will fail identically, the content cannot be embedded as chunked"
                 )
             }
+        case .documentEmpty(_, let source):
+            // Chunk, not Load: the document arrived intact and it is the *chunker* that produced
+            // nothing. Attributing it to Load would point at the wrong phase to go and fix.
+            append(.chunk, "\(sourceLabel(source)) produced no chunks — nothing to index, stored version untouched")
+        case .loadFailed(let error):
+            failureCount += 1
+            append(.load, "⚠️ \(error)")
         }
+    }
+
+    private func summarise(_ stats: RTSRAGIngestionStats) {
+        append(
+            .load,
+            "loaded \(stats.documentsLoaded) document(s) from \(sourcesProcessed) file(s), "
+                + "\(failureCount) failure(s), \(stats.documentsSkipped) skipped"
+        )
+        append(.chunk, "produced \(stats.chunksCreated) chunk(s)")
+        append(
+            .embed,
+            "embedded \(stats.chunksEmbedded) chunk(s), \(stats.batchesFailed) batch failure(s)"
+                + (vectorDimension.map { ", \($0) dimensions" } ?? "")
+                // Tokens and latency are the two halves of what a run cost, and which half exists
+                // depends on the path: a metered provider reports tokens, an on-device run reports
+                // none and only latency says anything at all.
+                + (stats.inputTokens.map { ", \($0) tokens billed" } ?? "")
+                + String(format: ", %.1fs in the embedder", stats.embeddingLatency)
+        )
+        append(
+            .store,
+            "stored \(stats.chunksStored) chunk(s) across \(stats.documentsCommitted) document(s)"
+                + (stats.chunksDropped > 0 ? ", \(stats.chunksDropped) dropped" : "")
+                // Withheld documents belong in the totals, not only in the per-event lines: they
+                // are precisely what a re-run will pick up, so a reader deciding whether to run
+                // again needs the number without scrolling.
+                + (stats.documentsWithheld > 0 ? ", \(stats.documentsWithheld) withheld for retry" : "")
+                // Kept apart from the line above rather than added to it: one number is an
+                // invitation to run again and the others are instructions to change something.
+                + (stats.documentsUnchunkable > 0 ? ", \(stats.documentsUnchunkable) unchunkable" : "")
+                + (stats.documentsUnembeddable > 0 ? ", \(stats.documentsUnembeddable) unembeddable" : "")
+                + (stats.documentsEmpty > 0 ? ", \(stats.documentsEmpty) empty" : "")
+                + (stats.chunksStored > 0 ? " — ask a question below" : "")
+        )
+        // The invariant made visible. A shortfall means a document reached no outcome at all, which
+        // is a library bug rather than anything the corpus did — worth saying out loud on the one
+        // screen that watches whole runs.
+        if stats.documentsAccountedFor != stats.documentsLoaded {
+            append(
+                .store,
+                "⚠️ \(stats.documentsLoaded) document(s) loaded but only "
+                    + "\(stats.documentsAccountedFor) accounted for — please report this"
+            )
+        }
+        // One verdict rather than a wall of scrollback. `needsAttention` means "something went
+        // wrong", not "a re-run will not fix it" — some of these clear on their own and some never
+        // will, so the line reports the numbers and lets the per-document lines above give the
+        // advice, each of which already names its own remedy.
+        if stats.needsAttention {
+            append(
+                .store,
+                "⚠️ this run needs a look: \(stats.chunksDropped) chunk(s) dropped, "
+                    + "\(stats.documentsUnchunkable) document(s) no chunker would take, "
+                    + "\(stats.documentsUnembeddable) no embedder would take, "
+                    + "\(stats.documentsWithheld) withheld, "
+                    + "\(stats.failures.count) failure(s) recorded"
+            )
+        }
+    }
+
+
+    // MARK: - Retrieval
+
+    /// Embeds the question with the run's own embedder and searches what it stored.
+    ///
+    /// The same embedder deliberately: a store is only queryable by the model that wrote it, since
+    /// two models place the same text in different parts of the space and the scores would look
+    /// perfectly reasonable while meaning nothing.
+    func search() {
+        guard let runtime, !question.isEmpty else {
+            return
+        }
+        isSearching = true
+        results = []
+        searchNote = nil
+        let question = self.question
+        Task { [weak self] in
+            defer {
+                self?.isSearching = false
+            }
+            do {
+                // The runtime embeds the question with the same embedder that filled the store and
+                // searches in one call — the store refuses a foreign query vector, so there is
+                // nothing for the caller to check.
+                let result = try await runtime.retrieve(question, topK: 5)
+                self?.results = result.entries
+                self?.searchNote = result.entries.isEmpty ? "no matches" : nil
+            } catch {
+                self?.searchNote = "\(error)"
+            }
+        }
+    }
+
+    var canSearch: Bool {
+        runtime != nil && !question.isEmpty && !isSearching && !isRunning
     }
 
     private func noteSourceFinished(_ documents: [RTSRAGDocument]) {
@@ -625,12 +695,6 @@ class RAGViewModel {
         }
         let filePart = source.split(separator: "#", maxSplits: 1).first.map(String.init) ?? source
         return URL(fileURLWithPath: filePart).lastPathComponent
-    }
-
-    private func appendPendingPhases() {
-        for phase in Phase.allCases where !phase.isImplemented {
-            append(phase, phase.pendingNote)
-        }
     }
 
     // MARK: - Log
@@ -660,13 +724,11 @@ class RAGViewModel {
         documentCount = 0
         failureCount = 0
         chunkCount = 0
-        chunkFailureCount = 0
         embeddedCount = 0
-        embedFailureCount = 0
-        embeddedTokens = 0
+        storedCount = 0
+        results = []
+        searchNote = nil
         vectorDimension = nil
-        previewDocument = nil
-        previewChunks = []
     }
 
     /// Builds the chosen embedder, or reports why it cannot be built.

@@ -11,19 +11,21 @@ import RailtracksSwiftRAG
 /// Trigger and progress view for the RAG ingest pipeline.
 ///
 /// Deliberately phase-shaped rather than loader-shaped: the status log attributes every line to
-/// Resolve / Load / Chunk / Embed / Store, and names the three that do not exist yet, so the
-/// screen keeps working as each phase lands.
+/// Resolve / Load / Chunk / Embed / Store, so the screen reads the same whichever loader is
+/// driving it.
 struct RAGView: View {
     @State private var viewModel = RAGViewModel()
 
     var body: some View {
-        // The whole page scrolls: an expanded preview of a long document plus its chunks runs well
-        // past the window, and the status log's own scroll view only covers the log.
+        // The whole page scrolls: the pickers, the field toggles and a full set of search results
+        // run past the window together, and the status log's own scroll view only covers the log.
         ScrollView {
             VStack(spacing: 16) {
                 inputSection
                 Divider()
                 statusSection
+                Divider()
+                querySection
             }
             .padding()
         }
@@ -182,6 +184,7 @@ struct RAGView: View {
             + " · \(viewModel.documentCount) doc(s)"
             + " · \(viewModel.chunkCount) chunk(s)"
             + " · \(viewModel.embeddedCount) embedded"
+            + " · \(viewModel.storedCount) stored"
     }
 
     // MARK: - Status
@@ -205,12 +208,66 @@ struct RAGView: View {
             }
 
             statusLog
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            if let document = viewModel.previewDocument {
-                documentPreview(document)
+    /// Ask the stored corpus a question — the first point at which the whole pipeline is visible
+    /// end to end rather than as counters.
+    ///
+    /// The question is embedded by the *same* embedder that filled the store, which the view model
+    /// holds onto for exactly this reason: a store is only queryable by the model that wrote it.
+    private var querySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ask:")
+
+            HStack(spacing: 8) {
+                TextField("what does the document say about…", text: $viewModel.question)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        viewModel.search()
+                    }
+
+                Button("Search") {
+                    viewModel.search()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canSearch)
+
+                if viewModel.isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if let note = viewModel.searchNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(viewModel.results, id: \.entry.id) { hit in
+                resultRow(hit)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func resultRow(_ hit: RTSRAGRetrievedEntry) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            // The score is worth showing: it is the only signal separating a confident match from
+            // the best of a bad set, and retrieval always returns *something*.
+            Text("#\(hit.rank + 1)  score \(String(format: "%.3f", hit.score))  ·  \(hit.entry.content.count) chars")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(hit.entry.content.prefix(300) + (hit.entry.content.count > 300 ? "…" : ""))
+                .font(.system(.caption, design: .monospaced))
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .textSelection(.enabled)
+        }
     }
 
     /// A scrolling log rather than a `TextField`.
@@ -244,64 +301,6 @@ struct RAGView: View {
     }
 
     private static let logBottomAnchor = "rag-status-log-bottom"
-
-    /// The first document of the run. Worth showing because "document" means something different
-    /// per format — a whole file for text, a single row for CSV, one page for PDF — and the count
-    /// alone does not reveal that.
-    private func documentPreview(_ document: RTSRAGDocument) -> some View {
-        DisclosureGroup("First document", isExpanded: $viewModel.isShowingPreview) {
-            VStack(alignment: .leading, spacing: 4) {
-                previewRow("source", document.source ?? "nil")
-                previewRow("type", document.type.rawValue)
-                previewRow("id", document.id.description)
-                previewRow("metadata", document.metadata.isEmpty ? "none" : "\(document.metadata.count) key(s)")
-                excerpt(document.content)
-
-                // The chunks this document produced, which is where the two chunkers visibly
-                // differ: identity returns the document unchanged, sentence returns slices.
-                if !viewModel.previewChunks.isEmpty {
-                    Divider()
-                    previewRow("chunks", "\(viewModel.previewChunks.count)")
-                    ForEach(viewModel.previewChunks.prefix(3), id: \.id) { chunk in
-                        Text("[\(chunk.index)] \(chunk.content.count) chars")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        excerpt(chunk.content)
-                    }
-                    if viewModel.previewChunks.count > 3 {
-                        Text("…\(viewModel.previewChunks.count - 3) more")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.top, 4)
-        }
-        .font(.caption)
-    }
-
-    private func excerpt(_ content: String) -> some View {
-        Text(content.prefix(400) + (content.count > 400 ? "…" : ""))
-            .font(.system(.caption, design: .monospaced))
-            .padding(6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .textSelection(.enabled)
-    }
-
-    private func previewRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Text(label)
-                .foregroundStyle(.secondary)
-                .frame(width: 70, alignment: .leading)
-            Text(value)
-                .textSelection(.enabled)
-                .lineLimit(2)
-                .truncationMode(.middle)
-        }
-        .font(.caption)
-    }
 }
 
 #Preview {

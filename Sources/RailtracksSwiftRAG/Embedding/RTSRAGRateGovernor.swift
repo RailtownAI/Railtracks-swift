@@ -16,6 +16,10 @@ import Synchronization
 /// *which response means back off* is a few provider-specific lines. A custom Cohere, Voyage or
 /// Azure embedder reuses this and writes only its classifier.
 ///
+/// That describes the **type**, not an instance. One governor must never span two providers — see
+/// the scope rule below — and nothing here can catch it if it does, because
+/// ``recordSuccess(headroom:)`` takes a bare `Double` and cannot know which budget produced it.
+///
 /// The loop is AIMD — additive increase, multiplicative decrease — the same shape as TCP
 /// congestion control, so the permit count settles near what the provider tolerates rather than
 /// being guessed up front.
@@ -26,6 +30,33 @@ import Synchronization
 ///     try await send(request)
 /// }
 /// ```
+///
+/// ## One governor per (key, model), which is the unit a provider meters
+///
+/// Two embedders drawing on **one budget** must share one governor, or each probes upward on its
+/// own 429s and together they exceed a budget neither can observe. ``RTSRAGRateGovernorManager``
+/// applies that rule so a caller does not have to:
+///
+/// ```swift
+/// let governors = RTSRAGRateGovernorManager()
+/// let full = RTSRAGOpenAIEmbedding(apiKey: key, governors: governors)
+/// let narrow = RTSRAGOpenAIEmbedding(apiKey: key, dimensions: 256, governors: governors)
+/// ```
+///
+/// Those two produce vectors for different spaces — `dimensions` is part of
+/// ``RTSRAGEmbedding/modelIdentifier`` — so they belong in different stores while competing for one
+/// quota, and they get one governor. A different `model` or `apiKey` gets its own.
+///
+/// The governor is also injectable directly, for scoping one by hand.
+///
+/// **The pair is the scope, not the key, and never two providers.** OpenAI meters per API key *per
+/// model*, and `x-ratelimit-remaining-tokens` reports that model's budget — so a governor shared
+/// across `text-embedding-3-small` and `-large` would halve one model's concurrency on the other's
+/// 429 and steer its AIMD loop on headroom belonging to something else. Across two *providers* the
+/// same three things go wrong and none of them are visible: the permit pool is shared, so an idle
+/// provider's requests queue behind a busy one's; and since ``recordSuccess(headroom:)`` takes a
+/// plain fraction, one provider's remaining budget is silently applied as the other's. It compiles,
+/// runs, and converges on a rate that is correct for neither.
 ///
 /// - Note: ``RTSRAGAppleEmbedding`` composes none of this. On-device embedding has no quota and no
 ///   429; its constraint is a non-`Sendable` model that must not be used concurrently, which actor
