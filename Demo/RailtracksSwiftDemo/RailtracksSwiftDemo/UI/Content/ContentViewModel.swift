@@ -22,6 +22,7 @@ class ContentViewModel {
         case evaluation
         case vision
         case rag
+        case resumeSearch
     }
 
     var libVersion: String = RailtracksSwift.version

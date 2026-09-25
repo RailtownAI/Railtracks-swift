@@ -512,6 +512,10 @@ class RAGViewModel {
         do {
             let stats = try await runtime.ingest(loader: progressLoader, chunker: chunking)
             summarise(stats)
+            // The full path, last and only on success — it is what another tool needs to open this
+            // store, and a path printed before the run could name a store that ended up empty.
+            // Selectable in the log, so it can be copied straight into the Résumé Search tab.
+            append(.store, "store path: \(storeDirectory.path)")
         } catch {
             // Only an unusable embedder or a store built by a different one reaches here; every
             // per-document problem arrived as an event.

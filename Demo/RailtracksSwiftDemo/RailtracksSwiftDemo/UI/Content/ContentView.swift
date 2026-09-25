@@ -75,6 +75,12 @@ struct ContentView: View {
                 }
                 .background(viewModel.mode == .rag ? Color.accentColor.opacity(0.2) : Color.clear)
                 .buttonStyle(.bordered)
+
+                Button("Résumé Search") {
+                    viewModel.mode = .resumeSearch
+                }
+                .background(viewModel.mode == .resumeSearch ? Color.accentColor.opacity(0.2) : Color.clear)
+                .buttonStyle(.bordered)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -127,6 +133,8 @@ struct ContentView: View {
                 VisionView()
             case .rag:
                 RAGView()
+            case .resumeSearch:
+                ResumeSearchView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
