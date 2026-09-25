@@ -17,6 +17,8 @@ swift package clean
 
 The Demo app is an Xcode project at `Demo/RailtracksSwiftDemo/RailtracksSwiftDemo.xcodeproj` and must be built/run through Xcode.
 
+It has two app targets over the same source folder. `RailtracksSwiftDemo` (macOS 15.6 / iOS 18.6) is the main one. `RailtracksSwiftDemoOS27` (macOS / iOS 27) is the same app plus the OS 27-only demos — today `Math(Claude)` — and is the only target that links `ClaudeForFoundationModels`: Swift refuses to import a module whose minimum OS is above the importing target's, `@available` or not. OS 27-only demo folders (`UI/MathClaude/`) are excluded from the main target by membership; the few lines in the shared `ContentView` / `ContentViewModel` that mention them sit behind `#if OS27`, a flag only the OS 27 target sets. Its bundle id differs, so its keychain is separate and it asks for the Anthropic key again on first use.
+
 OpenAI API key is stored in the Keychain under service `ai.railtown.RailtracksSwiftDemo`, account `openai-api-key`. The demo app prompts for the key on first launch via `APIKeySetupView` and reads it via `KeychainHelper.readOpenAIKey()`.
 
 ## Coding style

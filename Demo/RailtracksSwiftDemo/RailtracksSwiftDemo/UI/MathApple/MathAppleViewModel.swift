@@ -14,7 +14,7 @@ import Logging
 @available(macOS 26, iOS 26, *)
 @Observable
 class MathAppleViewModel {
-    let prompt: String = "What is 50 + 20 x 8 - 4? Give me the final answer in a single number without any description."
+    let prompt: String = MathToolsPrompt.prompt
     var promptResult: String = ""
     var isRunning = false
 
@@ -58,14 +58,7 @@ class MathAppleViewModel {
                 llmProvider: .appleAI,
                 name: "AppleAI Math Assistant Agent",
                 tools: tools,
-                systemMessage: "You are a Math assistant. " +
-                "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +
-                "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. " +
-                "If there is multiplication in the math, you must use the provided multiplication tool to perform the calculation. " +
-                "If there is division in the math, you must use the provided division tool to perform the calculation. " +
-                "You will use the tools in proper sequence and wait for result of multiplication and division tools before using addition and subtraction tools." +
-                "You must use these tools one at a time and not run them in parallel." +
-                "You will calculate simple math problem asked by user."
+                systemMessage: MathToolsPrompt.systemMessage
             )
 
             Log.debug("starting prompt, waiting for response...")

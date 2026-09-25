@@ -10,6 +10,20 @@ import RailtracksSwift
 import FoundationModels
 import Logging
 
+/// The prompt and system message shared by the tool-using math demos (AppleAI and Claude), so each
+/// demo sends identical text and their traces compare like for like.
+enum MathToolsPrompt {
+    static let prompt = "What is 50 + 20 x 8 - 4? Give me the final answer in a single number without any description."
+    static let systemMessage = "You are a Math assistant. " +
+        "If there is addition in the math, you must use the provided addition tool to perform the calculation. " +
+        "If there is subtraction in the math, you must use the provided subtraction tool to perform the calculation. " +
+        "If there is multiplication in the math, you must use the provided multiplication tool to perform the calculation. " +
+        "If there is division in the math, you must use the provided division tool to perform the calculation. " +
+        "You will use the tools in proper sequence and wait for result of multiplication and division tools before using addition and subtraction tools." +
+        "You must use these tools one at a time and not run them in parallel." +
+        "You will calculate simple math problem asked by user."
+}
+
 @available(macOS 26, iOS 26, *)
 struct AdditionToolApple: RTSAppleAIToolNode {
     typealias Output = String

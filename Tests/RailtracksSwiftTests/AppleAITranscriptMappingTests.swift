@@ -316,6 +316,54 @@ struct FoundationModelProviderTests {
     }
 }
 
+// MARK: - One model call, one message
+
+@Suite("FoundationModels assistant-message merging")
+struct AssistantMessageMergingTests {
+
+    private func message(_ role: RTSMessage.Role, _ text: String) -> RTSMessage {
+        RTSMessage(
+            id: UUID(),
+            role: role,
+            content: .text(text),
+            timestamp: Date(),
+            metadata: nil,
+            runID: nil
+        )
+    }
+
+    /// The shape of a live Claude run: each tool call is preceded by narration from the same model
+    /// call, which the transcript records as a separate `.response` entry.
+    @Test("Narration and the tool call beside it become one assistant message")
+    func narrationMergesWithToolCall() {
+        let merged = mergingConsecutiveAssistantMessages([
+            message(.user, "What is 50 + 20 x 8 - 4?"),
+            message(.assistant, "Step 1: 20 x 8"),
+            message(.assistant, #"Multiplication: {"b": 8, "a": 20}"#),
+            message(.tool, "[Multiplication] 160"),
+            message(.assistant, "Step 2: 50 + 160"),
+            message(.assistant, #"Addition: {"b": 160, "a": 50}"#),
+            message(.tool, "[Addition] 210"),
+            message(.assistant, "206"),
+        ])
+
+        #expect(merged.map(\.role) == [.user, .assistant, .tool, .assistant, .tool, .assistant])
+        #expect(merged[1].content.textValue == "Step 1: 20 x 8\nMultiplication: {\"b\": 8, \"a\": 20}")
+        #expect(merged[5].content.textValue == "206")
+    }
+
+    @Test("Assistant messages separated by a tool result stay separate")
+    func toolResultSeparatesCalls() {
+        let messages = [
+            message(.assistant, "Addition: {}"),
+            message(.tool, "[Addition] 3"),
+            message(.assistant, "3"),
+        ]
+
+        #expect(mergingConsecutiveAssistantMessages(messages).count == 3)
+    }
+}
+
 // MARK: - Stamping one respond's messages
 
 @Suite("FoundationModels message stamping")
