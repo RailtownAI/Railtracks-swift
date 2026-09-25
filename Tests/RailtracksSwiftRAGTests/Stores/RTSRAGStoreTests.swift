@@ -301,6 +301,54 @@ struct RTSRAGStoreTests {
         #expect(hits.map { $0.entry.content } == ["revision 29"])
     }
 
+    @Test("a failed compaction does not fail the write")
+    func fileStoreSurvivesAFailedCompaction() async throws {
+        guard getuid() != 0 else {
+            return
+        }
+        let scratch = try Scratch()
+        defer {
+            scratch.clean()
+        }
+        let store = try RTSRAGFileStore(directory: scratch.directory)
+        let documentID = RTSRAGDocumentID(UUID())
+        let url = scratch.directory.appendingPathComponent("entries.jsonl")
+        // One write first, so the log exists and appends to it keep working below.
+        try await store.replaceDocument(
+            id: documentID,
+            with: [Self.entry(documentID: documentID, index: 0, content: "revision 0", vector: [1, 0, 0])]
+        )
+
+        // A read-only directory still allows appending to the existing file, but not creating the
+        // temp file an `.atomic` write renames into place — so every compaction fails and every
+        // append succeeds.
+        let attributes: [FileAttributeKey: Any] = [.posixPermissions: 0o555]
+        try FileManager.default.setAttributes(attributes, ofItemAtPath: scratch.directory.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: scratch.directory.path
+            )
+        }
+        for revision in 1..<31 {
+            try await store.replaceDocument(
+                id: documentID,
+                with: [Self.entry(documentID: documentID, index: 0, content: "revision \(revision)", vector: [1, 0, 0])]
+            )
+        }
+
+        // Every write landed, and none was compacted away: compaction is maintenance, so its
+        // failure leaves a longer log rather than a failed write.
+        let lines = try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+        let hits = try await store.search(Self.query([1, 0, 0], topK: 10))
+        let reopened = try RTSRAGFileStore(directory: scratch.directory)
+        let reopenedHits = try await reopened.search(Self.query([1, 0, 0], topK: 10))
+        #expect(lines.count == 31)
+        #expect(hits.map { $0.entry.content } == ["revision 30"])
+        #expect(reopenedHits.map { $0.entry.content } == ["revision 30"])
+    }
+
     @Test("a refused append costs one document, not the log")
     func fileStoreSurvivesARefusedAppend() async throws {
         guard getuid() != 0 else {

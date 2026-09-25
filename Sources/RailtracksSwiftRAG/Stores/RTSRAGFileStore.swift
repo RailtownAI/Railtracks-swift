@@ -120,6 +120,8 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
     ///   the document, because a write changes more than the document: the *first* one also latches
     ///   the store's model and dimension, and undoing only the document left an empty store pinned
     ///   to a model whose single document was never written.
+    ///
+    /// Compaction comes after the commit and cannot fail it — see ``compactIfNeeded()``.
     private func apply(_ entries: [RTSRAGStoreEntry], to id: RTSRAGDocumentID) throws {
         let snapshot = index.snapshot(of: id)
         try index.replace(documentID: id, with: entries)
@@ -129,7 +131,7 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
             index.restore(snapshot, for: id)
             throw error
         }
-        try compactIfNeeded()
+        compactIfNeeded()
     }
 
     /// Reads the log back into a document map, last write winning.
@@ -188,21 +190,38 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
     ///
     /// Twice the live count is the trigger: an edit-heavy corpus would otherwise grow without
     /// bound, since every replacement appends rather than editing in place.
-    private func compactIfNeeded() throws {
+    ///
+    /// Runs only from ``apply(_:to:)``, after a write has landed — never on open or on a read, so a
+    /// store opened over a bloated log stays that way until its next write.
+    ///
+    /// **Does not throw.** A failure is logged and the log is left uncompacted: larger than it
+    /// should be, but complete and consistent. ``lineCount`` resets only on success, so the next
+    /// write retries.
+    private func compactIfNeeded() {
         let live = index.documents.count
         guard lineCount > max(8, live * 2) else {
             return
         }
-        let encoder = JSONEncoder()
-        var data = Data()
-        for (id, entries) in index.documents {
-            data.append(try encoder.encode(Record(documentID: id, entries: entries)))
-            data.append(0x0A)
+        do {
+            let encoder = JSONEncoder()
+            var data = Data()
+            for (id, entries) in index.documents {
+                data.append(try encoder.encode(Record(documentID: id, entries: entries)))
+                data.append(0x0A)
+            }
+            // Atomic, so a crash during compaction leaves the old log intact rather than a partial
+            // rewrite — the one place this store gets filesystem-level atomicity, and it is worth
+            // having here because compaction touches every document at once.
+            try data.write(to: fileURL, options: .atomic)
+        } catch {
+            // Not rethrown: the document that triggered this is already in the log and the index,
+            // and the atomic write left the old log intact. Throwing would report a durable write
+            // as failed — and with a lasting cause, every later write too.
+            ragLog.warning(
+                "📚 compacting \(fileURL.lastPathComponent) failed, keeping the uncompacted log (\(lineCount) lines, \(live) live documents): \(error)"
+            )
+            return
         }
-        // Atomic, so a crash during compaction leaves the old log intact rather than a partial
-        // rewrite — the one place this store gets filesystem-level atomicity, and it is worth
-        // having here because compaction touches every document at once.
-        try data.write(to: fileURL, options: .atomic)
         lineCount = live
     }
 }
