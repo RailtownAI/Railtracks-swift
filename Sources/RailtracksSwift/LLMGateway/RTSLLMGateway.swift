@@ -63,6 +63,9 @@ public struct RTSLLMGateway: Sendable {
                 sessionFactory: nil
             )
 
+        // XCODE26-SDK: `sessionFactory()` needs the OS 27 SDK (Xcode 27, Swift 6.4). Built with an
+        // older SDK nothing can construct a `.foundationModel`, so this branch is unreachable there.
+        #if compiler(>=6.4)
         case .foundationModel(let languageModel):
             guard #available(macOS 27, iOS 27, *) else {
                 throw RTSError.providerUnavailable(
@@ -76,6 +79,12 @@ public struct RTSLLMGateway: Sendable {
                 onNewSession: onNewSession,
                 sessionFactory: try languageModel.sessionFactory()
             )
+        #else
+        case .foundationModel:
+            throw RTSError.providerUnavailable(
+                "\(provider) (FoundationModels LanguageModel) requires building with the OS 27 SDK (Xcode 27)"
+            )
+        #endif
 
         case .openAI(modelIDString: let modelIDString):
             guard let apiKey = apiKeys[provider.kind] else {

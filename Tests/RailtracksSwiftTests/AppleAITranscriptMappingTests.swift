@@ -152,6 +152,8 @@ struct AppleAITranscriptMappingTests {
         #expect(message.content.textValue == "[add] 3")
     }
 
+    // XCODE26-SDK: `Transcript.Reasoning` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+    #if compiler(>=6.4)
     /// Reasoning is not a message: as one it would count as an extra round trip in `llm_details`.
     @Test("A reasoning entry is not turned into a message")
     func reasoningIsSkipped() {
@@ -164,6 +166,7 @@ struct AppleAITranscriptMappingTests {
 
         #expect(reasoning.toRTSMessage() == nil)
     }
+    #endif
 
     // MARK: - Structured output
 
@@ -225,6 +228,9 @@ struct AppleAITranscriptMappingTests {
 
 // MARK: - .foundationModel provider
 
+// XCODE26-SDK: every test here builds an `RTSFoundationLanguageModel` from `SystemLanguageModel`
+// as a `LanguageModel`, which needs the OS 27 SDK (Xcode 27, Swift 6.4).
+#if compiler(>=6.4)
 @Suite("FoundationModels provider")
 struct FoundationModelProviderTests {
 
@@ -315,6 +321,7 @@ struct FoundationModelProviderTests {
         }
     }
 }
+#endif
 
 // MARK: - One model call, one message
 

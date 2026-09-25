@@ -28,6 +28,10 @@ import FoundationModels
 ///
 /// The model is stored type-erased, so `RTSLLMProvider` carries no availability annotation; only
 /// this initializer does.
+///
+/// Built with an SDK older than OS 27 (Xcode 26), `LanguageModel` does not exist, so neither does
+/// the initializer: the type is there, keeping `RTSLLMProvider.foundationModel` in every build, but
+/// nothing can construct it.
 public struct RTSFoundationLanguageModel: Sendable {
     /// Who serves the model — not how it is reached. Claude through Foundation Models is
     /// `.anthropic`, which makes pricing, `llm.*` events, the flow-graph trace and the evaluation
@@ -40,6 +44,8 @@ public struct RTSFoundationLanguageModel: Sendable {
     /// Always an `any LanguageModel`, set only by the OS 27 initializer.
     let model: any Sendable
 
+    // XCODE26-SDK: `LanguageModel` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+    #if compiler(>=6.4)
     @available(macOS 27, iOS 27, *)
     public init(
         _ model: some LanguageModel,
@@ -50,8 +56,11 @@ public struct RTSFoundationLanguageModel: Sendable {
         self.kind = kind
         self.modelID = modelID
     }
+    #endif
 }
 
+// XCODE26-SDK: as above — this builds on `LanguageModel` and `init(model:tools:instructions:)`.
+#if compiler(>=6.4)
 @available(macOS 27, iOS 27, *)
 extension RTSFoundationLanguageModel {
     /// A factory building each `LanguageModelSession` on this model, for `AppleAISession`.
@@ -65,3 +74,4 @@ extension RTSFoundationLanguageModel {
         }
     }
 }
+#endif

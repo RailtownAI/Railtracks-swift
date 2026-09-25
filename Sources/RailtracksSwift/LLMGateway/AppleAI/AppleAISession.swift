@@ -126,6 +126,9 @@ final class AppleAISession: @unchecked Sendable {
     private static func sessionTokenTotals(
         of session: LanguageModelSession
     ) -> TokenTotals? {
+        // XCODE26-SDK: `usage` exists only in the OS 27 SDK (Xcode 27, Swift 6.4); `@available`
+        // cannot hide a symbol the SDK being compiled against does not declare.
+        #if compiler(>=6.4)
         // OS26-FLOOR: `LanguageModelSession.usage` is OS 27 API.
         guard #available(macOS 27, iOS 27, *) else {
             return nil
@@ -134,6 +137,9 @@ final class AppleAISession: @unchecked Sendable {
             input: session.usage.input.totalTokenCount,
             output: session.usage.output.totalTokenCount
         )
+        #else
+        return nil
+        #endif
     }
 
     /// Token counts and latency for one `respond`.
@@ -153,6 +159,9 @@ final class AppleAISession: @unchecked Sendable {
         startedAt: Date,
         sessionUsage: (before: TokenTotals?, after: TokenTotals?)
     ) -> AppleAIResponse {
+        // XCODE26-SDK: `Response.usage` exists only in the OS 27 SDK (Xcode 27, Swift 6.4). Built
+        // with an older SDK, only the Mirror probe is available.
+        #if compiler(>=6.4)
         // OS26-FLOOR: `Response.usage` is OS 27 API. Below that, fall back to the Mirror probe;
         // delete this guard and `extractResponseMetrics` once OS 26 is dropped.
         guard #available(macOS 27, iOS 27, *) else {
@@ -170,6 +179,9 @@ final class AppleAISession: @unchecked Sendable {
             outputTokens: usage?.output,
             latency: latency
         )
+        #else
+        return extractResponseMetrics(from: response, text: text)
+        #endif
     }
 
     /// The session-usage delta across the `respond` when it is a plausible sum of every call, or
@@ -375,6 +387,9 @@ extension Transcript.Entry {
                 metadata: nil,
                 runID: nil
             )
+        // XCODE26-SDK: `.reasoning` exists only in the OS 27 SDK (Xcode 27, Swift 6.4). An older
+        // SDK cannot produce the entry either, so leaving the case out there loses nothing.
+        #if compiler(>=6.4)
         case .reasoning(let reasoning):
             // OS 27: a model's thinking, e.g. Claude's adaptive thinking. Deliberately not a
             // message — `RTSLLMRoundTrip` makes one round trip per assistant message, so mapping it
@@ -384,6 +399,7 @@ extension Transcript.Entry {
             // become a way around what the trace keeps out (see the AppleAI PII guardrail).
             log.debug("🍎 reasoning entry skipped: \(joinedText(of: reasoning.segments).count) characters")
             return nil
+        #endif
         @unknown default:
             log.debug("🍎 toRTSMessage: unhandled Transcript.Entry case: \(self)")
             return nil
