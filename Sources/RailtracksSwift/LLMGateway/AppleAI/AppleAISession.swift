@@ -121,7 +121,8 @@ final class AppleAISession: @unchecked Sendable {
         }
     }
 
-    /// The session's running token totals, or `nil` below OS 27.
+    /// The session's usage: the total tokens across every run so far within this session — a
+    /// running total, not the latest run's. `nil` below OS 27.
     private static func sessionTokenTotals(
         of session: LanguageModelSession
     ) -> TokenTotals? {
@@ -142,8 +143,8 @@ final class AppleAISession: @unchecked Sendable {
     /// final call alone and missed the three tool-calling calls before it. So the counts come from
     /// the change in the session's running `usage` across the `respond`. That the session total
     /// accumulates every call is itself not documented, so it is checked: a delta smaller than
-    /// `Response.usage` cannot be a sum that includes it, and then `Response.usage` is used with a
-    /// warning that the counts are a lower bound.
+    /// `Response.usage` cannot be a sum that includes it, and then the counts are reported as
+    /// unknown (`nil`) rather than as a figure that is silently too low.
     ///
     /// Latency is wall clock: FoundationModels reports no duration.
     private func responseMetrics<Content>(
@@ -162,24 +163,38 @@ final class AppleAISession: @unchecked Sendable {
             input: response.usage.input.totalTokenCount,
             output: response.usage.output.totalTokenCount
         )
-        let usage = respondUsage(lastCall: lastCall, sessionUsage: sessionUsage)
+        let usage = Self.respondUsage(lastCall: lastCall, sessionUsage: sessionUsage)
         return AppleAIResponse(
             text: text,
-            inputTokens: usage.input,
-            outputTokens: usage.output,
+            inputTokens: usage?.input,
+            outputTokens: usage?.output,
             latency: latency
         )
     }
 
-    /// The session-usage delta across the `respond` when it is a plausible sum of every call,
-    /// otherwise `Response.usage` — see ``responseMetrics(from:text:startedAt:sessionUsage:)``.
-    private func respondUsage(
+    /// The session-usage delta across the `respond` when it is a plausible sum of every call, or
+    /// `nil` when it cannot be trusted — see ``responseMetrics(from:text:startedAt:sessionUsage:)``.
+    ///
+    /// Deliberately not a fallback to `Response.usage`: that covers only the last model call, so on
+    /// a respond with N tool-calling turns it would report roughly 1/N of the real tokens and cost,
+    /// with nothing in the trace to say so.
+    ///
+    /// - Parameters:
+    ///   - lastCall: `Response.usage` — the tokens of the run's last model call only.
+    ///   - sessionUsage: the session's usage — the total tokens across every run so far within this
+    ///     session — read just before this run (`before`) and just after it returns (`after`). The
+    ///     model calls in between are not observable: Apple's session drives the tool loop inside
+    ///     `respond`.
+    static func respondUsage(
         lastCall: TokenTotals,
         sessionUsage: (before: TokenTotals?, after: TokenTotals?)
-    ) -> TokenTotals {
+    ) -> TokenTotals? {
         guard let before = sessionUsage.before, let after = sessionUsage.after else {
-            return lastCall
+            return nil
         }
+        // The total tokens between before and after this run: every model call the run made,
+        // however many — one for a plain answer, several when tools are called. Measured once per
+        // run, never between the calls inside it.
         let sessionDelta = TokenTotals(
             input: after.input - before.input,
             output: after.output - before.output
@@ -188,11 +203,11 @@ final class AppleAISession: @unchecked Sendable {
         guard sessionDelta.input >= lastCall.input, sessionDelta.output >= lastCall.output else {
             log.warning(
                 """
-                ⚠️🍎 session usage delta \(sessionDelta) is below Response.usage \(lastCall); \
-                reporting the latter, which may cover only the last model call
+                ⚠️🍎 session usage delta \(sessionDelta) is below Response.usage \(lastCall), so it \
+                is not a total of every model call; reporting token counts as unknown
                 """
             )
-            return lastCall
+            return nil
         }
         return sessionDelta
     }

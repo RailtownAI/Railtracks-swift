@@ -364,6 +364,67 @@ struct AssistantMessageMergingTests {
     }
 }
 
+// MARK: - Trusting the session usage delta
+
+@Suite("FoundationModels usage delta")
+struct FoundationModelsUsageDeltaTests {
+
+    /// The last call of a four-call respond, from the live Claude run.
+    @available(macOS 26, iOS 26, *)
+    private var lastCall: AppleAISession.TokenTotals {
+        AppleAISession.TokenTotals(input: 1506, output: 4)
+    }
+
+    @Test("A delta covering the last call is reported as the respond's total")
+    func plausibleDeltaIsUsed() throws {
+        guard #available(macOS 26, iOS 26, *) else {
+            return
+        }
+        let usage = AppleAISession.respondUsage(
+            lastCall: lastCall,
+            sessionUsage: (
+                before: AppleAISession.TokenTotals(input: 100, output: 10),
+                after: AppleAISession.TokenTotals(input: 5400, output: 360)
+            )
+        )
+
+        let total = try #require(usage)
+        #expect(total.input == 5300)
+        #expect(total.output == 350)
+    }
+
+    /// Smaller than the last call alone, so it cannot be a total that includes it. Reporting
+    /// `Response.usage` instead would silently cover one call of four.
+    @Test("A delta below the last call is reported as unknown, not as the last call")
+    func implausibleDeltaIsUnknown() {
+        guard #available(macOS 26, iOS 26, *) else {
+            return
+        }
+        let usage = AppleAISession.respondUsage(
+            lastCall: lastCall,
+            sessionUsage: (
+                before: AppleAISession.TokenTotals(input: 5000, output: 300),
+                after: AppleAISession.TokenTotals(input: 5500, output: 302)
+            )
+        )
+
+        #expect(usage == nil)
+    }
+
+    @Test("Missing session totals are reported as unknown")
+    func missingTotalsAreUnknown() {
+        guard #available(macOS 26, iOS 26, *) else {
+            return
+        }
+        let usage = AppleAISession.respondUsage(
+            lastCall: lastCall,
+            sessionUsage: (before: nil, after: nil)
+        )
+
+        #expect(usage == nil)
+    }
+}
+
 // MARK: - Stamping one respond's messages
 
 @Suite("FoundationModels message stamping")

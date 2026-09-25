@@ -319,7 +319,9 @@ private extension RTSMessage {
             tokenCount: output ?? existing?.tokenCount,
             inputTokenCount: input ?? existing?.inputTokenCount,
             generationTime: latency ?? existing?.generationTime,
-            model: existing?.model ?? model,
+            // New values win throughout — as for the counts above — so `model` and
+            // `providerName` always come from the same stamping pass and cannot disagree.
+            model: model ?? existing?.model,
             providerName: providerName ?? existing?.providerName,
             tokensPerSecond: existing?.tokensPerSecond,
             providerExtra: existing?.providerExtra,
