@@ -132,6 +132,19 @@ struct RTSRAGSpotlightTests {
         #expect(query.contains(" && "))
     }
 
+    @Test("the search filter matches the namespace the staleness query uses")
+    func searchFilterMatchesNamespace() {
+        let feeder = RTSRAGSpotlightFeeder(indexing: FakeSpotlightIndex(), namespace: "app.rag")
+        let staleness = RTSRAGSpotlightFeeder.stalenessQuery(
+            namespace: "app.rag",
+            source: "/s",
+            contentHash: "h"
+        )
+
+        #expect(feeder.searchFilter == #"rtsragNamespace == "app.rag""#)
+        #expect(staleness.hasPrefix(feeder.searchFilter))
+    }
+
     // MARK: - Feeder
 
     @Test("replacing deletes the domain before indexing, so a shrunk document keeps no stragglers")

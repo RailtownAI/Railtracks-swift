@@ -111,6 +111,19 @@ public struct RTSRAGSpotlightFeeder: Sendable {
         try await indexing.deleteItems(inDomains: [namespace])
     }
 
+    // MARK: - Searching
+
+    /// A Spotlight query predicate matching only this feeder's items.
+    ///
+    /// For a caller's own search — `CSSearchQueryContext.filterQueries` or
+    /// `CSUserQueryContext.filterQueries` — so results cannot include anything else the app
+    /// donates. Offered here rather than left for the caller to spell, because the attribute it
+    /// filters on is this module's own and its name is not public.
+    public var searchFilter: String {
+        let key = RTSRAGSpotlightAttribute.namespace.rawValue
+        return "\(key) == \"\(RTSRAGSpotlightFeeder.escapedQueryValue(namespace))\""
+    }
+
     // MARK: - Staleness
 
     /// Whether Spotlight already holds this source, at this content, in full.
