@@ -202,7 +202,7 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
         stats.chunksCreated += chunks.count
         emitter.emit(.documentChunked(id: document.id, chunks: chunks.count))
 
-        let stamped = stamp(chunks, from: document)
+        let stamped = RTSRAGChunk.stamped(chunks, from: document)
         var embedded: [RTSRAGEmbeddedChunk] = []
         var droppedChunks = 0
         var withheldReason: String?
@@ -394,19 +394,5 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
             return false
         }
         return try await store.count(matching: filters) >= expected
-    }
-
-    /// Writes the staleness metadata every later run reads back.
-    private func stamp(_ chunks: [RTSRAGChunk], from document: RTSRAGDocument) -> [RTSRAGChunk] {
-        chunks.map { chunk in
-            var chunk = chunk
-            if let source = document.source {
-                chunk.metadata[RTSRAGChunk.MetadataKey.sourcePath] = .string(source)
-            }
-            if let hash = document.contentHash {
-                chunk.metadata[RTSRAGChunk.MetadataKey.contentHash] = .string(hash)
-            }
-            return chunk
-        }
     }
 }
