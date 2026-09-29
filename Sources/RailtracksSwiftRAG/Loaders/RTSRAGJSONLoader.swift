@@ -45,7 +45,7 @@ public struct RTSRAGJSONLoader: RTSRAGDocumentLoader {
         let idKey = self.idKey
         let ignoreKeys = self.ignoreKeys
         let separator = self.contentSeparator
-        return RTSRAGDocumentStream(sources: resolved) { url in
+        return RTSRAGDocumentStream(sources: resolved, root: path) { url in
             try RTSRAGJSONLoader.makeDocuments(
                 at: url,
                 contentKeys: contentKeys,

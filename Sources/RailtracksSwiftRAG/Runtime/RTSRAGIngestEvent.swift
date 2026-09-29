@@ -37,6 +37,10 @@ public enum RTSRAGIngestEvent: Sendable {
     case documentEmpty(id: RTSRAGDocumentID, source: String?)
     /// A source the loader could not read. One file, not the run.
     case loadFailed(RTSRAGError)
+    /// Removed from the store: an orphan the run's root covered but the run did not see — a file
+    /// moved away, or a page or row that is no longer there — or a document an explicit
+    /// `removeSource(at:)` named. See `docs/rag-orphan-sweep.md`.
+    case documentSwept(id: RTSRAGDocumentID, source: String?)
 }
 
 // MARK: - RTSRAGWithholdReason

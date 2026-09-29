@@ -52,15 +52,23 @@ public final class RTSRAGSpotlightIngestRuntime: @unchecked Sendable {
 
     // MARK: - Ingest
 
-    /// Reads, chunks and donates everything `loader` produces.
+    /// Reads, chunks and donates everything `loader` produces, then sweeps orphans.
     ///
+    /// The sweep follows the same rule as ``RTSRAGRetrievalRuntime``'s: once the loader has been
+    /// read to the end, donated documents under its root that the run did not see are removed,
+    /// keeping any a sanitizer dropped or whose source failed to load. The feeder's namespace is
+    /// the scope. See `docs/rag-orphan-sweep.md`.
+    ///
+    /// - Parameter sweepsOrphans: `false` skips the sweep for this run.
     /// - Throws: ``RTSRAGError/ingestAlreadyRunning`` if this runtime is already ingesting, or when
     ///   the loader cannot start. Per-document problems — including a failed donation — are
-    ///   reported as events and counted in the returned stats; they do not end the run.
+    ///   reported as events and counted in the returned stats; they do not end the run. Nor does a
+    ///   failed sweep, which is counted in ``RTSRAGIngestionStats/sweepFailures``.
     @discardableResult
     public func ingest(
         loader: any RTSRAGDocumentLoader,
-        chunker: any RTSRAGChunker
+        chunker: any RTSRAGChunker,
+        sweepsOrphans: Bool = true
     ) async throws -> RTSRAGIngestionStats {
         // The claim throws before the `defer` is installed, so a refused second call cannot release
         // the slot the first one holds.
@@ -73,7 +81,9 @@ public final class RTSRAGSpotlightIngestRuntime: @unchecked Sendable {
         var seen = Set<RTSRAGDocumentID>()
 
         do {
-            for await element in try loader.stream() {
+            // Held rather than iterated inline, so the sweep can read what it covered and recorded.
+            let stream = try loader.stream()
+            for await element in stream {
                 try Task.checkCancellation()
                 switch element {
                 case .failure(let error):
@@ -90,6 +100,14 @@ public final class RTSRAGSpotlightIngestRuntime: @unchecked Sendable {
                     record(outcome, for: document, into: &stats)
                 }
             }
+            if sweepsOrphans, let root = stream.root, !Task.isCancelled {
+                await sweepOrphans(
+                    under: RTSRAGSourceRoot(root),
+                    seen: seen,
+                    stream: stream,
+                    into: &stats
+                )
+            }
         } catch {
             // Drained on the way out too: delivery is asynchronous, so without it the throw would
             // overtake the events that explain it.
@@ -103,6 +121,58 @@ public final class RTSRAGSpotlightIngestRuntime: @unchecked Sendable {
     /// Removes one document's chunks from Spotlight.
     public func deleteDocument(id: RTSRAGDocumentID) async throws {
         try await feeder.deleteDocument(id: id)
+    }
+
+    /// Removes every donated document whose source is `url`, or lies inside it.
+    ///
+    /// For a deleted file, which the automatic sweep cannot tell from one the app lost access to.
+    /// Works on a path that no longer exists.
+    ///
+    /// - Returns: how many documents were removed, each announced as
+    ///   ``RTSRAGIngestEvent/documentSwept(id:source:)``.
+    @discardableResult
+    public func removeSource(at url: URL) async throws -> Int {
+        let donated = try await feeder.documents(under: RTSRAGSourceRoot(url))
+        for (id, source) in donated.sorted(by: { $0.value < $1.value }) {
+            try await feeder.deleteDocument(id: id)
+            emitter.emit(.documentSwept(id: id, source: source))
+        }
+        await emitter.drain()
+        return donated.count
+    }
+
+    /// The orphan sweep, by ``RTSRAGOrphanSweep``'s rule. Never throws — the ingest has already
+    /// succeeded, and a surviving orphan is swept by the next run.
+    private func sweepOrphans(
+        under root: RTSRAGSourceRoot,
+        seen: Set<RTSRAGDocumentID>,
+        stream: RTSRAGDocumentStream,
+        into stats: inout RTSRAGIngestionStats
+    ) async {
+        let donated: [RTSRAGDocumentID: String]
+        do {
+            donated = try await feeder.documents(under: root)
+        } catch {
+            ragLog.warning("📚 orphan sweep could not list \(root.path) in Spotlight: \(error)")
+            stats.sweepFailures += 1
+            return
+        }
+        let orphans = RTSRAGOrphanSweep.orphans(
+            stored: donated,
+            seen: seen,
+            filtered: stream.ledger.filteredDocuments,
+            failedSources: stream.ledger.failedSources
+        )
+        for orphan in orphans {
+            do {
+                try await feeder.deleteDocument(id: orphan.id)
+                stats.documentsSwept += 1
+                emitter.emit(.documentSwept(id: orphan.id, source: orphan.source))
+            } catch {
+                ragLog.warning("📚 orphan sweep could not remove \(orphan.source): \(error)")
+                stats.sweepFailures += 1
+            }
+        }
     }
 
     /// Removes every chunk the feeder's namespace holds.

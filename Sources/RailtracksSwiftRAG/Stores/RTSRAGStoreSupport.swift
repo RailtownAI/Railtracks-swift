@@ -248,6 +248,31 @@ struct RTSRAGStoreIndex {
         return total
     }
 
+    /// Stored documents under `root` in exactly `scope`, with their sources — for the orphan sweep.
+    ///
+    /// Per document rather than per entry: a document's entries share one source and one scope,
+    /// having been written together by one replacement, so its first entry speaks for it.
+    func documents(
+        under root: RTSRAGSourceRoot,
+        scope: RTSRAGStoreScope?
+    ) -> [RTSRAGDocumentID: String] {
+        var found: [RTSRAGDocumentID: String] = [:]
+        for (id, entries) in documents {
+            // Exact scope, not `matches`'s "nil means any": this result is deleted from, and a
+            // sweep must never reach another tenant.
+            guard let first = entries.first, first.scope == scope else {
+                continue
+            }
+            guard case .string(let source)? = first.metadata[RTSRAGChunk.MetadataKey.sourcePath],
+                  root.contains(source: source)
+            else {
+                continue
+            }
+            found[id] = source
+        }
+        return found
+    }
+
     /// Flat equality, which is all the staleness check needs — `source_path` and `content_hash`.
     private func matches(
         _ entry: RTSRAGStoreEntry,

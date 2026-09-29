@@ -57,4 +57,11 @@ public actor RTSRAGInMemoryStore: RTSRAGVectorStore {
     public func count(matching filters: RTSRAGMetadata) async throws -> Int {
         index.count(matching: filters)
     }
+
+    public func documents(
+        under root: RTSRAGSourceRoot,
+        scope: RTSRAGStoreScope?
+    ) async throws -> [RTSRAGDocumentID: String] {
+        index.documents(under: root, scope: scope)
+    }
 }

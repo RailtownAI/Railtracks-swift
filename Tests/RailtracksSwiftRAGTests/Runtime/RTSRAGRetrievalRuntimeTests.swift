@@ -812,6 +812,8 @@ private final class EventCollector: @unchecked Sendable {
             }
         case .loadFailed:
             break
+        case .documentSwept:
+            derived.documentsSwept += 1
         }
     }
 }

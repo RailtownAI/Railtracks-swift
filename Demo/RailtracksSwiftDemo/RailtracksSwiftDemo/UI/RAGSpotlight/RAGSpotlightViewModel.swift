@@ -208,6 +208,9 @@ class RAGSpotlightViewModel {
             append("\(Self.label(source)) produced no chunks")
         case .loadFailed(let error):
             append("⚠️ \(error)")
+        case .documentSwept(_, let source):
+            // An orphan the run's root covered but the run did not see — moved away, or gone.
+            append("\(Self.label(source)) no longer at its source — removed from Spotlight")
         case .batchEmbedded, .batchFailed:
             // Embedding events belong to the vector-store path; Spotlight embeds for itself.
             break

@@ -42,7 +42,7 @@ public struct RTSRAGPDFLoader: RTSRAGDocumentLoader {
             extensions: RTSRAGPDFLoader.supportedExtensions
         )
         let granularity = self.granularity
-        return RTSRAGDocumentStream(sources: resolved) { url in
+        return RTSRAGDocumentStream(sources: resolved, root: path) { url in
             try RTSRAGPDFLoader.makeDocuments(at: url, granularity: granularity)
         }
     }

@@ -11,7 +11,7 @@ import Synchronization
 
 // MARK: - RTSRAGSpotlightRecord
 
-/// What the staleness check needs back from one matching item.
+/// What the staleness check and the orphan sweep need back from one matching item.
 ///
 /// A value type for the same reason ``RTSRAGSpotlightItem`` is one: `CSSearchableItem` is not
 /// `Sendable`, so the adapter converts inside its own callback rather than handing the item across.
@@ -19,6 +19,22 @@ struct RTSRAGSpotlightRecord: Sendable, Equatable {
     let uniqueIdentifier: String
     /// The recorded chunk count, or `nil` when the item did not come back with one.
     let chunkCount: Int?
+    /// The owning document, from `containerIdentifier` — what a sweep deletes by.
+    let documentID: RTSRAGDocumentID?
+    /// The document's source, from the custom source-path attribute — what a sweep reports.
+    let sourcePath: String?
+
+    init(
+        uniqueIdentifier: String,
+        chunkCount: Int?,
+        documentID: RTSRAGDocumentID? = nil,
+        sourcePath: String? = nil
+    ) {
+        self.uniqueIdentifier = uniqueIdentifier
+        self.chunkCount = chunkCount
+        self.documentID = documentID
+        self.sourcePath = sourcePath
+    }
 }
 
 // MARK: - RTSRAGSpotlightIndexing
@@ -30,7 +46,7 @@ struct RTSRAGSpotlightRecord: Sendable, Equatable {
 protocol RTSRAGSpotlightIndexing: Sendable {
     func index(_ items: [RTSRAGSpotlightItem]) async throws
     func deleteItems(inDomains domainIdentifiers: [String]) async throws
-    /// Items matching `queryString`, with their recorded chunk counts.
+    /// Items matching `queryString`, with their recorded chunk counts, documents and sources.
     func records(matching queryString: String) async throws -> [RTSRAGSpotlightRecord]
 }
 
@@ -59,16 +75,27 @@ struct RTSRAGSpotlightIndexAdapter: RTSRAGSpotlightIndexing, @unchecked Sendable
     /// `results` sequence, because that sequence is newer than this package's OS floor.
     func records(matching queryString: String) async throws -> [RTSRAGSpotlightRecord] {
         let context = CSSearchQueryContext()
-        context.fetchAttributes = [RTSRAGSpotlightAttribute.chunkCount.rawValue]
+        context.fetchAttributes = [
+            RTSRAGSpotlightAttribute.chunkCount.rawValue,
+            RTSRAGSpotlightAttribute.sourcePath.rawValue,
+            "containerIdentifier",
+        ]
         let query = CSSearchQuery(queryString: queryString, queryContext: context)
         let found = Mutex<[RTSRAGSpotlightRecord]>([])
         query.foundItemsHandler = { items in
             let chunkCountKey = RTSRAGSpotlightAttribute.chunkCount.key
+            let sourcePathKey = RTSRAGSpotlightAttribute.sourcePath.key
             let records = items.map { item in
-                let value = item.attributeSet.value(forCustomKey: chunkCountKey)
+                let attributes = item.attributeSet
+                let chunkCount = attributes.value(forCustomKey: chunkCountKey) as? NSNumber
+                let documentID = attributes.containerIdentifier
+                    .flatMap(UUID.init(uuidString:))
+                    .map(RTSRAGDocumentID.init)
                 return RTSRAGSpotlightRecord(
                     uniqueIdentifier: item.uniqueIdentifier,
-                    chunkCount: (value as? NSNumber)?.intValue
+                    chunkCount: chunkCount?.intValue,
+                    documentID: documentID,
+                    sourcePath: attributes.value(forCustomKey: sourcePathKey) as? String
                 )
             }
             found.withLock { $0.append(contentsOf: records) }

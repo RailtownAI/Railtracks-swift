@@ -348,6 +348,83 @@ struct RTSRAGSpotlightTests {
         #expect(names == ["loaded", "chunked", "committed"])
     }
 
+    // MARK: - Orphan sweep
+
+    @Test("a file moved within the root is swept from Spotlight")
+    func spotlightSweepsAMove() async throws {
+        let corpus = try Corpus()
+        defer {
+            corpus.clean()
+        }
+        try corpus.write("a.txt", "Refunds take thirty days.")
+        let index = FakeSpotlightIndex()
+        let runtime = Self.runtime(over: index)
+        _ = try await runtime.ingest(loader: corpus.loader, chunker: identity)
+
+        try FileManager.default.moveItem(
+            at: corpus.directory.appendingPathComponent("a.txt"),
+            to: corpus.directory.appendingPathComponent("b.txt")
+        )
+        let stats = try await runtime.ingest(loader: corpus.loader, chunker: identity)
+
+        let names = await index.sources.map { ($0 as NSString).lastPathComponent }
+        #expect(names == ["b.txt"])
+        #expect(stats.documentsSwept == 1)
+    }
+
+    @Test("removing a source removes every donated page of that file")
+    func spotlightRemoveSource() async throws {
+        let index = FakeSpotlightIndex()
+        let feeder = RTSRAGSpotlightFeeder(indexing: index)
+        let runtime = RTSRAGSpotlightIngestRuntime(feeder: feeder)
+        let sources = ["/r/cv.pdf#page-1", "/r/cv.pdf#page-2", "/r/other.pdf#page-1"]
+        for (page, source) in sources.enumerated() {
+            let documentID = RTSRAGDocumentID(RTSRAGDocument.derivedID(for: source))
+            let chunks = Self.chunks(documentID: documentID, contents: ["p\(page)"], source: source)
+            try await feeder.replaceDocument(id: documentID, with: chunks)
+        }
+
+        let removed = try await runtime.removeSource(at: URL(fileURLWithPath: "/r/cv.pdf"))
+
+        #expect(removed == 2)
+        #expect(await index.sources == ["/r/other.pdf#page-1"])
+    }
+
+    @Test("a named index lists a file's pages under its root, and not a sibling's")
+    func namedIndexListsUnderARoot() async throws {
+        guard CSSearchableIndex.isIndexingAvailable() else {
+            return
+        }
+        let namespace = "railtracks.rag.test.\(UUID().uuidString.prefix(8))"
+        let feeder = RTSRAGSpotlightFeeder(
+            index: CSSearchableIndex(name: "railtracks-rag-tests"),
+            namespace: namespace
+        )
+        defer {
+            Task {
+                try? await feeder.deleteAll()
+            }
+        }
+        let sources = ["/cv/a.pdf#page-1", "/cv/a.pdf#page-2", "/cv/ab.pdf#page-1"]
+        for source in sources {
+            let documentID = RTSRAGDocumentID(RTSRAGDocument.derivedID(for: source))
+            let chunks = Self.chunks(documentID: documentID, contents: [source], source: source)
+            try await feeder.replaceDocument(id: documentID, with: chunks)
+        }
+
+        var listed: [String] = []
+        let found = try await Self.poll {
+            listed = try await feeder.documents(under: RTSRAGSourceRoot(path: "/cv/a.pdf"))
+                .values.sorted()
+            return listed.count == 2
+        }
+
+        // Spotlight's trailing wildcard does the prefix match, and `/cv/ab.pdf` — a longer name
+        // sharing the prefix — must not be claimed by `/cv/a.pdf`.
+        #expect(found)
+        #expect(listed == ["/cv/a.pdf#page-1", "/cv/a.pdf#page-2"])
+    }
+
     // MARK: - Real Spotlight
 
     /// The one test against a real `CSSearchableIndex` — a *named* one, so it never touches the
@@ -510,6 +587,8 @@ struct RTSRAGSpotlightTests {
             return "embedding"
         case .loadFailed:
             return "loadFailed"
+        case .documentSwept:
+            return "swept"
         }
     }
 
@@ -581,6 +660,11 @@ private actor FakeSpotlightIndex: RTSRAGSpotlightIndexing {
         sortedItems.map(\.expirationDate)
     }
 
+    /// The distinct sources still donated, sorted.
+    var sources: [String] {
+        Set(items.values.compactMap(\.sourcePath)).sorted()
+    }
+
     private var sortedItems: [RTSRAGSpotlightItem] {
         items.values.sorted { $0.uniqueIdentifier < $1.uniqueIdentifier }
     }
@@ -619,6 +703,16 @@ private actor FakeSpotlightIndex: RTSRAGSpotlightIndexing {
                 guard let source = item.sourcePath, let hash = item.contentHash else {
                     return false
                 }
+                if let root = Self.listedRoot(in: queryString) {
+                    // A listing asks for every source under a root; answer it by the listing
+                    // query this item's namespace and that root would produce, so the string the
+                    // feeder builds is still what is exercised.
+                    let own = RTSRAGSpotlightFeeder.listingQuery(
+                        namespace: item.namespace,
+                        root: root
+                    )
+                    return own == queryString && root.contains(source: source)
+                }
                 let own = RTSRAGSpotlightFeeder.stalenessQuery(
                     namespace: item.namespace,
                     source: source,
@@ -629,9 +723,25 @@ private actor FakeSpotlightIndex: RTSRAGSpotlightIndexing {
             .map { item in
                 RTSRAGSpotlightRecord(
                     uniqueIdentifier: item.uniqueIdentifier,
-                    chunkCount: item.chunkCount
+                    chunkCount: item.chunkCount,
+                    documentID: item.documentID,
+                    sourcePath: item.sourcePath
                 )
             }
+    }
+
+    /// The root a listing query names — its first source clause's literal — or `nil` for any other
+    /// query. Test paths contain no characters the feeder would escape, so no unescaping is needed.
+    private static func listedRoot(in queryString: String) -> RTSRAGSourceRoot? {
+        let marker = "\(RTSRAGSpotlightAttribute.sourcePath.rawValue) == \""
+        guard queryString.contains(" || "), let start = queryString.range(of: marker) else {
+            return nil
+        }
+        let rest = queryString[start.upperBound...]
+        guard let end = rest.firstIndex(of: "\"") else {
+            return nil
+        }
+        return RTSRAGSourceRoot(path: String(rest[..<end]))
     }
 }
 

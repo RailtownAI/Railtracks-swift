@@ -584,6 +584,9 @@ class RAGViewModel {
         case .loadFailed(let error):
             failureCount += 1
             append(.load, "⚠️ \(error)")
+        case .documentSwept(_, let source):
+            // An orphan the run's root covered but the run did not see — moved away, or gone.
+            append(.store, "\(sourceLabel(source)) no longer at its source — removed")
         }
     }
 
