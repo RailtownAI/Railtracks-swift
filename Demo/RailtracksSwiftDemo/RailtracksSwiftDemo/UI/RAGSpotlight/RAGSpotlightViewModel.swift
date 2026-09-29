@@ -222,10 +222,11 @@ class RAGSpotlightViewModel {
         // Only this feeder's items, not anything else the app donates.
         context.filterQueries = [filter]
         // Without these a hit is little more than its identifier; with them it carries its passage
-        // and where it came from.
+        // and where it came from. The passage comes from `contentDescription`: `textContent` is
+        // what the query matches against, but Spotlight never returns it.
         context.fetchAttributes = [
             "title",
-            "textContent",
+            "contentDescription",
             "containerTitle",
             "containerOrder",
             "contentURL",
@@ -278,7 +279,7 @@ class RAGSpotlightViewModel {
             rank: rank,
             title: attributes.containerTitle ?? attributes.title ?? "(untitled)",
             chunkIndex: attributes.containerOrder?.intValue,
-            text: attributes.textContent ?? "",
+            text: attributes.contentDescription ?? "",
             contentURL: attributes.contentURL
         )
     }

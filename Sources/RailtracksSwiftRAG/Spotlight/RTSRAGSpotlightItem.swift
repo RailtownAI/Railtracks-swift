@@ -77,9 +77,15 @@ struct RTSRAGSpotlightItem: Sendable, Equatable {
     ///
     /// The *containment* attributes carry the chunk's parent and position — document id, index,
     /// source name — which is the relationship Spotlight defines them for.
+    ///
+    /// The chunk text is set **twice**, deliberately. `textContent` is what Spotlight matches a
+    /// query against, but it is index-only: no query ever returns it, however it is named in
+    /// `fetchAttributes`. `contentDescription` is returned, so it carries the same text back with
+    /// the hit — without it a result says which chunk matched but not what it says.
     func searchableItem() -> CSSearchableItem {
         let attributes = CSSearchableItemAttributeSet(contentType: UTType.text)
         attributes.textContent = textContent
+        attributes.contentDescription = textContent
         attributes.title = containerTitle
         attributes.containerIdentifier = documentID.description
         attributes.containerOrder = NSNumber(value: chunkIndex)

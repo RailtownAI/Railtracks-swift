@@ -31,6 +31,15 @@ import Foundation
 /// ``RTSRAGVectorStore/replaceDocument(id:with:)`` this is not atomic: the failure it permits is a
 /// document briefly missing, never one that mixes two versions.
 ///
+/// ## Donated chunks are visible system-wide
+///
+/// Every chunk becomes its own result in the device's Spotlight search (⌘Space on macOS), titled
+/// `<source name>` — `report.pdf#page-3` for a PDF page — with its passage text as the
+/// description. Observed on macOS 27; no mechanism has been found that keeps an item queryable by
+/// the app but out of the system search UI. Weigh that before donating anything sensitive: a
+/// document ingested for retrieval becomes browsable, fragment by fragment, by anyone at the
+/// device.
+///
 /// A `struct` rather than an actor: it holds no mutable state, and actor isolation would not
 /// serialise a replacement anyway, since isolation is released at the `await` between its two
 /// calls.

@@ -66,6 +66,9 @@ struct RTSRAGSpotlightTests {
         #expect(searchable.expirationDate == .distantFuture)
         #expect(searchable.domainIdentifier == "test.ns.\(documentID)")
         #expect(attributes.textContent == "two")
+        // `textContent` is never returned by a query, so the passage must also travel in an
+        // attribute that is.
+        #expect(attributes.contentDescription == "two")
         #expect(attributes.containerIdentifier == documentID.description)
         #expect(attributes.containerOrder == 1)
         let recordedCount = attributes.value(forCustomKey: RTSRAGSpotlightAttribute.chunkCount.key)
