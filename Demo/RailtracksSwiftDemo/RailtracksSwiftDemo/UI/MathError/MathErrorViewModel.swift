@@ -56,7 +56,7 @@ class MathErrorViewModel {
             defer { self?.isRunning = false }
             self?.promptResult = "waiting..."
             let flow = RTSFlow(title: "Throwing Workflow")
-            await self?.observe(flow)
+            self?.observe(flow)
             do {
                 _ = try await flow.run(ThrowingWorkflow(), input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
                 self?.promptResult = "n/a — expected a failure"
@@ -106,7 +106,7 @@ class MathErrorViewModel {
             ]
 
             let flow = RTSFlow(title: "Math Error")
-            await self?.observe(flow)
+            self?.observe(flow)
 
             let agent = RTSAgent(
                 llmProvider: .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString),

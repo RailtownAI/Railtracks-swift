@@ -24,15 +24,25 @@ public protocol RTSAgentNode: RTSNode {
 }
 
 public extension RTSAgentNode {
-    public var inputKeySystemMessage: String { "systemMessage" }
-    public var inputKeyPrompt: String { "prompt" }
-    public var inputKeyImages: String { "images" }
-    public var outputKeyResult: String { "result" }
+    var inputKeySystemMessage: String {
+        "systemMessage"
+    }
+    var inputKeyPrompt: String {
+        "prompt"
+    }
+    var inputKeyImages: String {
+        "images"
+    }
+    var outputKeyResult: String {
+        "result"
+    }
 
     var agentName: String {
         String(describing: type(of: self))
     }
-    var outputSchemaMaxToken: Int { 4096 }
+    var outputSchemaMaxToken: Int {
+        4096
+    }
     var inputGuardrails: [any RTSAgentInputGuardrail] { [] }
     var outputGuardrails: [any RTSAgentOutputGuardrail] { [] }
 

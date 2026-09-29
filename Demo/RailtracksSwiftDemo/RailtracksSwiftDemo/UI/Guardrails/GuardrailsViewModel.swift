@@ -83,7 +83,7 @@ class GuardrailsViewModel {
             defer { self?.isRunning = false }
             let gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
             let flow = RTSFlow(title: "Safe Support Assistant")
-            await self?.nodeTree.attach(to: flow)
+            self?.nodeTree.attach(to: flow)
 
             // No wiring needed: the flow builds and subscribes its own writer. This just
             // watches the file it produces.
@@ -99,7 +99,7 @@ class GuardrailsViewModel {
                 let piiOutput = try RTSPIIRedactOutputGuardrail()
 
                 var inputGuards: [any RTSAgentInputGuardrail] = [injectionGuard, piiInput]
-                var outputGuards: [any RTSAgentOutputGuardrail] = [piiOutput]
+                let outputGuards: [any RTSAgentOutputGuardrail] = [piiOutput]
 
                 // On-device, model-based PII redaction catches names/addresses the regex
                 // guard can't. Added only when Apple Intelligence is actually available so

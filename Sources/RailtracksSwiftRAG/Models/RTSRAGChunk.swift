@@ -61,6 +61,46 @@ public struct RTSRAGChunk: Sendable, Hashable, Codable {
     }
 }
 
+// MARK: - Positional identity
+
+public extension RTSRAGChunk {
+    /// `"<documentID>#<index>"` — an identifier that survives re-ingest, unlike ``id``.
+    ///
+    /// ``id`` is a fresh random UUID on every ingest, which nothing in this module minds: stores
+    /// replace whole documents, and the staleness check never reads chunk ids. What it breaks is an
+    /// index *outside* the store that remembers chunks by id, such as Spotlight, which would lose
+    /// every item on each update. The document id is derived from the source and the index is the
+    /// chunk's position, so this stays the same as long as the chunker splits the same way.
+    ///
+    /// Computed rather than stored, so ``id``, the stored fields and the file store's log format
+    /// are unchanged.
+    var positionalIdentifier: String {
+        "\(documentID)#\(index)"
+    }
+}
+
+// MARK: - Stamping
+
+extension RTSRAGChunk {
+    /// Writes the staleness metadata every later run reads back: the document's source and
+    /// content hash.
+    ///
+    /// Shared by both runtimes so they stamp alike — the staleness check reads these keys back as
+    /// filters, so a writer that spelled them differently would never find its own documents.
+    static func stamped(_ chunks: [RTSRAGChunk], from document: RTSRAGDocument) -> [RTSRAGChunk] {
+        chunks.map { chunk in
+            var chunk = chunk
+            if let source = document.source {
+                chunk.metadata[RTSRAGChunk.MetadataKey.sourcePath] = .string(source)
+            }
+            if let hash = document.contentHash {
+                chunk.metadata[RTSRAGChunk.MetadataKey.contentHash] = .string(hash)
+            }
+            return chunk
+        }
+    }
+}
+
 // MARK: - Stamped metadata keys
 
 public extension RTSRAGChunk {

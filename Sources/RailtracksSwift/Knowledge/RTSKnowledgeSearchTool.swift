@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import FoundationModels
 
 /// A tool that lets an agent look something up in a knowledge source.
 ///
@@ -158,4 +159,47 @@ public struct RTSKnowledgeSearchTool: RTSToolNode {
     static let queryKey = "query"
     static let topKKey = "topK"
     static let resultsKey = "results"
+}
+
+// MARK: - On-device (FoundationModels)
+
+/// Makes the same tool callable by Apple's on-device model.
+///
+/// The Apple path hands `LanguageModelSession` only agent tools, orchestrator tools and
+/// ``RTSAppleAIToolNode``s; any other ``RTSToolNode`` is dropped with a warning. Without this, an
+/// `RTSAgent(llmProvider: .appleAI)` given this tool would silently have no search at all.
+///
+/// **The availability sits on the conformance, not on the type.** ``RTSAppleAIToolNode`` requires
+/// macOS 26 / iOS 26 because it builds on FoundationModels' `Tool`; marking the type would lift the
+/// tool above the package's macOS 15 / iOS 18 floor. Gated here, it stays one type everywhere, and
+/// is an ``RTSAppleAIToolNode`` only where FoundationModels exists — which is exactly where the
+/// Apple path's dynamic cast looks for it.
+///
+/// Only `Arguments` and `Output` are declared. The protocol's defaults bridge `call(arguments:)` to
+/// the existing ``callableRoutine`` and route it through `RTSNodeInvoker`, so an on-device call is
+/// traced like a cloud one. The explicit ``parameterSchema`` above still takes precedence, keeping
+/// the dynamic result-count text that a `@Guide` literal cannot express.
+@available(macOS 26, iOS 26, *)
+extension RTSKnowledgeSearchTool: RTSAppleAIToolNode {
+
+    /// Property names must equal ``queryKey`` and ``topKKey``: the default `call(arguments:)`
+    /// round-trips these through JSON into the `RTSInput` that ``callableRoutine`` reads.
+    @Generable
+    public struct Arguments: Encodable {
+        @Guide(
+            description: """
+            What to look up, phrased as the question or topic to find passages about.
+            """
+        )
+        public var query: String
+        @Guide(
+            description: """
+            How many passages to return. Ask for more only when one passage is unlikely to hold \
+            the whole answer.
+            """
+        )
+        public var topK: Int
+    }
+
+    public typealias Output = String
 }

@@ -87,6 +87,12 @@ struct ContentView: View {
                 .background(viewModel.mode == .rag ? Color.accentColor.opacity(0.2) : Color.clear)
                 .buttonStyle(.bordered)
 
+                Button("RAG (Spotlight)") {
+                    viewModel.mode = .ragSpotlight
+                }
+                .background(viewModel.mode == .ragSpotlight ? Color.accentColor.opacity(0.2) : Color.clear)
+                .buttonStyle(.bordered)
+
                 Button("Résumé Search") {
                     viewModel.mode = .resumeSearch
                 }
@@ -150,6 +156,8 @@ struct ContentView: View {
                 VisionView()
             case .rag:
                 RAGView()
+            case .ragSpotlight:
+                RAGSpotlightView()
             case .resumeSearch:
                 ResumeSearchView()
             }

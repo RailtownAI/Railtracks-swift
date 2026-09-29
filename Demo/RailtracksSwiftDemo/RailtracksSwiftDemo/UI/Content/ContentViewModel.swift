@@ -26,6 +26,7 @@ class ContentViewModel {
         case evaluation
         case vision
         case rag
+        case ragSpotlight
         case resumeSearch
     }
 
