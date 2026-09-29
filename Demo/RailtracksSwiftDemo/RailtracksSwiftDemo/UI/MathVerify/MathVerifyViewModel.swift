@@ -83,7 +83,7 @@ class MathVerifyViewModel {
             )
 
             let flow = RTSFlow(title: "Math Verify flow")
-            await self?.nodeTree.attach(to: flow)
+            self?.nodeTree.attach(to: flow)
             var cancellables = Set<AnyCancellable>()
             flow.nodeStatusPublisher
                 .receive(on: DispatchQueue.main)

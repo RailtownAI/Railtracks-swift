@@ -75,16 +75,16 @@ extension RailtracksSwiftTestSuite {
         // MARK: - Schema
 
         @Test("the schema declares both parameters and names the bounds")
-        func schemaDeclaresParameters() {
+        func schemaDeclaresParameters() throws {
             let tool = makeTool(source: RecordingSource(), range: 2...8)
             let parameters = tool.parameterSchema.parameters
 
             #expect(parameters.map { $0.name } == ["query", "topK"])
             // The bounds go in the description because the schema cannot express them: a model
             // that is not told the ceiling will ask for twenty.
-            let topK = try? #require(parameters.first { $0.name == "topK" })
-            #expect(topK?.description.contains("2") == true)
-            #expect(topK?.description.contains("8") == true)
+            let topK = try #require(parameters.first { $0.name == "topK" })
+            #expect(topK.description.contains("2"))
+            #expect(topK.description.contains("8"))
         }
 
         // MARK: - Mapping

@@ -83,7 +83,9 @@ final class RTSRAGIngestEventEmitter: @unchecked Sendable {
     }
 
     func emit(_ event: RTSRAGIngestEvent) {
-        deliveryQueue.async { [subject] in
+        // `self`, not `subject`: `PassthroughSubject` is not `Sendable`, and the subject is only ever
+        // touched on `deliveryQueue` — the confinement this type's `@unchecked Sendable` stands for.
+        deliveryQueue.async { [self] in
             subject.send(event)
         }
     }

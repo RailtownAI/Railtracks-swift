@@ -7,7 +7,9 @@ enum HTMLFetcherError: Error {
 }
 
 struct HTMLFetcher {
-    static let defaultTimeout: Duration = .seconds(15)
+    /// `nonisolated`: read by `fetchText`'s default argument, which is checked outside any actor.
+    /// Safe for a constant `Sendable` value.
+    nonisolated static let defaultTimeout: Duration = .seconds(15)
 
     /// A helper function that grabs the text of a given URL
     @MainActor

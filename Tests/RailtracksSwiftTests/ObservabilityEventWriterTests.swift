@@ -226,7 +226,10 @@ extension RailtracksSwiftTestSuite {
             weak var writerAfterRelease: RTSEventWriter?
             do {
                 let flow = RTSFlow(title: "BuiltInRelease")
-                writerAfterRelease = try #require(flow.eventWriter)
+                // Bound to a non-optional first: assigned straight to the optional, `#require`
+                // infers an optional type, can never fail, and a flow with no writer would pass.
+                let writer = try #require(flow.eventWriter)
+                writerAfterRelease = writer
                 let root = StubOrchestrator(nodeName: "Root") { _, _ in
                     [:]
                 }
@@ -376,7 +379,7 @@ extension RailtracksSwiftTestSuite {
 
             // Read on the very next statement: no polling, no sleep. If the barrier regresses
             // this fails deterministically rather than flakily.
-            let written = try Self.decodeEvents(in: try url)
+            let written = try Self.decodeEvents(in: url)
             #expect(written.last?.eventType == RTSSessionCompletedEvent.eventTypeName)
         }
 
@@ -403,7 +406,7 @@ extension RailtracksSwiftTestSuite {
             // tests build in debug — so assert the format explicitly rather than trusting that
             // the habit was not copied. A payload containing a literal newline is the case that
             // would break the format if escaping ever regressed.
-            let fileLines = try Self.lines(of: try url)
+            let fileLines = try Self.lines(of: url)
             #expect(fileLines.count == recorder.events.count)
             for line in fileLines {
                 #expect(line.hasPrefix("{"))
@@ -482,7 +485,7 @@ extension RailtracksSwiftTestSuite {
 
             // Both runs share the flow's `scope_id`, so they accumulate rather than overwrite —
             // the opposite of the flow-graph trace's behaviour on flow re-use.
-            let written = try Self.decodeEvents(in: try url)
+            let written = try Self.decodeEvents(in: url)
             let scopeIDs = Set(written.map { $0.scopeID })
             #expect(scopeIDs == [flow.id.uuidString])
             #expect(Self.count(of: RTSSessionStartedEvent.eventTypeName, in: written) == 2)
@@ -548,7 +551,7 @@ extension RailtracksSwiftTestSuite {
             let url = try #require(await writer.finish()).get()
 
             // The default `.throw` strategy would have lost the whole event.
-            let fileLines = try Self.lines(of: try url)
+            let fileLines = try Self.lines(of: url)
             #expect(fileLines.count == 1)
             let parsed = try JSONSerialization.jsonObject(
                 with: Data(try #require(fileLines.first).utf8)
@@ -712,7 +715,7 @@ extension RailtracksSwiftTestSuite {
             let url = try #require(await writer.finish()).get()
 
             #expect(await writer.lateEventCount == 1)
-            let written = try Self.decodeEvents(in: try url)
+            let written = try Self.decodeEvents(in: url)
             #expect(written.map { $0.eventType } == [
                 "session.started",
                 "session.completed",
@@ -788,7 +791,7 @@ extension RailtracksSwiftTestSuite {
             }
             _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
             let url = try #require(await writer.finish()).get()
-            let afterFirstRun = try Self.decodeEvents(in: try url)
+            let afterFirstRun = try Self.decodeEvents(in: url)
 
             // `finish()` cancels the subscription and terminates the queue permanently, so a
             // second run publishes into a dead stream. Pinned because the tempting mistake is
@@ -796,7 +799,7 @@ extension RailtracksSwiftTestSuite {
             _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
             _ = await writer.finish()
 
-            #expect(try Self.decodeEvents(in: try url).count == afterFirstRun.count)
+            #expect(try Self.decodeEvents(in: url).count == afterFirstRun.count)
             #expect(Self.count(of: RTSSessionStartedEvent.eventTypeName, in: afterFirstRun) == 1)
         }
 
