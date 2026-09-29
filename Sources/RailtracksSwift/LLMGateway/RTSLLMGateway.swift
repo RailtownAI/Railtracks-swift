@@ -55,24 +55,36 @@ public struct RTSLLMGateway: Sendable {
                     "AppleAI (FoundationModels) requires macOS 26 / iOS 26 or later"
                 )
             }
-            let (appleAISession, unsupported) = try AppleAISession.build(
-                fromAgentTools: agentNode.tools,
+            return try buildFoundationModelsSession(
+                apiKeys: apiKeys,
                 invoker: invoker,
-                createdBy: agentNode,
-                makeSubSession: { subAgent in
-                    try RTSLLMGateway.buildSession(
-                        apiKeys: apiKeys,
-                        invoker: invoker,
-                        agentNode: subAgent,
-                        onNewSession: onNewSession
-                    )
-                },
-                onNewSession: onNewSession
+                agentNode: agentNode,
+                onNewSession: onNewSession,
+                sessionFactory: nil
             )
-            if !unsupported.isEmpty {
-                log.warning("⚠️ [\(agentNode.agentName)] \(unsupported.count) tool(s) ignored — conform to RTSAppleAIToolNode to use tools with AppleAI: [\(unsupported.map(\.toolName))]")
+
+        // XCODE26-SDK: `sessionFactory()` needs the OS 27 SDK (Xcode 27, Swift 6.4). Built with an
+        // older SDK nothing can construct a `.foundationModel`, so this branch is unreachable there.
+        #if compiler(>=6.4)
+        case .foundationModel(let languageModel):
+            guard #available(macOS 27, iOS 27, *) else {
+                throw RTSError.providerUnavailable(
+                    "\(provider) (FoundationModels LanguageModel) requires macOS 27 / iOS 27 or later"
+                )
             }
-            return RTSLLMSession.build(appleAI: appleAISession, agentNode: agentNode)
+            return try buildFoundationModelsSession(
+                apiKeys: apiKeys,
+                invoker: invoker,
+                agentNode: agentNode,
+                onNewSession: onNewSession,
+                sessionFactory: try languageModel.sessionFactory()
+            )
+        #else
+        case .foundationModel:
+            throw RTSError.providerUnavailable(
+                "\(provider) (FoundationModels LanguageModel) requires building with the OS 27 SDK (Xcode 27)"
+            )
+        #endif
 
         case .openAI(modelIDString: let modelIDString):
             guard let apiKey = apiKeys[provider.kind] else {
@@ -120,6 +132,38 @@ public struct RTSLLMGateway: Sendable {
                 applyProviderOptions: options.applyToConduitConfig
             )
         }
+    }
+
+    /// Builds a session on `LanguageModelSession`: the on-device system model when
+    /// `sessionFactory` is `nil` (`.appleAI`), otherwise the factory's `LanguageModel`
+    /// (`.foundationModel`). Tool bridging is identical for both.
+    @available(macOS 26, iOS 26, *)
+    private static func buildFoundationModelsSession(
+        apiKeys: [RTSLLMProviderKind: String],
+        invoker: RTSNodeInvoker,
+        agentNode: any RTSAgentNode,
+        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
+        sessionFactory: AppleAISession.MakeSession?
+    ) throws -> RTSLLMSession {
+        let (appleAISession, unsupported) = try AppleAISession.build(
+            fromAgentTools: agentNode.tools,
+            invoker: invoker,
+            createdBy: agentNode,
+            makeSubSession: { subAgent in
+                try RTSLLMGateway.buildSession(
+                    apiKeys: apiKeys,
+                    invoker: invoker,
+                    agentNode: subAgent,
+                    onNewSession: onNewSession
+                )
+            },
+            onNewSession: onNewSession,
+            sessionFactory: sessionFactory
+        )
+        if !unsupported.isEmpty {
+            log.warning("⚠️ [\(agentNode.agentName)] \(unsupported.count) tool(s) ignored — conform to RTSAppleAIToolNode to use tools with \(agentNode.llmProvider.providerName) via FoundationModels: [\(unsupported.map(\.toolName))]")
+        }
+        return RTSLLMSession.build(appleAI: appleAISession, agentNode: agentNode)
     }
 
     /// Builds a session for a cloud (Conduit-backed) provider. The tool-bridging is provider-agnostic,

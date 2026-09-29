@@ -15,6 +15,10 @@ class ContentViewModel {
         case math
         @available(macOS 26, iOS 26, *)
         case mathApple
+        #if OS27
+        @available(macOS 27, iOS 27, *)
+        case mathClaude
+        #endif
         case mathVerify
         case mathError
         case outputSchema

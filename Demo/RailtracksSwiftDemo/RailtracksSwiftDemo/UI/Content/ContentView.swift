@@ -34,6 +34,17 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                 }
 
+                // RailtracksSwiftDemoOS27 target only — see MathClaudeViewModel.swift.
+                #if OS27
+                if #available(macOS 27, iOS 27, *) {
+                    Button("Math(Claude)") {
+                        viewModel.mode = .mathClaude
+                    }
+                    .background(viewModel.mode == .mathClaude ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+                }
+                #endif
+
                 Button("Verified Math") {
                     viewModel.mode = .mathVerify
                 }
@@ -119,6 +130,12 @@ struct ContentView: View {
                 if #available(macOS 26, iOS 26, *) {
                     MathAppleView()
                 }
+            #if OS27
+            case .mathClaude:
+                if #available(macOS 27, iOS 27, *) {
+                    MathClaudeView()
+                }
+            #endif
             case .mathVerify:
                 MathVerifyView()
             case .mathError:
