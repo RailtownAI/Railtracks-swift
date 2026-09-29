@@ -245,6 +245,59 @@ extension RailtracksSwiftTestSuite {
             }
         }
 
+        // MARK: - On-device conformance
+
+        @Test("on OS 26 the same tool is an Apple on-device tool")
+        func isAnAppleAIToolNode() throws {
+            guard #available(macOS 26, iOS 26, *) else {
+                return
+            }
+            let tool: any RTSToolNode = makeTool(source: RecordingSource())
+
+            // The dynamic cast the Apple path makes. Without the conformance it fails and the
+            // tool is dropped with a warning, leaving an on-device agent with no search.
+            #expect(tool is any RTSAppleAIToolNode)
+        }
+
+        @Test("on-device arguments are named as the routine reads them")
+        func argumentsMatchTheInputKeys() throws {
+            guard #available(macOS 26, iOS 26, *) else {
+                return
+            }
+            let schema = RTSKnowledgeSearchTool.Arguments.generationSchema
+            let encoded = try JSONEncoder().encode(schema)
+            let decoded = try JSONSerialization.jsonObject(with: encoded)
+            let json = try #require(decoded as? [String: Any])
+            let properties = try #require(json["properties"] as? [String: Any])
+            let expected: Set = [RTSKnowledgeSearchTool.queryKey, RTSKnowledgeSearchTool.topKKey]
+
+            // `call(arguments:)` round-trips these through JSON into the `RTSInput` the search
+            // closure reads, so a renamed property would arrive as a missing input.
+            #expect(Set(properties.keys) == expected)
+        }
+
+        @Test("an on-device call runs the same routine and returns its results")
+        func onDeviceCallRunsTheRoutine() async throws {
+            guard #available(macOS 26, iOS 26, *) else {
+                return
+            }
+            let hit = RTSKnowledgeHit(
+                content: "Refunds take thirty days.",
+                source: "policies.pdf#page-4",
+                score: 0.8
+            )
+            let source = RecordingSource(returning: [hit])
+            let tool = makeTool(source: source, range: 1...3)
+
+            let output = try await tool.call(arguments: .init(query: "refunds", topK: 9))
+
+            // One routine for every provider: the clamp and the encoding are the cloud path's.
+            #expect(source.lastQuery?.text == "refunds")
+            #expect(source.lastQuery?.topK == 3)
+            #expect(output.contains("Refunds take thirty days."))
+            #expect(output.contains("policies.pdf#page-4"))
+        }
+
         // MARK: - Through the invoker
 
         @Test("the tool runs through the node invoker and publishes events")

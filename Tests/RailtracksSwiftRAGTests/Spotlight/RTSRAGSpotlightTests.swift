@@ -395,6 +395,68 @@ struct RTSRAGSpotlightTests {
         #expect(forgotten)
     }
 
+    // MARK: - Searcher
+
+    @Test("a returned item maps to a hit with its passage, source and position")
+    func searcherMapsAnItem() throws {
+        let documentID = RTSRAGDocumentID(UUID())
+        let chunks = Self.chunks(
+            documentID: documentID,
+            contents: ["zero", "one"],
+            source: "/cv/alex.pdf#page-2"
+        )
+        let item = RTSRAGSpotlightItem.items(for: chunks, of: documentID, namespace: "test.ns")[1]
+
+        let hit = RTSRAGSpotlightSearcher.hit(from: item.searchableItem(), rank: 3)
+
+        // The passage must come from `contentDescription`: a real query returns `textContent` as
+        // nil, so a mapping that read it would hand every agent an empty passage.
+        #expect(hit.text == "one")
+        #expect(hit.source == "/cv/alex.pdf#page-2")
+        #expect(hit.identifier == "\(documentID)#1")
+        #expect(hit.documentID == documentID)
+        #expect(hit.chunkIndex == 1)
+        #expect(hit.rank == 3)
+    }
+
+    @Test("the searcher finds a donated chunk, passage included")
+    func searcherRoundTrip() async throws {
+        guard CSSearchableIndex.isIndexingAvailable() else {
+            return
+        }
+        let namespace = "railtracks.rag.test.\(UUID().uuidString.prefix(8))"
+        let feeder = RTSRAGSpotlightFeeder(
+            index: CSSearchableIndex(name: "railtracks-rag-tests"),
+            namespace: namespace
+        )
+        let searcher = RTSRAGSpotlightSearcher(feeder: feeder)
+        let documentID = RTSRAGDocumentID(UUID())
+        // A made-up word, so the keyword match can only come from this chunk.
+        let passage = "Quokkavelt certification completed in the spring term."
+        defer {
+            Task {
+                try? await feeder.deleteAll()
+            }
+        }
+
+        let chunks = Self.chunks(
+            documentID: documentID,
+            contents: [passage],
+            source: "/cv/test.pdf#page-1"
+        )
+        try await feeder.replaceDocument(id: documentID, with: chunks)
+        var hits: [RTSRAGSpotlightHit] = []
+        let found = try await Self.poll {
+            hits = try await searcher.search("quokkavelt", limit: 5)
+            return !hits.isEmpty
+        }
+
+        #expect(found)
+        #expect(hits.first?.text == passage)
+        #expect(hits.first?.source == "/cv/test.pdf#page-1")
+        #expect(hits.first?.documentID == documentID)
+    }
+
     // MARK: - Helpers
 
     private static func runtime(over index: FakeSpotlightIndex) -> RTSRAGSpotlightIngestRuntime {
