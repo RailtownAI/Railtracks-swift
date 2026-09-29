@@ -8,6 +8,7 @@
 import Combine
 import CoreSpotlight
 import Foundation
+import RailtracksSwift
 import RailtracksSwiftRAG
 
 /// Ingests PDFs into the app's Spotlight index and searches them back with `CSUserQuery`.
@@ -16,22 +17,38 @@ import RailtracksSwiftRAG
 /// the **default** index. Loader and chunker are fixed — `RTSRAGPDFLoader` per page and
 /// `RTSRAGSentenceChunker` — because the screen exists to exercise Spotlight, not the loaders.
 ///
-/// Search is `CSUserQuery` rather than `SpotlightSearchTool`: no model sits between the index and
-/// the results, so a hit proves the donation itself.
+/// Two ways to read it back, side by side: **raw search**, `RTSRAGSpotlightSearcher` with no model
+/// in between, so a hit proves the donation itself; and **an agent** (phase C) whose only knowledge
+/// is `RTSKnowledgeSearchTool` over the same searcher, on Claude or Apple's on-device model.
 @MainActor
 @Observable
 class RAGSpotlightViewModel {
 
-    /// One search hit, flattened from the `CSSearchableItem` it wraps.
-    struct Hit: Identifiable {
-        /// The item's `"<documentID>#<index>"` identifier.
-        let id: String
-        /// Arrival order. `CSUserQuery.Item` carries no score, so ranked order is all there is.
-        let rank: Int
-        let title: String
-        let chunkIndex: Int?
-        let text: String
-        let contentURL: URL?
+    /// Which model answers in the agent section.
+    enum ModelChoice: String, CaseIterable, Identifiable {
+        case claude
+        case onDevice
+
+        var id: String {
+            rawValue
+        }
+
+        var title: String {
+            switch self {
+            case .claude:
+                return "Claude"
+            case .onDevice:
+                return "On-device"
+            }
+        }
+
+        /// The on-device model needs FoundationModels; the main demo target deploys below it.
+        static var available: [ModelChoice] {
+            if #available(macOS 26, iOS 26, *) {
+                return allCases
+            }
+            return [.claude]
+        }
     }
 
     var selectedPath: URL?
@@ -48,18 +65,28 @@ class RAGSpotlightViewModel {
     /// Off means lexical only, so the two modes can be compared on the same question.
     var usesSemanticSearch = true
     var isSearching = false
-    var hits: [Hit] = []
+    var hits: [RTSRAGSpotlightHit] = []
     var searchNote: String?
 
-    /// One feeder and runtime for the screen's lifetime, both over the default index.
+    var agentQuestion = ""
+    var model: ModelChoice = .claude
+    var isAsking = false
+    var answer: String?
+    var agentError: String?
+    /// Every passage the tool handed the agent, across all its searches for one question.
+    var retrieved: [RTSKnowledgeHit] = []
+
+    /// One feeder, runtime and searcher for the screen's lifetime, all over the default index.
     private let feeder = RTSRAGSpotlightFeeder()
     private let runtime: RTSRAGSpotlightIngestRuntime
+    private let searcher: RTSRAGSpotlightSearcher
     private var subscription: AnyCancellable?
     private var runTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
 
     init() {
         runtime = RTSRAGSpotlightIngestRuntime(feeder: feeder)
+        searcher = RTSRAGSpotlightSearcher(feeder: feeder)
         subscription = runtime.eventPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
@@ -73,6 +100,10 @@ class RAGSpotlightViewModel {
 
     var canSearch: Bool {
         !question.isEmpty && !isRunning
+    }
+
+    var canAsk: Bool {
+        !agentQuestion.isEmpty && !isRunning && !isAsking
     }
 
     var progressText: String {
@@ -183,9 +214,12 @@ class RAGSpotlightViewModel {
         }
     }
 
-    // MARK: - Search
+    // MARK: - Raw search
 
-    /// Searches this feeder's items with `CSUserQuery`, cancelling any search still running.
+    /// Searches this feeder's items directly, cancelling any search still running.
+    ///
+    /// Kept beside the agent for comparison: this is exactly what the agent's tool sees, before a
+    /// model has rephrased anything.
     func search() {
         guard canSearch else {
             return
@@ -196,13 +230,16 @@ class RAGSpotlightViewModel {
         isSearching = true
         let question = self.question
         let usesSemanticSearch = self.usesSemanticSearch
-        let filter = feeder.searchFilter
+        let searcher = self.searcher
         searchTask = Task { [weak self] in
-            let found = await Self.run(
-                question: question,
-                usesSemanticSearch: usesSemanticSearch,
-                filter: filter
-            )
+            let found: Result<[RTSRAGSpotlightHit], Error>
+            do {
+                found = .success(
+                    try await searcher.search(question, usesSemanticSearch: usesSemanticSearch)
+                )
+            } catch {
+                found = .failure(error)
+            }
             guard !Task.isCancelled else {
                 return
             }
@@ -210,31 +247,7 @@ class RAGSpotlightViewModel {
         }
     }
 
-    /// Built where the query runs, so no non-`Sendable` Core Spotlight object crosses actors.
-    private nonisolated static func makeQueryContext(
-        usesSemanticSearch: Bool,
-        filter: String
-    ) -> CSUserQueryContext {
-        let context = CSUserQueryContext()
-        context.enableRankedResults = true
-        context.maxResultCount = 10
-        context.disableSemanticSearch = !usesSemanticSearch
-        // Only this feeder's items, not anything else the app donates.
-        context.filterQueries = [filter]
-        // Without these a hit is little more than its identifier; with them it carries its passage
-        // and where it came from. The passage comes from `contentDescription`: `textContent` is
-        // what the query matches against, but Spotlight never returns it.
-        context.fetchAttributes = [
-            "title",
-            "contentDescription",
-            "containerTitle",
-            "containerOrder",
-            "contentURL",
-        ]
-        return context
-    }
-
-    private func finishSearch(_ found: Result<[Hit], Error>) {
+    private func finishSearch(_ found: Result<[RTSRAGSpotlightHit], Error>) {
         isSearching = false
         switch found {
         case .success(let results):
@@ -245,44 +258,113 @@ class RAGSpotlightViewModel {
         }
     }
 
-    /// Runs one query to completion. The query is started by reading `responses` and cancelled when
-    /// the surrounding task is.
-    private nonisolated static func run(
-        question: String,
-        usesSemanticSearch: Bool,
-        filter: String
-    ) async -> Result<[Hit], Error> {
-        let context = makeQueryContext(usesSemanticSearch: usesSemanticSearch, filter: filter)
-        let query = CSUserQuery(userQueryString: question, userQueryContext: context)
-        return await withTaskCancellationHandler {
-            do {
-                var results: [Hit] = []
-                for try await response in query.responses {
-                    guard case .item(let item) = response else {
-                        continue
-                    }
-                    results.append(makeHit(item.item, rank: results.count))
-                }
-                return .success(results)
-            } catch {
-                return .failure(error)
+    // MARK: - Agent
+
+    /// Answers `agentQuestion` with an agent whose only knowledge is a Spotlight-backed
+    /// `RTSKnowledgeSearchTool`.
+    ///
+    /// The same tool the Résumé Search tab builds over a vector store — only the source behind it
+    /// differs, adapted with `RTSClosureKnowledgeSource`.
+    func ask() {
+        guard canAsk else {
+            return
+        }
+        let gateway: RTSLLMGateway
+        let provider: RTSLLMProvider
+        switch model {
+        case .claude:
+            guard let apiKey = KeychainHelper.readAnthropicKey(), !apiKey.isEmpty else {
+                agentError = "no Anthropic key in the Keychain — add one on the main screen"
+                return
             }
-        } onCancel: {
-            query.cancel()
+            gateway = RTSLLMGateway(apiKeys: [.anthropic: apiKey])
+            provider = .anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString)
+        case .onDevice:
+            gateway = RTSLLMGateway(apiKeys: [:])
+            provider = .appleAI
+        }
+        isAsking = true
+        answer = nil
+        agentError = nil
+        retrieved = []
+        let question = agentQuestion
+        let agent = RTSAgent(
+            llmProvider: provider,
+            name: "Document Researcher",
+            tools: [makeSearchTool()],
+            systemMessage: Self.systemMessage
+        )
+        Task { [weak self] in
+            defer {
+                self?.isAsking = false
+            }
+            do {
+                let flow = RTSFlow(title: "Spotlight RAG")
+                let reply = try await flow.run(agent: agent, prompt: question, gateway: gateway)
+                self?.answer = reply
+            } catch {
+                self?.agentError = "\(error)"
+            }
         }
     }
 
-    private nonisolated static func makeHit(_ item: CSSearchableItem, rank: Int) -> Hit {
-        let attributes = item.attributeSet
-        return Hit(
-            id: item.uniqueIdentifier,
-            rank: rank,
-            title: attributes.containerTitle ?? attributes.title ?? "(untitled)",
-            chunkIndex: attributes.containerOrder?.intValue,
-            text: attributes.contentDescription ?? "",
-            contentURL: attributes.contentURL
+    /// The knowledge tool, over Spotlight.
+    ///
+    /// The description carries what semantic search does not: matching is by keyword, so the
+    /// model is told to search with the documents' own vocabulary and to retry before giving up.
+    private func makeSearchTool() -> RTSKnowledgeSearchTool {
+        RTSKnowledgeSearchTool(
+            toolName: "SearchDocuments",
+            toolDescription: """
+            Search the user's documents for passages. Matching is by keyword, not meaning: search \
+            with distinctive words likely to appear in the text itself (skills, product names, \
+            job titles, qualifications). If a search returns nothing, try synonyms or narrower \
+            terms before concluding the documents do not cover it. Each passage comes with the \
+            file and page it came from.
+            """,
+            source: makeSource(),
+            // No threshold: Spotlight exposes no score, so the one the source derives from rank
+            // would filter on nothing real.
+            minimumScore: nil
         )
     }
+
+    /// Adapts Spotlight hits to the knowledge tool, recording what the agent was handed.
+    private func makeSource() -> RTSClosureKnowledgeSource {
+        let searcher = self.searcher
+        return RTSClosureKnowledgeSource { [weak self] query in
+            let found = try await searcher.search(query.text, limit: query.topK)
+            let hits = found.map { hit -> RTSKnowledgeHit in
+                var metadata: [String: RTSValue] = [:]
+                if let chunkIndex = hit.chunkIndex {
+                    metadata["chunk"] = .number(Double(chunkIndex))
+                }
+                return RTSKnowledgeHit(
+                    content: hit.text,
+                    source: hit.source ?? hit.title,
+                    // Rank-derived: `CSUserQuery` returns order, not relevance.
+                    score: 1 / Double(hit.rank + 1),
+                    metadata: metadata
+                )
+            }
+            await self?.recordRetrieved(query: query.text, hits: hits)
+            return hits
+        }
+    }
+
+    private func recordRetrieved(query: String, hits: [RTSKnowledgeHit]) {
+        retrieved.append(contentsOf: hits)
+        append("agent searched \"\(query)\" → \(hits.count) passage(s)")
+    }
+
+    private static let systemMessage = """
+    You answer questions using only the user's documents, reached through your search tool.
+
+    Always search before answering — never answer from prior knowledge. The search matches \
+    keywords, so if it returns nothing, search again with different words before deciding the \
+    documents do not cover the question. Cite the file and page for every claim. If nothing is \
+    found after a few attempts, say plainly that the documents do not cover it.
+    """
 
     // MARK: - Maintenance
 
