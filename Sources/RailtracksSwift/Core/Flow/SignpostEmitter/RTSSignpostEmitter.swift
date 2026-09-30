@@ -14,16 +14,18 @@ import RailtracksInstrumentationKit
 
 /// Default `RTSSignpostEmitting` conformer. Routes each call directly to the
 /// matching `RailtracksSignposts` API — no internal state except the
-/// `AgentRunHandle` map needed to pair interval begin/end calls.
+/// `NodeRunHandle` map needed to pair interval begin/end calls. Every node call
+/// (agent, tool, function) gets a Node Runs interval nested under its caller's.
 final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
 
     private let lock = NSLock()
-    private var handles: [RTSRunID: AgentRunHandle] = [:]
+    private var handles: [RTSRunID: NodeRunHandle] = [:]
 
     // MARK: - Interval
 
     func emitNodeStart(
         nodeID: UUID,
+        parentNodeID: UUID?,
         nodeName: String,
         nodeType: RTSFlowNodeType,
         sessionID: UUID,
@@ -33,14 +35,15 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
     ) {
-        guard nodeType == .agent else { return }
-        let event = AgentRun(
+        let event = NodeRun(
             name: Self.decorateWithGuardrails(
                 nodeName,
                 hasInputGuardrail: hasInputGuardrail,
                 hasOutputGuardrail: hasOutputGuardrail
             ),
+            nodeType: nodeType.asNodeType,
             nodeId: nodeID.uuidString,
+            parentNodeId: parentNodeID?.uuidString ?? "",
             sessionId: sessionID.uuidString,
             runId: sessionID.uuidString,
             parentName: parentName
@@ -197,7 +200,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
     
     /// Instruments-only decoration: a shield (⛨, BLACK CROSS ON SHIELD) is suffixed when
     /// the agent has any guardrails (input or output), giving a quick visual cue across
-    /// the Agent Runs, Flow Tree, and Tool I/O lanes. Applied here (not to the node's real
+    /// the Node Runs, Flow Tree, and Tool I/O lanes. Applied here (not to the node's real
     /// name) so the JSON trace keeps the undecorated name.
     private static func decorateWithGuardrails(
         _ name: String,

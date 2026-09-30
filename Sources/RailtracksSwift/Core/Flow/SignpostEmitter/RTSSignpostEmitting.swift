@@ -20,8 +20,14 @@ public protocol RTSSignpostEmitting: Sendable {
 
     // MARK: - Interval (called by RTSNodeInvoker, real-time)
 
+    /// Called when a node call (agent, tool, function) begins, once per invocation.
+    /// - Parameters:
+    ///   - nodeID: This invocation's id, distinct per call even when the same node runs twice.
+    ///   - parentNodeID: The calling node's invocation id, or `nil` at the flow root. Lets a
+    ///     conformer nest the call under its caller's interval.
     func emitNodeStart(
         nodeID: UUID,
+        parentNodeID: UUID?,
         nodeName: String,
         nodeType: RTSFlowNodeType,
         sessionID: UUID,

@@ -275,6 +275,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
         signpostEmitter?.emitNodeStart(
             nodeID: invocationID,
+            parentNodeID: parentInvocationID,
             nodeName: node.name(),
             nodeType: nodeType,
             sessionID: sessionID,
