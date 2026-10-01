@@ -15,6 +15,7 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
         let nodeName: String
         let nodeType: RTSFlowNodeType
         let runID: RTSRunID
+        let input: RTSInput
     }
 
     struct End: Equatable {
@@ -52,7 +53,8 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
             parentNodeID: parentNodeID,
             nodeName: nodeName,
             nodeType: nodeType,
-            runID: runID
+            runID: runID,
+            input: input
         )
         lock.withLock { _starts.append(start) }
     }
@@ -182,6 +184,9 @@ extension RailtracksSwiftTestSuite {
             #expect(toolStart.nodeType == .tool)
             #expect(agentStart.parentNodeID == nil)
             #expect(toolStart.parentNodeID == agentStart.nodeID)
+            // The agent's start carries the input it ran with, which the emitter summarizes.
+            #expect(agentStart.input == ["prompt": .string("hi")])
+            #expect(RTSSignpostEmitter.inputSummary(agentStart.input, nodeType: .agent) == "hi")
             expectEveryStartEnded(emitter)
         }
 

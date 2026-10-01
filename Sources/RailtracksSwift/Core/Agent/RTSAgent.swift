@@ -23,15 +23,45 @@ public protocol RTSAgentNode: RTSNode {
     var outputGuardrails: [any RTSAgentOutputGuardrail] { get }
 }
 
+/// The input keys an agent reads and how it turns them into its user message. Static so code
+/// that has only the input, not the agent (e.g. the Instruments node summary in
+/// `RTSSignpostEmitter`), derives the prompt exactly the way `invoke` does.
+enum RTSAgentInput {
+    static let systemMessageKey = "systemMessage"
+    static let promptKey = "prompt"
+    static let imagesKey = "images"
+
+    /// The text the agent sends as its user message, or `nil` when the input has no string prompt.
+    static func prompt(in inputs: RTSInput) -> String? {
+        guard case let .string(prompt) = inputs[promptKey] else {
+            return nil
+        }
+        return prompt
+    }
+
+    /// The images the agent attaches to its user message; non-image entries are skipped.
+    static func images(in inputs: RTSInput) -> [RTSImage] {
+        guard case let .array(values) = inputs[imagesKey] else {
+            return []
+        }
+        return values.compactMap { value in
+            guard case let .image(image) = value else {
+                return nil
+            }
+            return image
+        }
+    }
+}
+
 public extension RTSAgentNode {
     var inputKeySystemMessage: String {
-        "systemMessage"
+        RTSAgentInput.systemMessageKey
     }
     var inputKeyPrompt: String {
-        "prompt"
+        RTSAgentInput.promptKey
     }
     var inputKeyImages: String {
-        "images"
+        RTSAgentInput.imagesKey
     }
     var outputKeyResult: String {
         "result"
@@ -53,21 +83,13 @@ public extension RTSAgentNode {
     func invoke() async throws -> RTSOutput { [:] }
 
     func invoke(runID: RTSRunID, session: RTSLLMSession) async throws -> RTSOutput {
-        guard case let .string(prompt) = inputs[inputKeyPrompt] else {
+        guard let prompt = RTSAgentInput.prompt(in: inputs) else {
             throw RTSError.missingInput("Agent \(agentName) missing prompt")
         }
         if case let .string(systemMessage) = inputs[inputKeySystemMessage] {
             session.setSystemPrompt(systemMessage, runID: runID)
         }
-        var images: [RTSImage] = []
-        if case let .array(values) = inputs[inputKeyImages] {
-            images = values.compactMap { value in
-                guard case let .image(image) = value else {
-                    return nil
-                }
-                return image
-            }
-        }
+        let images = RTSAgentInput.images(in: inputs)
         do {
             let result = try await session.run(prompt, images: images, runID: runID)
             return [outputKeyResult: .string(result)]
