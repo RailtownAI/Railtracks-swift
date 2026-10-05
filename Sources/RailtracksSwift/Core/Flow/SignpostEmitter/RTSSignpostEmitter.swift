@@ -32,6 +32,7 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         parentName: String,
         runID: RTSRunID,
         input: RTSInput,
+        instructions: String?,
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
     ) {
@@ -47,7 +48,8 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             sessionId: sessionID.uuidString,
             runId: sessionID.uuidString,
             parentName: parentName,
-            input: Self.inputSummary(input, nodeType: nodeType)
+            input: Self.inputSummary(input, nodeType: nodeType),
+            instructions: instructions ?? ""
         )
         let handle = RailtracksSignposts.begin(event)
         log.trace("🚧 emitting begin: \(event) | \(handle)")

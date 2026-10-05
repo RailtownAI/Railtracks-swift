@@ -16,6 +16,7 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
         let nodeType: RTSFlowNodeType
         let runID: RTSRunID
         let input: RTSInput
+        let instructions: String?
     }
 
     struct End: Equatable {
@@ -45,6 +46,7 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
         parentName: String,
         runID: RTSRunID,
         input: RTSInput,
+        instructions: String?,
         hasInputGuardrail: Bool,
         hasOutputGuardrail: Bool
     ) {
@@ -54,7 +56,8 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
             nodeName: nodeName,
             nodeType: nodeType,
             runID: runID,
-            input: input
+            input: input,
+            instructions: instructions
         )
         lock.withLock { _starts.append(start) }
     }
@@ -95,6 +98,18 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
         outputTokens: Int, displayRole: String, toolName: String, content: String,
         startTime: TimeInterval, hasInputGuardrail: Bool, hasOutputGuardrail: Bool
     ) {}
+}
+
+/// Captures the system prompts an agent sets on its session.
+private final class SystemPromptRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _prompts: [String] = []
+
+    var prompts: [String] { lock.withLock { _prompts } }
+
+    func record(_ prompt: String) {
+        lock.withLock { _prompts.append(prompt) }
+    }
 }
 
 /// Minimal orchestrator whose body is supplied as a closure.
@@ -145,6 +160,8 @@ extension RailtracksSwiftTestSuite {
             #expect(child.nodeType == .function)
             #expect(root.parentNodeID == nil)
             #expect(child.parentNodeID == root.nodeID)
+            #expect(root.instructions == nil)
+            #expect(child.instructions == nil)
             expectEveryStartEnded(emitter)
         }
 
@@ -184,10 +201,94 @@ extension RailtracksSwiftTestSuite {
             #expect(toolStart.nodeType == .tool)
             #expect(agentStart.parentNodeID == nil)
             #expect(toolStart.parentNodeID == agentStart.nodeID)
+            #expect(agentStart.instructions == nil)
+            #expect(toolStart.instructions == nil)
             // The agent's start carries the input it ran with, which the emitter summarizes.
             #expect(agentStart.input == ["prompt": .string("hi")])
             #expect(RTSSignpostEmitter.inputSummary(agentStart.input, nodeType: .agent) == "hi")
             expectEveryStartEnded(emitter)
+        }
+
+        @Test("an agent's configured system message reaches the emitter as its instructions")
+        func agentConfiguredInstructions() async throws {
+            let emitter = RecordingSignpostEmitter()
+            let systemPrompts = SystemPromptRecorder()
+            let invoker = makeInvoker(emitter)
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Agent",
+                systemMessage: "Be brief."
+            )
+            // Seeds the call input from `agent.inputs`, as `RTSFlow.run`, `RTSRunContext.call`
+            // and the agent-tool bridges do; the invoker replaces the agent's inputs with it.
+            var input = agent.inputs
+            input["prompt"] = .string("hi")
+
+            _ = try await invoker.invokeAgent(agent, input: input, session: stubSession(systemPrompts))
+
+            let start = try #require(emitter.start(named: "Agent"))
+            #expect(start.instructions == "Be brief.")
+            #expect(systemPrompts.prompts == ["Be brief."])
+            expectEveryStartEnded(emitter)
+        }
+
+        @Test("a call-input system message overrides the configured one, and the emitter reports it")
+        func callInputInstructionsWin() async throws {
+            let emitter = RecordingSignpostEmitter()
+            let systemPrompts = SystemPromptRecorder()
+            let invoker = makeInvoker(emitter)
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Agent",
+                systemMessage: "Configured."
+            )
+            // Overlays the call's system message onto `agent.inputs`, as `RTSFlow.run` does when
+            // passed `systemMessage:`.
+            var input = agent.inputs
+            input["prompt"] = .string("hi")
+            input["systemMessage"] = .string("Per call.")
+
+            _ = try await invoker.invokeAgent(agent, input: input, session: stubSession(systemPrompts))
+
+            let start = try #require(emitter.start(named: "Agent"))
+            #expect(start.instructions == "Per call.")
+            // The emitter reports exactly what the agent set on its session.
+            #expect(systemPrompts.prompts == [start.instructions])
+            expectEveryStartEnded(emitter)
+        }
+
+        @Test("an agent invoked without a system message reports nil instructions")
+        func agentWithoutInstructions() async throws {
+            let emitter = RecordingSignpostEmitter()
+            let systemPrompts = SystemPromptRecorder()
+            let invoker = makeInvoker(emitter)
+            let agent = RTSAgent(llmProvider: .openAI(modelIDString: "gpt-4o"), name: "Agent")
+
+            _ = try await invoker.invokeAgent(
+                agent,
+                input: ["prompt": .string("hi")],
+                session: stubSession(systemPrompts)
+            )
+
+            let start = try #require(emitter.start(named: "Agent"))
+            #expect(start.instructions == nil)
+            #expect(systemPrompts.prompts.isEmpty)
+            expectEveryStartEnded(emitter)
+        }
+
+        private func makeInvoker(_ emitter: RecordingSignpostEmitter) -> RTSNodeInvoker {
+            RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID(), signpostEmitter: emitter)
+        }
+
+        /// A session that answers without an LLM and records every system prompt set on it.
+        private func stubSession(_ systemPrompts: SystemPromptRecorder) -> RTSLLMSession {
+            RTSLLMSession(
+                run: { _, _, _ in "done" },
+                setSystemPrompt: { prompt, _ in systemPrompts.record(prompt) },
+                message: { [] },
+                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
+                agentName: "Agent"
+            )
         }
 
         private func expectEveryStartEnded(_ emitter: RecordingSignpostEmitter) {

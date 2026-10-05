@@ -31,6 +31,16 @@ enum RTSAgentInput {
     static let promptKey = "prompt"
     static let imagesKey = "images"
 
+    /// The system prompt the agent sets on its session, or `nil` when the input has no string
+    /// system message. `invoke` reads only its own `inputs`, which the invoker replaces with the
+    /// call's input, so this is the system message the agent actually runs with.
+    static func systemMessage(in inputs: RTSInput) -> String? {
+        guard case let .string(systemMessage) = inputs[systemMessageKey] else {
+            return nil
+        }
+        return systemMessage
+    }
+
     /// The text the agent sends as its user message, or `nil` when the input has no string prompt.
     static func prompt(in inputs: RTSInput) -> String? {
         guard case let .string(prompt) = inputs[promptKey] else {
@@ -86,7 +96,7 @@ public extension RTSAgentNode {
         guard let prompt = RTSAgentInput.prompt(in: inputs) else {
             throw RTSError.missingInput("Agent \(agentName) missing prompt")
         }
-        if case let .string(systemMessage) = inputs[inputKeySystemMessage] {
+        if let systemMessage = RTSAgentInput.systemMessage(in: inputs) {
             session.setSystemPrompt(systemMessage, runID: runID)
         }
         let images = RTSAgentInput.images(in: inputs)
