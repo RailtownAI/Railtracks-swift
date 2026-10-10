@@ -1,5 +1,5 @@
 {
-  "originHash" : "17b428e8ff1c182450578fa7572c84476107bfce8f92967933b87cbb35ace9af",
+  "originHash" : "6c7165718fd92f0125d9c7b9b2a806b4f08c5eef1035d6f50752fbcef17667f4",
   "pins" : [
     {
       "identity" : "claudeforfoundationmodels",
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
       "state" : {
-        "revision" : "2e282a7919995df8aa775928669548b84171cf68",
-        "version" : "1.0.0"
+        "revision" : "ffcb38103a594183ff45865233ca4d066e5de3c3",
+        "version" : "1.1.0"
       }
     },
     {
