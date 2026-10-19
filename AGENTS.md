@@ -196,6 +196,8 @@ Per-agent input/output guardrails live in `Guardrails/` (abstraction + runner) a
 | New tool | Conform to `RTSToolNode`; set `isRequired = true` if schema failure should be fatal |
 | Structured output | Set `outputSchema` on the agent; conversion failure is always fatal by design |
 | New guardrail | Conform to `RTSAgentInputGuardrail` / `RTSAgentOutputGuardrail` (or use the closure conformers); attach via `RTSAgent(inputGuardrails:outputGuardrails:)`. Prebuilt ones live in `Guardrails/Builtin/` |
+| New RAG vector store | Conform to `RTSRAGVectorStore`, including `documents(under:scope:)` — the orphan sweep's listing; match scope exactly. See `docs/rag-orphan-sweep.md` |
+| New RAG loader | Return an `RTSRAGDocumentStream`; pass `root:` (the path it was given) to opt in to the orphan sweep |
 | Consume observability events | Subscribe to `RTSFlow.eventPublisher` — it's multicast, so add as many subscribers as you like. The one exception is a second `RTSEventWriter`: it would append to the same `<session id>.jsonl` as the flow's built-in writer. To own the file yourself, pass `savesEvents: false`; to observe it, read `flow.eventWriter` |
 
 ### Observability events
@@ -249,10 +251,11 @@ grep -rn "^import Conduit" Sources/RailtracksSwiftRAG/
 If a component ever genuinely needs an agent, add a bridge target depending on both rather than a
 dependency here.
 
-Apple's `NaturalLanguage` is the one platform framework the module does lean on — `NLTokenizer`
-for sentence boundaries and `NLContextualEmbedding` for on-device vectors — which makes the
-default splitter and embedder Apple-only. Both sit behind protocols, so a Linux port supplies
-different conformers rather than changing anything else.
+Apple's `NaturalLanguage` is the one platform framework the module's core pipeline leans on —
+`NLTokenizer` for sentence boundaries and `NLContextualEmbedding` for on-device vectors — which
+makes the default splitter and embedder Apple-only. Both sit behind protocols, so a Linux port
+supplies different conformers rather than changing anything else. The `Spotlight/` folder (below)
+adds Core Spotlight, and is Apple-only by nature.
 
 Chunk size is capped in **characters** (`RTSRAGLimits.defaultMaxChunkCharacters`), not tokens. A
 chunker enforces that by construction, so oversized input is impossible rather than detected —
@@ -260,6 +263,59 @@ which is what lets the port ship without a token counter, since nothing in Swift
 tokens accurately (Conduit's `countTokens` is `text.count / 4`).
 
 Design, the Python mapping, and the two deliberate departures from it live in `docs/rag-port.md`.
+
+#### Spotlight path
+
+A second ingest path, in `Spotlight/`, with Core Spotlight as both index and retriever and no vector
+store of ours: `RTSRAGSpotlightIngestRuntime` runs loader → chunker → `RTSRAGSpotlightFeeder`, which
+donates each chunk as a `CSSearchableItem`, and `RTSRAGSpotlightSearcher` queries it with
+`CSUserQuery`. Spotlight embeds for itself, so there is no embedding step. It is kept as a separate
+runtime rather than a generalised `RTSRAGRetrievalRuntime`, but shares that runtime's rules and types
+(`RTSRAGIngestEvent`, `RTSRAGIngestionStats`). Every API it uses predates OS 27, so the package floor
+is unchanged — `SpotlightSearchTool`, the one OS 27 API, was considered and not used.
+
+- **Item ids are positional**, `"<documentID>#<chunkIndex>"` (`RTSRAGChunk.positionalIdentifier`),
+  because `RTSRAGChunkID` is a random UUID per ingest. Each document is its own domain,
+  `"<namespace>.<documentID>"`, and replacement is delete-the-domain then index — the delete is what
+  clears trailing items when a document shrinks.
+- **The staleness check asks Spotlight**, through custom attributes (source, content hash, chunk
+  count, namespace), with no local ledger. Unlike the vector-store path, a failing staleness query
+  re-donates rather than ending the run.
+- **Items carry `expirationDate`** (`.distantFuture` by default); unset, Spotlight expires them
+  silently.
+- **Demo:** run it on `RailtracksSwiftDemoOS27`. Spotlight refuses the main target's bundle id with
+  `CSIndexErrorDomain -1003`, persistently and for no stated reason.
+
+Design, the chunk-to-item mapping, and the findings from real runs live in `docs/spotlight-rag.md`.
+
+#### Orphan sweep
+
+Both runtimes sweep after an ingest: **every stored document under the run's root that the run did
+not see is removed.** Without it, a moved or renamed file left its old path's entries behind (every
+passage retrieved twice) and a shrunk file kept its vanished pages or rows.
+
+- **Root** is the file or folder the loader was pointed at, carried on `RTSRAGDocumentStream.root`.
+  Built-in loaders set it; a custom loader's defaults to `nil`, which never sweeps.
+- **Seen** is every id the run loaded, whatever became of it. Also kept: ids a `mapDocuments`
+  transform dropped (so a sanitizer change is never destructive), and everything under a source
+  that failed to load (unreadable is not gone). The stream records both.
+- **No sweep** when the run threw or was cancelled, or with `ingest(…, sweepsOrphans: false)`. A
+  failed sweep is counted in `sweepFailures`, never thrown.
+- **The rule is one pure function**, `RTSRAGOrphanSweep.orphans(stored:seen:filtered:failedSources:)`,
+  shared by both runtimes. Each runtime only lists what is stored under the root —
+  `RTSRAGVectorStore.documents(under:scope:)` (scope matched **exactly**, unlike retrieval) or
+  `RTSRAGSpotlightFeeder.documents(under:)` — and deletes what it returns.
+- **Root matching** (`RTSRAGSourceRoot`): a source is under `R` when it equals `R` or starts with
+  `R#` (a page or row) or `R/` (inside a folder). It matches every spelling of `R` — as given,
+  canonical, and its `/private` counterpart — because `FileManager` enumerates `/var/…` as
+  `/private/var/…`; without that, every folder sweep is a silent no-op.
+- **Content hash is deliberately not used**: it cannot tell a move from a copy, and identical pages
+  or rows are common.
+- **A sweep reaches only its root.** A deleted or renamed sibling of a single picked file, or a
+  renamed folder, is outside it — the app removes those with `removeSource(at:)`, on either runtime,
+  which works on paths that no longer exist.
+
+The rule, its use cases, and a possible injectable sweeper live in `docs/rag-orphan-sweep.md`.
 
 ### Concurrency model
 

@@ -83,6 +83,8 @@ class RAGSpotlightViewModel {
     private var subscription: AnyCancellable?
     private var runTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
+    /// Each loaded page's source, so a commit — whose event carries only the id — can be named.
+    private var loadedSources: [RTSRAGDocumentID: String] = [:]
 
     init() {
         runtime = RTSRAGSpotlightIngestRuntime(feeder: feeder)
@@ -179,7 +181,8 @@ class RAGSpotlightViewModel {
             append(
                 "done: \(stats.documentsLoaded) page(s), \(stats.chunksCreated) chunk(s), "
                     + "\(stats.documentsCommitted) donated, \(stats.documentsSkipped) skipped, "
-                    + "\(stats.documentsWithheld) withheld, \(stats.documentsEmpty) empty"
+                    + "\(stats.documentsWithheld) withheld, \(stats.documentsEmpty) empty, "
+                    + "\(stats.documentsSwept) swept"
             )
             if stats.documentsSkipped == stats.documentsLoaded, stats.documentsLoaded > 0 {
                 append("every page unchanged — the staleness check held on the default index")
@@ -192,12 +195,14 @@ class RAGSpotlightViewModel {
     /// Mirrors the runtime's events into the log and the counters.
     private func record(_ event: RTSRAGIngestEvent) {
         switch event {
-        case .documentLoaded:
+        case .documentLoaded(let id, let source):
             documentCount += 1
+            loadedSources[id] = source
         case .documentChunked(_, let chunks):
             chunkCount += chunks
-        case .documentCommitted:
+        case .documentCommitted(let id, _, _):
             committedCount += 1
+            append("\(Self.label(loadedSources[id])) new or changed — donated to Spotlight")
         case .documentSkipped(_, let source):
             skippedCount += 1
             append("\(Self.label(source)) unchanged — skipped")
@@ -401,6 +406,7 @@ class RAGSpotlightViewModel {
         committedCount = 0
         skippedCount = 0
         withheldCount = 0
+        loadedSources = [:]
     }
 
     /// `"<path>/file.pdf#page-N"` → `"file.pdf#page-N"`, for the log.
