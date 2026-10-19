@@ -4,16 +4,30 @@ A Swift 6 library for building agentic LLM pipelines with tool-calling support. 
 
 ## Requirements
 
-- macOS 26+ / iOS 26+
-- Swift 6
+- macOS 15+ / iOS 18+
+- Swift 6.3 (swift-tools-version 6.3)
+
+Only the features built on Apple's FoundationModels need a newer OS:
+
+| Feature | Requires |
+|---|---|
+| `.appleAI` provider | macOS 26+ / iOS 26+ with Apple Intelligence enabled |
+| `RTSAppleAIToolNode`, `RTSAppleAIPIIRedact*Guardrail` | macOS 26+ / iOS 26+ (`@available`), with Apple Intelligence enabled |
+| `.foundationModel` (third-party FoundationModels `LanguageModel`) | macOS 27+ / iOS 27+ |
+
+The providers are checked at run time: below their OS, the gateway throws `RTSError.providerUnavailable`. The tool node and guardrails are `@available`-gated, so use them behind `if #available`. OpenAI, Anthropic and Gemini need nothing beyond the package's minimum.
 
 ## Supported LLM Providers
 
-| Provider | Enum case |
-|---|---|
-| OpenAI | `.openAI(modelIDString:)` |
-| Apple Intelligence (on-device) | `.appleAI` |
-| Any FoundationModels `LanguageModel`, e.g. Claude via `ClaudeForFoundationModels` (macOS/iOS 27) | `.foundationModel(RTSFoundationLanguageModel)` |
+| Provider | Enum case | Model IDs |
+|---|---|---|
+| OpenAI | `.openAI(modelIDString:)` | `RTSOpenAIModelID` |
+| Anthropic | `.anthropic(modelIDString:)` | `RTSAnthropicModelID` |
+| Google Gemini | `.gemini(modelIDString:options:)` | `RTSGeminiModelID` |
+| Apple Intelligence (on-device) | `.appleAI` | — |
+| Any FoundationModels `LanguageModel`, e.g. Claude via `ClaudeForFoundationModels` | `.foundationModel(RTSFoundationLanguageModel)` | — |
+
+`RTSGeminiOptions` carries Gemini-only settings, such as `mediaResolution` for image input.
 
 ## Quick Start
 
@@ -165,7 +179,7 @@ RTSAgent(
 
 ### Structured Output
 
-Annotate any `Codable` struct with `@RTSSchema` to generate an `RTSOutputSchema` the library can pass to the model. Supported by both `.openAI` and `.appleAI`.
+Annotate any `Codable` struct with `@RTSSchema` to generate an `RTSOutputSchema` the library can pass to the model. Supported by `.openAI`, `.anthropic`, `.gemini` and `.appleAI`.
 
 ```swift
 @RTSSchema
@@ -189,7 +203,7 @@ Nested types are supported — annotate each nested struct with `@RTSSchema` as 
 
 ### RTSToolNode
 
-Protocol for tools used with OpenAI (via Conduit). Implement `callableRoutine`, `toolDescription`, and `parameterSchema`.
+Protocol for tools used with the cloud providers — OpenAI, Anthropic and Gemini (via Conduit). Implement `callableRoutine`, `toolDescription`, and `parameterSchema`.
 
 ```swift
 struct MyTool: RTSToolNode {
@@ -204,7 +218,7 @@ struct MyTool: RTSToolNode {
 
 ### RTSAppleAIToolNode
 
-Extends `RTSToolNode` with FoundationModels' `Tool` protocol for Apple Intelligence support. Declare `@Generable struct Arguments: Encodable` with `@Guide` descriptions and the library provides `parameterSchema` and `call(arguments:)` automatically. The same `callableRoutine` runs for both OpenAI and Apple paths.
+Extends `RTSToolNode` with FoundationModels' `Tool` protocol for Apple Intelligence support. Declare `@Generable struct Arguments: Encodable` with `@Guide` descriptions and the library provides `parameterSchema` and `call(arguments:)` automatically. The same `callableRoutine` runs on both the cloud and Apple paths.
 
 ### RTSFoundationLanguageModel
 
@@ -248,8 +262,8 @@ typealias RTSOutput = [String: RTSValue]
 Instantiated with API keys at the app level. Builds provider-specific sessions per agent invocation.
 
 ```swift
-// OpenAI
-RTSLLMGateway(apiKeys: [.openAI: apiKey])
+// Cloud providers — one key per provider kind the app's agents use
+RTSLLMGateway(apiKeys: [.openAI: openAIKey, .anthropic: anthropicKey, .gemini: geminiKey])
 
 // Apple Intelligence (no key needed)
 RTSLLMGateway(apiKeys: [:])
@@ -409,18 +423,21 @@ do {
 
 The on-device PII guard calls FoundationModels **directly** (not through the flow), so the raw pre-redaction text is never written to the trace — only the redacted result and the verdict counts.
 
-## OpenAI Model IDs
+## Model IDs
 
 ```swift
-RTSOpenAIModelID.gpt4o
+RTSOpenAIModelID.gpt5_4
 RTSOpenAIModelID.gpt4oMini
-RTSOpenAIModelID.gpt4Turbo
-RTSOpenAIModelID.o1
-RTSOpenAIModelID.o3Mini
+RTSAnthropicModelID.claudeSonnet46
+RTSAnthropicModelID.claudeHaiku45
+RTSGeminiModelID.gemini35Flash
+RTSGeminiModelID.gemini25Pro
 // ...
 ```
 
-Use `.modelIDString` to get the raw string for `RTSLLMProvider`.
+Use `.modelIDString` to get the raw string for `RTSLLMProvider`, e.g.
+`.anthropic(modelIDString: RTSAnthropicModelID.claudeSonnet46.modelIDString)`. Any string the
+provider accepts works too.
 
 ## Error Handling
 
@@ -641,6 +658,6 @@ interleave its writes with the flow's.
 
 ## Package Dependencies
 
-- [swift-conduit](https://github.com/RailtownAI/Conduit) — LLM backend (OpenAI and OpenRouter)
+- [swift-conduit](https://github.com/RailtownAI/Conduit) — LLM backend (OpenAI, Anthropic and Gemini)
 - [RailtracksInstrumentationKit](https://github.com/FabricioSffair/RailtracksInstrumentationKit) — Instruments signpost emission for live tracing
 - [swift-log](https://github.com/apple/swift-log) — Logging

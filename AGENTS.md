@@ -125,8 +125,8 @@ RailtracksSwift is a Swift 6 library for orchestrating LLM agent pipelines. It w
 │  Conduit  (external)    │  │  Apple Foundation Models    │
 │  ChatSession            │  │  (external, on-device)      │
 │  ToolExecutor           │  │  LanguageModelSession       │
-│  OpenAI / OpenRouter /  │  │                             │
-│  Anthropic              │  │                             │
+│  OpenAI / Anthropic /   │  │                             │
+│  Gemini                 │  │                             │
 └─────────────────────────┘  └─────────────────────────────┘
 ```
 
