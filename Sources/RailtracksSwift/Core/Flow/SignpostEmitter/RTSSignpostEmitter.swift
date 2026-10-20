@@ -14,36 +14,42 @@ import RailtracksInstrumentationKit
 
 /// Default `RTSSignpostEmitting` conformer. Routes each call directly to the
 /// matching `RailtracksSignposts` API — no internal state except the
-/// `AgentRunHandle` map needed to pair interval begin/end calls.
+/// `NodeRunHandle` map needed to pair interval begin/end calls. Every node call
+/// (agent, tool, function) gets a Node Runs interval nested under its caller's.
 final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
 
     private let lock = NSLock()
-    private var handles: [RTSRunID: AgentRunHandle] = [:]
+    private var handles: [RTSRunID: NodeRunHandle] = [:]
 
     // MARK: - Interval
 
     func emitNodeStart(
         nodeID: UUID,
+        parentNodeID: UUID?,
         nodeName: String,
         nodeType: RTSFlowNodeType,
         sessionID: UUID,
         parentName: String,
         runID: RTSRunID,
         input: RTSInput,
+        instructions: String?,
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
     ) {
-        guard nodeType == .agent else { return }
-        let event = AgentRun(
+        let event = NodeRun(
             name: Self.decorateWithGuardrails(
                 nodeName,
                 hasInputGuardrail: hasInputGuardrail,
                 hasOutputGuardrail: hasOutputGuardrail
             ),
+            nodeType: nodeType.asNodeType,
             nodeId: nodeID.uuidString,
+            parentNodeId: parentNodeID?.uuidString ?? "",
             sessionId: sessionID.uuidString,
             runId: sessionID.uuidString,
-            parentName: parentName
+            parentName: parentName,
+            input: Self.inputSummary(input, nodeType: nodeType),
+            instructions: instructions ?? ""
         )
         let handle = RailtracksSignposts.begin(event)
         log.trace("🚧 emitting begin: \(event) | \(handle)")
@@ -195,9 +201,37 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         RailtracksSignposts.emit(io)
     }
     
+    /// Rough ceiling on the summary text built here. The kit collapses whitespace and caps the
+    /// published value far below this; the limit only stops a huge input from being rendered in full.
+    static let inputSummaryLimit = 4096
+
+    /// Short text for the Node Runs hover: what the node received. For an agent, the prompt it sends
+    /// as its user message (plus a placeholder per attached image), derived by `RTSAgentInput` the way
+    /// `RTSAgentNode.invoke` does; an agent input without a prompt falls back to the key/value form.
+    /// For tools and functions, `key: value` pairs in key order, each value rendered as the Tool I/O
+    /// lane renders it. Empty input gives `""`.
+    static func inputSummary(_ input: RTSInput, nodeType: RTSFlowNodeType) -> String {
+        if nodeType == .agent, let prompt = RTSAgentInput.prompt(in: input) {
+            let images = RTSAgentInput.images(in: input).map(RTSValue.imagePlaceholder)
+            return ([String(prompt.prefix(inputSummaryLimit))] + images).joined(separator: " ")
+        }
+        var summary = ""
+        for key in input.keys.sorted() {
+            if summary.utf8.count > inputSummaryLimit {
+                summary += "…"
+                break
+            }
+            if !summary.isEmpty {
+                summary += ", "
+            }
+            summary += "\(key): \((input[key] ?? .null).signpostText)"
+        }
+        return summary
+    }
+
     /// Instruments-only decoration: a shield (⛨, BLACK CROSS ON SHIELD) is suffixed when
     /// the agent has any guardrails (input or output), giving a quick visual cue across
-    /// the Agent Runs, Flow Tree, and Tool I/O lanes. Applied here (not to the node's real
+    /// the Node Runs, Flow Tree, and Tool I/O lanes. Applied here (not to the node's real
     /// name) so the JSON trace keeps the undecorated name.
     private static func decorateWithGuardrails(
         _ name: String,

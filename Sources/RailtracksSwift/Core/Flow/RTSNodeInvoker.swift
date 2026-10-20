@@ -275,12 +275,16 @@ public class RTSNodeInvoker: @unchecked Sendable {
 
         signpostEmitter?.emitNodeStart(
             nodeID: invocationID,
+            parentNodeID: parentInvocationID,
             nodeName: node.name(),
             nodeType: nodeType,
             sessionID: sessionID,
             parentName: createdBy?.name() ?? "",
             runID: runID,
             input: workingInput,
+            // `invokeAgent` makes `workingInput` the agent's whole `inputs`, so this is the
+            // system message `invoke` will set — whatever the caller put in the call input.
+            instructions: nodeType == .agent ? RTSAgentInput.systemMessage(in: workingInput) : nil,
             hasInputGuardrail: runInputGuardrails != nil,
             hasOutputGuardrail: runOutputGuardrails != nil
         )

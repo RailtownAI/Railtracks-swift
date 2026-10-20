@@ -168,7 +168,7 @@ extension RTSFlowGraphCollector {
         let input = edgeEvent.input ?? [:]
         for key in input.keys.sorted() {
             ioIndex += 1
-            let kwargContent = stringify(input[key] ?? .null)
+            let kwargContent = (input[key] ?? .null).signpostText
             log.debug("🌊 emitIO[edge-in] '\(edgeEvent.targetName)' kwarg=\(key) contentLen=\(kwargContent.count) startTime=\(startTime)")
             signpostEmitter.emitIO(
                 nodeID: targetIDStr,
@@ -197,7 +197,7 @@ extension RTSFlowGraphCollector {
         switch edgeEvent.nodeType {
         case .tool, .function:
             let output = edgeEvent.output ?? [:]
-            outputRows = output.keys.sorted().map { ($0, stringify(output[$0] ?? .null)) }
+            outputRows = output.keys.sorted().map { ($0, (output[$0] ?? .null).signpostText) }
         case .agent:
             outputRows = [("result", edgeEvent.error == nil ? "Success" : "Failed")]
         }
@@ -247,21 +247,6 @@ extension RTSFlowGraphCollector {
         let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
         let cost = try? await RTSCostCalculator.shared.calculateCost(model: model, usage: usage)
         return cost?.totalCost ?? 0
-    }
-
-    private func stringify(_ value: RTSValue) -> String {
-        switch value {
-        case .null:           return "null"
-        case .bool(let b):   return b ? "true" : "false"
-        case .number(let n): return "\(n)"
-        case .string(let s): return s
-        case .array, .object:
-            guard let data = try? JSONEncoder().encode(value),
-                  let str = String(data: data, encoding: .utf8) else { return "\(value)" }
-            return str
-        case .image(let image):
-            return "[image \(image.mimeType)]"
-        }
     }
 
     /// Walk `edgeEvents` upward from `nodeID` to the root, collecting ancestor
