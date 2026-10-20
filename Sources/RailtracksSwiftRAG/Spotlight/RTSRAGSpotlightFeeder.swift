@@ -133,6 +133,54 @@ public struct RTSRAGSpotlightFeeder: Sendable {
         return "\(key) == \"\(RTSRAGSpotlightFeeder.escapedQueryValue(namespace))\""
     }
 
+    // MARK: - Listing
+
+    /// Every document this feeder donated whose source lies under `root`, with its source.
+    ///
+    /// What the orphan sweep and `removeSource(at:)` delete from. Spotlight has no tenant scope, so
+    /// the feeder's namespace is the scope. See ``RTSRAGSourceRoot`` for the matching rule.
+    public func documents(under root: RTSRAGSourceRoot) async throws -> [RTSRAGDocumentID: String] {
+        let records = try await indexing.records(
+            matching: RTSRAGSpotlightFeeder.listingQuery(namespace: namespace, root: root)
+        )
+        var found: [RTSRAGDocumentID: String] = [:]
+        for record in records {
+            // Re-checked here as well as in the query: the wildcard is Spotlight's, and a document
+            // is only deleted on this module's own reading of the rule.
+            guard let id = record.documentID,
+                  let source = record.sourcePath,
+                  root.contains(source: source)
+            else {
+                continue
+            }
+            found[id] = source
+        }
+        return found
+    }
+
+    /// `namespace == … && (source == path || source == "path#*" || source == "path/*" || …)`, over
+    /// every one of the root's ``RTSRAGSourceRoot/spellings``.
+    ///
+    /// Each path is escaped as a literal, and only the trailing `*` is left unescaped, as the
+    /// wildcard.
+    static func listingQuery(
+        namespace: String,
+        root: RTSRAGSourceRoot
+    ) -> String {
+        let key = RTSRAGSpotlightAttribute.sourcePath.rawValue
+        let sources = root.spellings.flatMap { spelling in
+            let path = escapedQueryValue(spelling)
+            return [
+                "\(key) == \"\(path)\"",
+                "\(key) == \"\(path)#*\"",
+                "\(key) == \"\(path)/*\"",
+            ]
+        }
+        let namespaceKey = RTSRAGSpotlightAttribute.namespace.rawValue
+        let scope = "\(namespaceKey) == \"\(escapedQueryValue(namespace))\""
+        return "\(scope) && (\(sources.joined(separator: " || ")))"
+    }
+
     // MARK: - Staleness
 
     /// Whether Spotlight already holds this source, at this content, in full.

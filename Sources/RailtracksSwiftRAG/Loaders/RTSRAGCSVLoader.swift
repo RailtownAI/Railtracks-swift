@@ -57,7 +57,7 @@ public struct RTSRAGCSVLoader: RTSRAGDocumentLoader {
         let idColumn = self.idColumn
         let ignoreColumns = self.ignoreColumns
         let separator = self.contentSeparator
-        return RTSRAGDocumentStream(sources: resolved) { url in
+        return RTSRAGDocumentStream(sources: resolved, root: path) { url in
             try RTSRAGCSVLoader.makeDocuments(
                 at: url,
                 contentColumns: contentColumns,

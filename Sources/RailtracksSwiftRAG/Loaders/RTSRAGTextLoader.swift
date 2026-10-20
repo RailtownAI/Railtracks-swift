@@ -27,7 +27,7 @@ public struct RTSRAGTextLoader: RTSRAGDocumentLoader {
             at: path,
             extensions: RTSRAGTextLoader.supportedExtensions
         )
-        return RTSRAGDocumentStream(sources: resolved) { url in
+        return RTSRAGDocumentStream(sources: resolved, root: path) { url in
             [try RTSRAGTextLoader.makeDocument(at: url)]
         }
     }

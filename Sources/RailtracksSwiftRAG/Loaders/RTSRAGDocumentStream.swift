@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 // MARK: - RTSRAGDocumentStream
 
@@ -32,12 +33,37 @@ public struct RTSRAGDocumentStream: AsyncSequence, Sendable {
     private let sources: [URL]
     /// Turns one source into its documents. May produce several — a CSV file yields one per row.
     private let loadOne: @Sendable (URL) async throws -> [RTSRAGDocument]
+    /// What one run of this stream covers — the file or folder the loader was pointed at — and so
+    /// what an orphan sweep may clear: stored documents under it that the run did not see.
+    ///
+    /// `nil`, the default, means the stream claims to cover nothing, and no sweep follows it. That
+    /// keeps a custom loader safe until it states a root deliberately. See
+    /// `docs/rag-orphan-sweep.md`.
+    public let root: URL?
+    /// What the stream read but did not emit — sources that failed, documents a transform removed.
+    /// Both protect stored documents from a sweep. Shared with every iterator and every stream
+    /// ``mapDocuments(_:)`` derives, so it sees the whole run whichever layer did the dropping.
+    let ledger: RTSRAGStreamLedger
 
+    /// - Parameter root: the file or folder this stream covers, for the orphan sweep. Leave it
+    ///   `nil` unless every document under it would be emitted by a complete run.
     public init(
         sources: [URL],
+        root: URL? = nil,
+        loadOne: @escaping @Sendable (URL) async throws -> [RTSRAGDocument]
+    ) {
+        self.init(sources: sources, root: root, ledger: RTSRAGStreamLedger(), loadOne: loadOne)
+    }
+
+    private init(
+        sources: [URL],
+        root: URL?,
+        ledger: RTSRAGStreamLedger,
         loadOne: @escaping @Sendable (URL) async throws -> [RTSRAGDocument]
     ) {
         self.sources = sources
+        self.root = root
+        self.ledger = ledger
         self.loadOne = loadOne
     }
 
@@ -51,7 +77,7 @@ public struct RTSRAGDocumentStream: AsyncSequence, Sendable {
     }
 
     public func makeAsyncIterator() -> Iterator {
-        Iterator(sources: sources, loadOne: loadOne)
+        Iterator(sources: sources, ledger: ledger, loadOne: loadOne)
     }
 
     /// A stream that applies `transform` to each source's documents before they are emitted.
@@ -60,17 +86,28 @@ public struct RTSRAGDocumentStream: AsyncSequence, Sendable {
     /// documents, and so laziness is preserved — `transform` runs when its source is read, not
     /// ahead of time. This is what lets ``RTSRAGSanitizingLoader`` decorate any loader without
     /// reaching into it.
+    ///
+    /// Every document id `transform` removes is recorded as *filtered*, which protects its stored
+    /// version from the orphan sweep: a document a sanitizer dropped still exists at its source,
+    /// and deleting it on absence would make an unrelated sanitizer change quietly destructive.
+    /// The root carries over, since the derived stream reads the same sources.
     public func mapDocuments(
         _ transform: @escaping @Sendable ([RTSRAGDocument]) async throws -> [RTSRAGDocument]
     ) -> RTSRAGDocumentStream {
         let loadOne = self.loadOne
-        return RTSRAGDocumentStream(sources: sources) { url in
-            try await transform(try await loadOne(url))
+        let ledger = self.ledger
+        return RTSRAGDocumentStream(sources: sources, root: root, ledger: ledger) { url in
+            let loaded = try await loadOne(url)
+            let kept = try await transform(loaded)
+            let keptIDs = Set(kept.map(\.id))
+            ledger.recordFiltered(loaded.map(\.id).filter { !keptIDs.contains($0) })
+            return kept
         }
     }
 
     public struct Iterator: AsyncIteratorProtocol {
         private let sources: [URL]
+        private let ledger: RTSRAGStreamLedger
         private let loadOne: @Sendable (URL) async throws -> [RTSRAGDocument]
         private var sourceIndex = 0
         /// Documents from the source currently being drained. Only ever holds one source's worth,
@@ -80,9 +117,11 @@ public struct RTSRAGDocumentStream: AsyncSequence, Sendable {
 
         init(
             sources: [URL],
+            ledger: RTSRAGStreamLedger,
             loadOne: @escaping @Sendable (URL) async throws -> [RTSRAGDocument]
         ) {
             self.sources = sources
+            self.ledger = ledger
             self.loadOne = loadOne
         }
 
@@ -114,6 +153,9 @@ public struct RTSRAGDocumentStream: AsyncSequence, Sendable {
                     // to the following source. This is the departure from Python, where a single
                     // failing file aborts the whole ingestion run.
                     let failure = RTSRAGError.asLoadFailure(error, source: source.path)
+                    // Unreadable is not gone: whatever is stored for this source must survive the
+                    // orphan sweep, which cannot tell a missing file from a failing one.
+                    ledger.recordFailed(source)
                     // Warning rather than error: the caller receives this as a `.failure` element
                     // and decides what it means, so this is a notice, not a verdict. Warning is
                     // also above swift-log's default level, unlike the two `debug` lines above —
@@ -127,6 +169,44 @@ public struct RTSRAGDocumentStream: AsyncSequence, Sendable {
                 // to the next rather than emitting anything.
             }
         }
+    }
+}
+
+// MARK: - RTSRAGStreamLedger
+
+/// What one run of a stream read without emitting: the inputs to the orphan sweep's protections.
+///
+/// A class shared by reference, because the stream is a value that is copied into iterators and
+/// wrapped by ``RTSRAGDocumentStream/mapDocuments(_:)`` — and the runtime has to read, after the
+/// run, what any of those layers recorded during it.
+final class RTSRAGStreamLedger: Sendable {
+
+    private struct State {
+        var failedSources: Set<URL> = []
+        var filteredDocuments: Set<RTSRAGDocumentID> = []
+    }
+
+    private let state = Mutex(State())
+
+    /// Sources whose read threw — every stored document under one is kept.
+    var failedSources: Set<URL> {
+        state.withLock { $0.failedSources }
+    }
+
+    /// Documents a transform removed before they were emitted — kept, since they still exist.
+    var filteredDocuments: Set<RTSRAGDocumentID> {
+        state.withLock { $0.filteredDocuments }
+    }
+
+    func recordFailed(_ source: URL) {
+        state.withLock { _ = $0.failedSources.insert(source) }
+    }
+
+    func recordFiltered(_ ids: [RTSRAGDocumentID]) {
+        guard !ids.isEmpty else {
+            return
+        }
+        state.withLock { $0.filteredDocuments.formUnion(ids) }
     }
 }
 

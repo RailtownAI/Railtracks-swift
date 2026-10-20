@@ -113,6 +113,13 @@ public actor RTSRAGFileStore: RTSRAGVectorStore {
         index.count(matching: filters)
     }
 
+    public func documents(
+        under root: RTSRAGSourceRoot,
+        scope: RTSRAGStoreScope?
+    ) async throws -> [RTSRAGDocumentID: String] {
+        index.documents(under: root, scope: scope)
+    }
+
     // MARK: - Log
 
     /// Writes `entries` to the index and the log together, or to neither.

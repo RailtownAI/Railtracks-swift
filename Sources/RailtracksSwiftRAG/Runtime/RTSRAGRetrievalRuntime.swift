@@ -93,15 +93,23 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
     /// the event stream — it cannot disturb the run already in progress. Concurrency comes from a
     /// second runtime over the same embedder and store.
     ///
+    /// **Then sweeps orphans.** Once the loader has been read to the end, stored documents under
+    /// its root — in this `scope` — that the run did not see are removed: a file that moved away,
+    /// a page or row that is gone. Documents a sanitizer dropped, and sources that failed to load,
+    /// are kept. A run that throws or is cancelled sweeps nothing. See `docs/rag-orphan-sweep.md`.
+    ///
+    /// - Parameter sweepsOrphans: `false` skips the sweep for this run.
     /// - Throws: ``RTSRAGError/ingestAlreadyRunning`` if this runtime is already ingesting; or,
     ///   once running, when the *embedder* is unusable — an exhausted account, an unavailable
     ///   model — or when the store was built by a different embedder. Per-document problems are
-    ///   reported as events and counted in the returned stats; they do not end the run.
+    ///   reported as events and counted in the returned stats; they do not end the run. Nor does a
+    ///   failed sweep, which is counted in ``RTSRAGIngestionStats/sweepFailures``.
     @discardableResult
     public func ingest(
         loader: any RTSRAGDocumentLoader,
         chunker: any RTSRAGChunker,
-        scope: RTSRAGStoreScope? = nil
+        scope: RTSRAGStoreScope? = nil,
+        sweepsOrphans: Bool = true
     ) async throws -> RTSRAGIngestionStats {
         // Ordering is load-bearing: the claim throws *before* the `defer` is installed, so a
         // refused second call cannot release the slot the first one holds. Written the other way
@@ -120,7 +128,10 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
         var seen = Set<RTSRAGDocumentID>()
 
         do {
-            for await element in try loader.stream() {
+            // Held rather than iterated inline: after the loop, the sweep reads what the stream
+            // covered and what it recorded as filtered or failed.
+            let stream = try loader.stream()
+            for await element in stream {
                 try Task.checkCancellation()
                 switch element {
                 case .failure(let error):
@@ -146,6 +157,17 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
                     record(outcome, for: document, into: &stats)
                 }
             }
+            // Only a run that read its loader to the end may sweep: a thrown run never gets here,
+            // and a cancellation that landed after the last element is checked for explicitly.
+            if sweepsOrphans, let root = stream.root, !Task.isCancelled {
+                await sweepOrphans(
+                    under: RTSRAGSourceRoot(root),
+                    seen: seen,
+                    stream: stream,
+                    scope: scope,
+                    into: &stats
+                )
+            }
         } catch {
             // Drained on the way out too, not only on success — and `defer` cannot `await`.
             // Delivery is asynchronous, so without this the throw overtakes the events that explain
@@ -156,6 +178,66 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
         }
         await emitter.drain()
         return stats
+    }
+
+    /// Removes every stored document whose source is `url`, or lies inside it — in `scope`.
+    ///
+    /// For what the automatic sweep cannot decide: that a file was **deleted**. The sweep cannot
+    /// tell a deleted file from one the app merely lost access to, and never covers a file outside
+    /// the root it was given. Works on a path that no longer exists, which is the point.
+    ///
+    /// - Returns: how many documents were removed. Each is announced as
+    ///   ``RTSRAGIngestEvent/documentSwept(id:source:)``.
+    @discardableResult
+    public func removeSource(
+        at url: URL,
+        scope: RTSRAGStoreScope? = nil
+    ) async throws -> Int {
+        let stored = try await store.documents(under: RTSRAGSourceRoot(url), scope: scope)
+        for (id, source) in stored.sorted(by: { $0.value < $1.value }) {
+            try await store.deleteDocument(id: id)
+            emitter.emit(.documentSwept(id: id, source: source))
+        }
+        await emitter.drain()
+        return stored.count
+    }
+
+    /// The orphan sweep: lists what the store holds under `root` and removes what the run left
+    /// orphaned, by ``RTSRAGOrphanSweep``'s rule.
+    ///
+    /// Never throws. The ingest has already succeeded, and an orphan that survives a failed sweep
+    /// is swept by the next run — so a failure is logged and counted, not raised.
+    private func sweepOrphans(
+        under root: RTSRAGSourceRoot,
+        seen: Set<RTSRAGDocumentID>,
+        stream: RTSRAGDocumentStream,
+        scope: RTSRAGStoreScope?,
+        into stats: inout RTSRAGIngestionStats
+    ) async {
+        let stored: [RTSRAGDocumentID: String]
+        do {
+            stored = try await store.documents(under: root, scope: scope)
+        } catch {
+            ragLog.warning("📚 orphan sweep could not list \(root.path): \(error)")
+            stats.sweepFailures += 1
+            return
+        }
+        let orphans = RTSRAGOrphanSweep.orphans(
+            stored: stored,
+            seen: seen,
+            filtered: stream.ledger.filteredDocuments,
+            failedSources: stream.ledger.failedSources
+        )
+        for orphan in orphans {
+            do {
+                try await store.deleteDocument(id: orphan.id)
+                stats.documentsSwept += 1
+                emitter.emit(.documentSwept(id: orphan.id, source: orphan.source))
+            } catch {
+                ragLog.warning("📚 orphan sweep could not remove \(orphan.source): \(error)")
+                stats.sweepFailures += 1
+            }
+        }
     }
 
     /// What happened to one document — one case per way `ingestOne` can end.

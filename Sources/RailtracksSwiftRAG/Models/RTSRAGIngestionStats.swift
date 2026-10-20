@@ -57,6 +57,14 @@ public struct RTSRAGIngestionStats: Sendable {
     /// a failure actionable — see ``RTSRAGEmbeddingFailure``.
     public var failures: [RTSRAGEmbeddingFailure] = []
 
+    /// Stored documents the orphan sweep removed after the run. Not a terminal outcome of anything
+    /// loaded — a swept document was, by definition, not in this run — so it stays out of
+    /// ``documentsAccountedFor``.
+    public var documentsSwept = 0
+    /// Orphans the sweep found but could not remove, or `1` when listing them failed. They remain
+    /// for the next run; the ingest itself had already succeeded.
+    public var sweepFailures = 0
+
     /// Tokens the provider billed, when it reports them. `nil` on a path that bills nothing, which
     /// is every on-device run.
     public var inputTokens: Int?
