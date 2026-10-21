@@ -71,13 +71,7 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
         pooling: Pooling = .mean,
         charactersPerToken: Int = RTSRAGAppleEmbedding.defaultCharactersPerToken
     ) throws {
-        let candidates = NLContextualEmbedding.contextualEmbeddings(
-            forValues: [
-                .languages: [language.rawValue],
-                .revision: revision,
-            ]
-        )
-        guard let model = candidates.first else {
+        guard let model = Self.resolveModel(revision: revision, language: language) else {
             throw RTSRAGError.embeddingModelUnavailable(
                 reason: "no contextual embedding for \(language.rawValue) at revision \(revision)"
             )
@@ -122,20 +116,116 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
     /// so a bad figure costs refusals, never a silently truncated vector.
     public static let defaultCharactersPerToken = 2
 
-    /// Downloads the model assets if the device does not already have them.
+    /// How long ``prepare(timeout:)`` waits for a download by default.
+    ///
+    /// **How long someone waits at a spinner, not a download estimate.** Apple reports no progress
+    /// and publishes no size (about 104 MB measured on a Mac, and free to change), and the OS may
+    /// hold the download for Wi-Fi or idle time, so no figure could predict when it finishes.
+    public static let defaultPrepareTimeout: Duration = .seconds(60)
+
+    /// Whether the model's assets are already on the device, without building an embedder or
+    /// loading anything.
+    ///
+    /// Uses the same lookup as ``init(revision:language:pooling:charactersPerToken:)``, and returns
+    /// `false` where it would throw. Cheaper than ``loadIfAvailable()``, which pays for the model
+    /// load, so it suits a status check run on every screen appearance — choosing an embedder up
+    /// front, or showing that a download is needed before the user starts indexing.
+    public static func assetsAvailable(revision: Int = 1, language: NLLanguage = .english) -> Bool {
+        resolveModel(revision: revision, language: language)?.hasAvailableAssets ?? false
+    }
+
+    /// Loads the model if its assets are already on the device. **Never downloads.**
+    ///
+    /// The "use the on-device model if it is here, otherwise move on" call — for an app that does
+    /// not want a download over mobile data, say. The library cannot see the network type; an app
+    /// that cares checks `NWPathMonitor`'s `isExpensive` / `isConstrained` and calls this instead
+    /// of ``prepare(timeout:)``.
+    ///
+    /// - Returns: `true` once the model is loaded, `false` when its assets are missing. A `Bool`
+    ///   rather than an error, because for this caller a missing model is the expected outcome.
+    /// - Throws: ``RTSRAGEmbeddingError`` only when the assets are present but fail to load.
+    @discardableResult
+    public func loadIfAvailable() throws -> Bool {
+        guard model.hasAvailableAssets else {
+            return false
+        }
+        try loadIfNeeded()
+        return true
+    }
+
+    /// Gets the model onto the device, downloading its assets if needed, and loads it.
     ///
     /// A state the cloud path has no equivalent of: `hasAvailableAssets` can be false on a fresh
     /// device. Call this before a first ingest, or let ``embed(_:)`` fail with
-    /// ``RTSRAGEmbeddingFailureKind/modelUnavailable`` and surface that to the user.
-    public func prepare() async throws {
+    /// ``RTSRAGEmbeddingFailureKind/modelUnavailable`` and surface that to the user. To use the
+    /// model only if it is already here, call ``loadIfAvailable()`` instead.
+    ///
+    /// Apple's request reports no progress, cannot be cancelled, and has been seen never to answer
+    /// in an iOS 18 Simulator, so the wait is bounded by `timeout`. Timing out or cancelling only
+    /// stops **this caller** waiting: the download keeps running, and a later call — from this
+    /// embedder or any other for the same asset — waits on the same request instead of starting
+    /// another.
+    ///
+    /// - Parameter timeout: How long to wait for a download, as how long the user is willing to
+    ///   wait. `nil` waits as long as it takes. Zero or negative starts the download and returns
+    ///   at once. Ignored when the assets are already on the device.
+    /// - Throws:
+    ///   - ``RTSRAGError/embeddingModelNotReady(reason:)`` when `timeout` passed first. Not a
+    ///     failure: offer to wait longer, or switch embedder.
+    ///   - ``RTSRAGError/embeddingModelUnavailable(reason:)`` when the request answered
+    ///     `.notAvailable` or `.error`, or threw.
+    ///   - `CancellationError` when the calling task is cancelled first.
+    ///   - ``RTSRAGEmbeddingError`` when the assets arrived but failed to load.
+    public func prepare(
+        timeout: Duration? = RTSRAGAppleEmbedding.defaultPrepareTimeout
+    ) async throws {
         guard !model.hasAvailableAssets else {
             try loadIfNeeded()
             return
         }
-        let result = try await model.requestAssets()
-        guard result == .available else {
+        // Keyed by the asset, not ``modelIdentifier``: pooling changes the vectors, not the
+        // download, so embedders differing only in pooling share one request.
+        let assetIdentifier = model.modelIdentifier
+        let request = RTSRAGAssetRequest.shared(key: assetIdentifier) {
+            // Resolved afresh rather than captured: the actor's model is not `Sendable`, and the
+            // request outlives this call.
+            guard let model = NLContextualEmbedding(modelIdentifier: assetIdentifier) else {
+                throw RTSRAGError.embeddingModelUnavailable(
+                    reason: "no contextual embedding with identifier \(assetIdentifier)"
+                )
+            }
+            return try await model.requestAssets()
+        }
+
+        let outcome: NLContextualEmbedding.AssetsResult?
+        do {
+            outcome = try await request.wait(timeout: timeout)
+        } catch is CancellationError {
+            ragLog.info("📚 stopped waiting for \(modelIdentifier) assets: cancelled")
+            throw CancellationError()
+        } catch let error as RTSRAGError {
+            throw error
+        } catch {
             throw RTSRAGError.embeddingModelUnavailable(
-                reason: "assets unavailable for \(modelIdentifier) (\(result))"
+                reason: "asset request for \(modelIdentifier) failed: \(error)"
+            )
+        }
+
+        guard let outcome else {
+            let waited = timeout.map { "within \($0)" } ?? "yet"
+            ragLog.info("📚 stopped waiting for \(modelIdentifier) assets: not ready \(waited)")
+            throw RTSRAGError.embeddingModelNotReady(
+                reason: """
+                assets for \(modelIdentifier) were not ready \(waited); the download keeps \
+                running and a later prepare() waits on it. On-device assets may never arrive \
+                in a Simulator
+                """
+            )
+        }
+        guard outcome == .available else {
+            let described = RTSRAGAssetRequest.describe(outcome)
+            throw RTSRAGError.embeddingModelUnavailable(
+                reason: "assets unavailable for \(modelIdentifier) (\(described))"
             )
         }
         try loadIfNeeded()
@@ -166,6 +256,21 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
     }
 
     // MARK: - Internals
+
+    /// The model for a language at a pinned revision, shared by the initializer and
+    /// ``assetsAvailable(revision:language:)`` so the two can never disagree.
+    private static func resolveModel(
+        revision: Int,
+        language: NLLanguage
+    ) -> NLContextualEmbedding? {
+        let candidates = NLContextualEmbedding.contextualEmbeddings(
+            forValues: [
+                .languages: [language.rawValue],
+                .revision: revision,
+            ]
+        )
+        return candidates.first
+    }
 
     private func loadIfNeeded() throws {
         guard !isLoaded else {
