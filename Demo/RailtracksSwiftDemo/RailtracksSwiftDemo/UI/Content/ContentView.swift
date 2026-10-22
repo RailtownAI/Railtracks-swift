@@ -13,91 +13,101 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 4) {
-                Button("Simple") {
-                    viewModel.mode = .simple
-                }
-                .background(viewModel.mode == .simple ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("Math") {
-                    viewModel.mode = .math
-                }
-                .background(viewModel.mode == .math ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                if #available(macOS 26, iOS 26, *) {
-                    Button("Math(AppleAI)") {
-                        viewModel.mode = .mathApple
+            // Scrolls sideways rather than wrapping: on iPhone the buttons outgrow one row, and
+            // extra rows would push the demo itself down, since this header does not scroll.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    Button("Simple") {
+                        viewModel.mode = .simple
                     }
-                    .background(viewModel.mode == .mathApple ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .background(viewModel.mode == .simple ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("Math") {
+                        viewModel.mode = .math
+                    }
+                    .background(viewModel.mode == .math ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    if #available(macOS 26, iOS 26, *) {
+                        Button("Math(AppleAI)") {
+                            viewModel.mode = .mathApple
+                        }
+                        .background(viewModel.mode == .mathApple ? Color.accentColor.opacity(0.2) : Color.clear)
+                        .buttonStyle(.bordered)
+                    }
+
+                    // RailtracksSwiftDemoOS27 target only — see MathClaudeViewModel.swift.
+                    #if OS27
+                    if #available(macOS 27, iOS 27, *) {
+                        Button("Math(Claude)") {
+                            viewModel.mode = .mathClaude
+                        }
+                        .background(viewModel.mode == .mathClaude ? Color.accentColor.opacity(0.2) : Color.clear)
+                        .buttonStyle(.bordered)
+                    }
+                    #endif
+
+                    Button("Verified Math") {
+                        viewModel.mode = .mathVerify
+                    }
+                    .background(viewModel.mode == .mathVerify ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("Math Error") {
+                        viewModel.mode = .mathError
+                    }
+                    .background(viewModel.mode == .mathError ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("Output Schema") {
+                        viewModel.mode = .outputSchema
+                    }
+                    .background(viewModel.mode == .outputSchema ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("Guardrails") {
+                        viewModel.mode = .guardrails
+                    }
+                    .background(viewModel.mode == .guardrails ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("Evaluation") {
+                        viewModel.mode = .evaluation
+                    }
+                    .background(viewModel.mode == .evaluation ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("Vision") {
+                        viewModel.mode = .vision
+                    }
+                    .background(viewModel.mode == .vision ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("RAG") {
+                        viewModel.mode = .rag
+                    }
+                    .background(viewModel.mode == .rag ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("RAG (Spotlight)") {
+                        viewModel.mode = .ragSpotlight
+                    }
+                    .background(viewModel.mode == .ragSpotlight ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("Apple Embedding") {
+                        viewModel.mode = .appleEmbedding
+                    }
+                    .background(viewModel.mode == .appleEmbedding ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .buttonStyle(.bordered)
+
+                    Button("Résumé Search") {
+                        viewModel.mode = .resumeSearch
+                    }
+                    .background(viewModel.mode == .resumeSearch ? Color.accentColor.opacity(0.2) : Color.clear)
                     .buttonStyle(.bordered)
                 }
-
-                // RailtracksSwiftDemoOS27 target only — see MathClaudeViewModel.swift.
-                #if OS27
-                if #available(macOS 27, iOS 27, *) {
-                    Button("Math(Claude)") {
-                        viewModel.mode = .mathClaude
-                    }
-                    .background(viewModel.mode == .mathClaude ? Color.accentColor.opacity(0.2) : Color.clear)
-                    .buttonStyle(.bordered)
-                }
-                #endif
-
-                Button("Verified Math") {
-                    viewModel.mode = .mathVerify
-                }
-                .background(viewModel.mode == .mathVerify ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("Math Error") {
-                    viewModel.mode = .mathError
-                }
-                .background(viewModel.mode == .mathError ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("Output Schema") {
-                    viewModel.mode = .outputSchema
-                }
-                .background(viewModel.mode == .outputSchema ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("Guardrails") {
-                    viewModel.mode = .guardrails
-                }
-                .background(viewModel.mode == .guardrails ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("Evaluation") {
-                    viewModel.mode = .evaluation
-                }
-                .background(viewModel.mode == .evaluation ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("Vision") {
-                    viewModel.mode = .vision
-                }
-                .background(viewModel.mode == .vision ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("RAG") {
-                    viewModel.mode = .rag
-                }
-                .background(viewModel.mode == .rag ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("RAG (Spotlight)") {
-                    viewModel.mode = .ragSpotlight
-                }
-                .background(viewModel.mode == .ragSpotlight ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
-
-                Button("Résumé Search") {
-                    viewModel.mode = .resumeSearch
-                }
-                .background(viewModel.mode == .resumeSearch ? Color.accentColor.opacity(0.2) : Color.clear)
-                .buttonStyle(.bordered)
             }
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -158,6 +168,8 @@ struct ContentView: View {
                 RAGView()
             case .ragSpotlight:
                 RAGSpotlightView()
+            case .appleEmbedding:
+                AppleEmbeddingView()
             case .resumeSearch:
                 ResumeSearchView()
             }

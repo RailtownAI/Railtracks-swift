@@ -59,9 +59,9 @@ internal final class RTSRAGAssetRequest: Sendable {
         key: String,
         start: @escaping @Sendable () async throws -> Outcome
     ) -> RTSRAGAssetRequest {
-        inFlight.withLock { requests in
+        let (request, joined) = inFlight.withLock { requests in
             if let existing = requests[key] {
-                return existing
+                return (existing, true)
             }
             let request = RTSRAGAssetRequest(key: key)
             requests[key] = request
@@ -71,8 +71,14 @@ internal final class RTSRAGAssetRequest: Sendable {
             Task.detached {
                 await request.run(start)
             }
-            return request
+            return (request, false)
         }
+        // Logged, rather than left to the absence of a "requesting" line, so sharing is something
+        // a manual test can see.
+        if joined {
+            ragLog.info("📚 joining the in-flight asset request for \(key)")
+        }
+        return request
     }
 
     /// Waits for the request's outcome, up to `timeout`.
