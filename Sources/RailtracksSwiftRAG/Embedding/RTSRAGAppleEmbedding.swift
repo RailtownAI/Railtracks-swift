@@ -172,8 +172,9 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
     /// never answer cannot strand later calls.
     ///
     /// - Parameter timeout: How long to wait for a download, as how long the user is willing to
-    ///   wait. `nil` waits as long as it takes. Zero or negative starts the download and returns
-    ///   at once. Ignored when the assets are already on the device.
+    ///   wait. `nil` waits as long as it takes. Zero or negative starts the download and, without
+    ///   waiting, throws ``RTSRAGError/embeddingModelNotReady(reason:)`` — the "start it, don't
+    ///   wait" call, so expect the error. Ignored when the assets are already on the device.
     /// - Throws:
     ///   - ``RTSRAGError/embeddingModelNotReady(reason:)`` when `timeout` passed first. Not a
     ///     failure: offer to wait longer, or switch embedder.
