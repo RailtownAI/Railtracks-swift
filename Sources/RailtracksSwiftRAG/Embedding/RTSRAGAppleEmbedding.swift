@@ -160,11 +160,16 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
     /// ``RTSRAGEmbeddingFailureKind/modelUnavailable`` and surface that to the user. To use the
     /// model only if it is already here, call ``loadIfAvailable()`` instead.
     ///
-    /// Apple's request reports no progress, cannot be cancelled, and has been seen never to answer
-    /// in an iOS 18 Simulator, so the wait is bounded by `timeout`. Timing out or cancelling only
-    /// stops **this caller** waiting: the download keeps running, and a later call — from this
-    /// embedder or any other for the same asset — waits on the same request instead of starting
-    /// another.
+    /// Apple's request reports no progress, cannot be cancelled, and may never answer: seen in an
+    /// iOS 18 Simulator, and on an iPhone that was offline. So the wait is bounded by `timeout`.
+    /// Nor is its answer the only signal — on an iPhone the model arrived while the request stayed
+    /// silent — so while waiting, `hasAvailableAssets` is also checked every few seconds, and the
+    /// model counts as ready the moment it is installed.
+    ///
+    /// Timing out or cancelling only stops **this caller** waiting: the download keeps running,
+    /// and a later call — from this embedder or any other for the same asset — waits on the same
+    /// request for its first 30 seconds, and asks iOS again after that, so a request that will
+    /// never answer cannot strand later calls.
     ///
     /// - Parameter timeout: How long to wait for a download, as how long the user is willing to
     ///   wait. `nil` waits as long as it takes. Zero or negative starts the download and returns
@@ -186,16 +191,22 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
         // Keyed by the asset, not ``modelIdentifier``: pooling changes the vectors, not the
         // download, so embedders differing only in pooling share one request.
         let assetIdentifier = model.modelIdentifier
-        let request = RTSRAGAssetRequest.shared(key: assetIdentifier) {
-            // Resolved afresh rather than captured: the actor's model is not `Sendable`, and the
-            // request outlives this call.
-            guard let model = NLContextualEmbedding(modelIdentifier: assetIdentifier) else {
-                throw RTSRAGError.embeddingModelUnavailable(
-                    reason: "no contextual embedding with identifier \(assetIdentifier)"
-                )
+        // Both closures resolve the model afresh rather than capturing it: the actor's model is
+        // not `Sendable`, and the request outlives this call.
+        let request = RTSRAGAssetRequest.shared(
+            key: assetIdentifier,
+            start: {
+                guard let model = NLContextualEmbedding(modelIdentifier: assetIdentifier) else {
+                    throw RTSRAGError.embeddingModelUnavailable(
+                        reason: "no contextual embedding with identifier \(assetIdentifier)"
+                    )
+                }
+                return try await model.requestAssets()
+            },
+            assetsArrived: {
+                NLContextualEmbedding(modelIdentifier: assetIdentifier)?.hasAvailableAssets ?? false
             }
-            return try await model.requestAssets()
-        }
+        )
 
         let outcome: NLContextualEmbedding.AssetsResult?
         do {
@@ -217,8 +228,8 @@ public actor RTSRAGAppleEmbedding: RTSRAGEmbedding {
             throw RTSRAGError.embeddingModelNotReady(
                 reason: """
                 assets for \(modelIdentifier) were not ready \(waited); the download keeps \
-                running and a later prepare() waits on it. On-device assets may never arrive \
-                in a Simulator
+                running and a later prepare() waits for it. Offline, or in a Simulator, \
+                on-device assets may never arrive
                 """
             )
         }
