@@ -40,6 +40,14 @@ public enum RTSRAGError: Error, Sendable, Equatable {
     /// only path that has it, since a hosted model is either reachable or a network failure.
     case embeddingModelUnavailable(reason: String)
 
+    /// The on-device model is not on the device yet, and the caller stopped waiting for it.
+    ///
+    /// Not a failure, unlike ``embeddingModelUnavailable(reason:)``: the download keeps running,
+    /// and a later `prepare` waits on it. Apple reports no progress and no size, so a timeout can
+    /// only mean "not within the time this caller was willing to wait", never "will not arrive".
+    /// An app offers to wait longer, or switches to another embedder.
+    case embeddingModelNotReady(reason: String)
+
     /// The store could not complete an operation.
     case storeFailed(reason: String)
 
@@ -75,6 +83,8 @@ extension RTSRAGError: CustomStringConvertible {
             return "embedding failed: \(reason)"
         case .embeddingModelUnavailable(let reason):
             return "embedding model unavailable: \(reason)"
+        case .embeddingModelNotReady(let reason):
+            return "embedding model not ready: \(reason)"
         case .storeFailed(let reason):
             return "store operation failed: \(reason)"
         case .ingestAlreadyRunning:

@@ -45,6 +45,27 @@ struct RTSRAGAppleEmbeddingTests {
         }
     }
 
+    // MARK: - Assets
+
+    @Test("the asset check agrees with the initializer's lookup")
+    func assetsAvailableUsesTheInitializersLookup() {
+        // The test Mac has the English asset. An absent revision is `false` here where the
+        // initializer throws: a status check answers, it does not fail.
+        #expect(RTSRAGAppleEmbedding.assetsAvailable())
+        #expect(RTSRAGAppleEmbedding.assetsAvailable(revision: 99) == false)
+    }
+
+    @Test("loading without a download succeeds when the assets are present")
+    func loadIfAvailableLoadsPresentAssets() async throws {
+        let embedder = try Self.makeEmbedder()
+
+        let loaded = try await embedder.loadIfAvailable()
+        let result = try await embedder.embed(["The refund policy is thirty days."])
+
+        #expect(loaded)
+        #expect(result.vectors.first?.count == 512)
+    }
+
     // MARK: - Vectors
 
     @Test("the same text embeds to the same vector")
