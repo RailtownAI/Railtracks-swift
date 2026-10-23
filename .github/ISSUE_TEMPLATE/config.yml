@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question / share an idea 🤔❓💬
+    url: https://github.com/RailtownAI/Railtracks-swift/discussions
+    about: For questions, ideas, and open-ended discussion.
+  # Documentation site is not live yet. Uncomment and set the URL once it is.
+  # - name: Documentation 📚📖📝
+  #   url: https://<documentation-site>/
+  #   about: Read the documentation and examples for RailtracksSwift.

@@ -1,0 +1,99 @@
+name: Bug Report
+description: Report a bug in RailtracksSwift.
+type: Bug
+
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      description: Which subsystem is affected? Pick the closest match.
+      options:
+        - Agents / Nodes / Flow
+        - Tools
+        - LLM Providers (OpenAI / Anthropic / Gemini)
+        - Apple Foundation Models (.appleAI / .privateCloudCompute / .foundationModel)
+        - Structured Output
+        - Guardrails
+        - Knowledge Tool
+        - RAG / Retrieval (RailtracksSwiftRAG)
+        - Observability / Flow-graph Trace / Instruments
+        - Evaluations
+        - Demo App
+        - Other / Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What did you expect to happen? What happened instead?
+      placeholder: |
+        I expected my agent to call the `Addition` tool when I asked "What is 12 + 8?", but it answered from its own knowledge. The flow-graph trace shows no tool node.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal, self-contained example. Should run in a fresh Swift package or app that depends only on RailtracksSwift.
+      render: swift
+      placeholder: |
+        import RailtracksSwift
+
+        struct AdditionTool: RTSToolNode {
+            let id = UUID()
+            let toolName = "Addition"
+            var inputs: RTSInput = [:]
+            let callableRoutine = RTSClosure { inputs in
+                guard case let .number(a) = inputs["a"] else { throw RTSError.missingInput("a") }
+                guard case let .number(b) = inputs["b"] else { throw RTSError.missingInput("b") }
+                return ["result": .number(a + b)]
+            }
+            var toolDescription = "Adds two numbers and returns the result."
+            var parameterSchema: RTSToolSchema {
+                RTSToolSchema(parameters: [
+                    .init(name: "a", description: "First number", type: .number),
+                    .init(name: "b", description: "Second number", type: .number)
+                ])
+            }
+        }
+
+        let agent = RTSAgent(
+            llmProvider: .openAI(modelIDString: RTSOpenAIModelID.gpt4o.modelIDString),
+            tools: [AdditionTool()]
+        )
+        let gateway = RTSLLMGateway(apiKeys: [.openAI: "<your-api-key>"])
+        let result = try await RTSFlow(title: "Repro").run(
+            agent: agent,
+            prompt: "What is 12 + 8?",
+            gateway: gateway
+        )
+        print(result)  // answers without calling the tool
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Error / logs
+      description: The thrown error (including `RTSError` cases and their context), crash log, or relevant console output. Attach the flow-graph JSON trace if it helps. Leave blank if the bug is behavioral (no error).
+      render: shell
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: System info
+      description: Fill in the values below if any of them might be relevant.
+      render: shell
+      placeholder: |
+        RailtracksSwift version:  # tag or commit, from Package.resolved
+        Xcode version:            # xcodebuild -version
+        Swift version:            # swift --version
+        Platform and OS:          # e.g. macOS 27.0, iOS 27.0
+        Device or Simulator:      # e.g. iPhone 13 mini, iOS Simulator, Mac
+        Apple Intelligence on:    # yes / no, for Apple Foundation Models issues
+        LLM provider and model:   # e.g. .anthropic, claude-sonnet-4-6
+        Conduit version:          # from Package.resolved
