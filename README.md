@@ -13,6 +13,7 @@ Only the features built on Apple's FoundationModels need a newer OS:
 |---|---|
 | `.appleAI` provider | macOS 26+ / iOS 26+ with Apple Intelligence enabled |
 | `RTSAppleAIToolNode`, `RTSAppleAIPIIRedact*Guardrail` | macOS 26+ / iOS 26+ (`@available`), with Apple Intelligence enabled |
+| `.privateCloudCompute` provider | macOS 27+ / iOS 27+ with Apple Intelligence enabled, a network connection, and the app's `com.apple.developer.private-cloud-compute` entitlement |
 | `.foundationModel` (third-party FoundationModels `LanguageModel`) | macOS 27+ / iOS 27+ |
 
 The providers are checked at run time: below their OS, the gateway throws `RTSError.providerUnavailable`. The tool node and guardrails are `@available`-gated, so use them behind `if #available`. OpenAI, Anthropic and Gemini need nothing beyond the package's minimum.
@@ -25,9 +26,14 @@ The providers are checked at run time: below their OS, the gateway throws `RTSEr
 | Anthropic | `.anthropic(modelIDString:)` | `RTSAnthropicModelID` |
 | Google Gemini | `.gemini(modelIDString:options:)` | `RTSGeminiModelID` |
 | Apple Intelligence (on-device) | `.appleAI` | — |
-| Any FoundationModels `LanguageModel`, e.g. Claude via `ClaudeForFoundationModels` | `.foundationModel(RTSFoundationLanguageModel)` | — |
+| Apple Intelligence on Private Cloud Compute (Apple's server model) | `.privateCloudCompute(options:)` | — |
+| Any third-party FoundationModels `LanguageModel`, e.g. Claude via `ClaudeForFoundationModels` | `.foundationModel(RTSFoundationLanguageModel)` | — |
 
-`RTSGeminiOptions` carries Gemini-only settings, such as `mediaResolution` for image input.
+`RTSGeminiOptions` carries Gemini-only settings, such as `mediaResolution` for image input. `RTSPrivateCloudComputeOptions` carries Private Cloud Compute's `reasoningLevel` (`.light`, `.moderate`, `.deep`; unset leaves Apple's default).
+
+Private Cloud Compute costs the developer nothing: each user has a daily limit counted against their iCloud account, higher with iCloud+, so traces record no cost for it. The app needs Apple's managed entitlement, available to developers in the App Store Small Business Program with under 2 million first-time downloads. Without the entitlement, Apple still reports the model as available, and requests fail with `RTSError.missingEntitlement`; a user over their daily limit gets `RTSError.quotaLimitReached`, with the reset date when Apple gives one (see [Error Handling](#error-handling)).
+
+For Apple's own models, use `.appleAI` and `.privateCloudCompute`: the library builds the model itself, so the app needs no `#available` check or FoundationModels import. `.foundationModel` is for third-party models.
 
 ## Quick Start
 
@@ -458,6 +464,23 @@ public enum RTSError: Error {
         reason: String,
         context: RTSErrorContext
     )
+    case quotaLimitReached(provider: String, resetDate: Date?, context: RTSErrorContext)
+    case missingEntitlement(name: String, context: RTSErrorContext)
+}
+```
+
+The last two come from Private Cloud Compute, so an app can handle them without importing
+FoundationModels:
+
+```swift
+do {
+    let result = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+} catch let RTSError.quotaLimitReached(_, resetDate, _) {
+    // The user's daily limit. Disable the action until `resetDate` (nil when Apple gives none),
+    // or switch the agent to another provider.
+} catch let RTSError.missingEntitlement(name, _) {
+    // The app lacks `name` ("com.apple.developer.private-cloud-compute"). Apple reports PCC as
+    // available without it, so only a failed request reveals this.
 }
 ```
 
