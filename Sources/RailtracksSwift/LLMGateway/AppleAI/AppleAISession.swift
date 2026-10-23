@@ -39,16 +39,21 @@ final class AppleAISession: @unchecked Sendable {
     private let sessionTools: [any Tool]
     private let outputSchema: GenerationSchema?
     private let makeSession: MakeSession
+    /// Private Cloud Compute's reasoning level, held as the library's own type: `ContextOptions`
+    /// is OS 27 API, which this OS 26 class cannot store. `nil` for every other model.
+    private let reasoningLevel: RTSPrivateCloudComputeReasoningLevel?
     private var _messages: [RTSMessage] = []
     private let lock = NSLock()
 
     private init(
         tools: [any Tool],
         outputSchema: GenerationSchema?,
+        reasoningLevel: RTSPrivateCloudComputeReasoningLevel?,
         makeSession: @escaping MakeSession
     ) {
         self.sessionTools = tools
         self.outputSchema = outputSchema
+        self.reasoningLevel = reasoningLevel
         self.makeSession = makeSession
         self.session = makeSession(nil, tools)
     }
@@ -72,7 +77,7 @@ final class AppleAISession: @unchecked Sendable {
         let responseText: String
         let metrics: AppleAIResponse
         if let schema = outputSchema {
-            let response = try await currentSession.respond(to: prompt, schema: schema)
+            let response = try await respond(currentSession, to: prompt, schema: schema)
             responseText = response.content.jsonString
             metrics = responseMetrics(
                 from: response,
@@ -84,7 +89,7 @@ final class AppleAISession: @unchecked Sendable {
                 )
             )
         } else {
-            let response = try await currentSession.respond(to: prompt)
+            let response = try await respond(currentSession, to: prompt)
             responseText = response.content
             metrics = responseMetrics(
                 from: response,
@@ -109,6 +114,71 @@ final class AppleAISession: @unchecked Sendable {
         }
         return metrics
     }
+
+    /// `respond(to:schema:)`, with the reasoning level's context options when there is one.
+    private func respond(
+        _ session: LanguageModelSession,
+        to prompt: String,
+        schema: GenerationSchema
+    ) async throws -> LanguageModelSession.Response<GeneratedContent> {
+        // XCODE26-SDK: `ContextOptions` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+        #if compiler(>=6.4)
+        // OS26-FLOOR: `ContextOptions` is OS 27 API; no reasoning level can be set below it.
+        if #available(macOS 27, iOS 27, *),
+           let contextOptions = Self.contextOptions(for: reasoningLevel, hasSchema: true) {
+            return try await session.respond(
+                to: prompt,
+                schema: schema,
+                contextOptions: contextOptions
+            )
+        }
+        #endif
+        return try await session.respond(to: prompt, schema: schema)
+    }
+
+    /// `respond(to:)`, with the reasoning level's context options when there is one.
+    private func respond(
+        _ session: LanguageModelSession,
+        to prompt: String
+    ) async throws -> LanguageModelSession.Response<String> {
+        // XCODE26-SDK and OS26-FLOOR: as in `respond(_:to:schema:)`.
+        #if compiler(>=6.4)
+        if #available(macOS 27, iOS 27, *),
+           let contextOptions = Self.contextOptions(for: reasoningLevel, hasSchema: false) {
+            return try await session.respond(to: prompt, contextOptions: contextOptions)
+        }
+        #endif
+        return try await session.respond(to: prompt)
+    }
+
+    // XCODE26-SDK: as above.
+    #if compiler(>=6.4)
+    /// The context options carrying `reasoningLevel`, or `nil` when there is no level, so the call
+    /// keeps Apple's own default options untouched.
+    ///
+    /// With a schema, `includeSchemaInPrompt` stays `true`: that is Apple's default for
+    /// `respond(to:schema:)`, and passing any `ContextOptions` replaces the default wholesale, so a
+    /// bare `ContextOptions(reasoningLevel:)` would silently stop the schema being sent.
+    @available(macOS 27, iOS 27, *)
+    static func contextOptions(
+        for reasoningLevel: RTSPrivateCloudComputeReasoningLevel?,
+        hasSchema: Bool
+    ) -> ContextOptions? {
+        guard let reasoningLevel else {
+            return nil
+        }
+        let level: ContextOptions.ReasoningLevel
+        switch reasoningLevel {
+        case .light:
+            level = .light
+        case .moderate:
+            level = .moderate
+        case .deep:
+            level = .deep
+        }
+        return ContextOptions(includeSchemaInPrompt: hasSchema ? true : nil, reasoningLevel: level)
+    }
+    #endif
 
     /// Input and output token totals, in a type this OS 26 class can hold —
     /// `LanguageModelSession.Usage` is OS 27 only.
@@ -244,14 +314,16 @@ final class AppleAISession: @unchecked Sendable {
     /// Returns non-conforming tools separately so the caller can warn about them.
     ///
     /// `sessionFactory` is `nil` for the on-device system model; `.foundationModel` passes one
-    /// built from its `LanguageModel`.
+    /// built from its `LanguageModel`, and `.privateCloudCompute` one built on Apple's server
+    /// model, along with its `reasoningLevel`.
     static func build(
         fromAgentTools tools: [any RTSToolNode],
         invoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode,
         makeSubSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
-        sessionFactory: MakeSession? = nil
+        sessionFactory: MakeSession? = nil,
+        reasoningLevel: RTSPrivateCloudComputeReasoningLevel? = nil
     ) throws -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
         var unsupportedTools: [any RTSToolNode] = []
@@ -309,12 +381,29 @@ final class AppleAISession: @unchecked Sendable {
         let session = AppleAISession(
             tools: appleTools,
             outputSchema: schema,
+            reasoningLevel: reasoningLevel,
             makeSession: sessionFactory ?? { instructions, tools in
                 makeSystemSession(instruction: instructions, tools: tools)
             }
         )
         return (session, unsupportedTools)
     }
+
+    // XCODE26-SDK: `PrivateCloudComputeLanguageModel` exists only in the OS 27 SDK (Xcode 27,
+    // Swift 6.4).
+    #if compiler(>=6.4)
+    /// A factory building each session on Apple's server model, for `.privateCloudCompute`.
+    ///
+    /// One model for the agent session's lifetime: `setInstruction` rebuilds the
+    /// `LanguageModelSession` on the same model rather than creating another.
+    @available(macOS 27, iOS 27, *)
+    static func privateCloudComputeSessionFactory() -> MakeSession {
+        let model = PrivateCloudComputeLanguageModel()
+        return { instructions, tools in
+            LanguageModelSession(model: model, tools: tools, instructions: instructions)
+        }
+    }
+    #endif
 
     /// A session on the on-device system model.
     private static func makeSystemSession(instruction: String?, tools: [any Tool]) -> LanguageModelSession {

@@ -230,8 +230,8 @@ extension RTSFlowGraphCollector {
     }
 
     /// Computes USD cost from token usage via `RTSCostCalculator`, mirroring the
-    /// JSON-export path (`RTSFlowGraph+Parser.makeLLMDetails`). Returns 0 for local
-    /// providers (e.g. AppleAI, which have no cost), when no tokens were used, or when
+    /// JSON-export path (`RTSFlowGraph+Parser.makeLLMDetails`). Returns 0 for unbilled
+    /// providers (AppleAI and Private Cloud Compute), when no tokens were used, or when
     /// the model has no pricing entry / the pricing map is unavailable.
     ///
     /// `static` (actor-nonisolated) so the detached signpost-emit task can call it
@@ -242,7 +242,7 @@ extension RTSFlowGraphCollector {
         inputTokens: Int,
         outputTokens: Int
     ) async -> Double {
-        guard !RTSLLMProvider.isLocal(providerName: provider),
+        guard RTSLLMProvider.isBilled(providerName: provider),
               inputTokens > 0 || outputTokens > 0 else { return 0 }
         let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
         let cost = try? await RTSCostCalculator.shared.calculateCost(model: model, usage: usage)

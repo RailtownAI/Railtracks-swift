@@ -60,8 +60,33 @@ public struct RTSLLMGateway: Sendable {
                 invoker: invoker,
                 agentNode: agentNode,
                 onNewSession: onNewSession,
-                sessionFactory: nil
+                sessionFactory: nil,
+                reasoningLevel: nil
             )
+
+        // XCODE26-SDK: `PrivateCloudComputeLanguageModel` exists only in the OS 27 SDK (Xcode 27,
+        // Swift 6.4).
+        #if compiler(>=6.4)
+        case .privateCloudCompute(let options):
+            guard #available(macOS 27, iOS 27, *) else {
+                throw RTSError.providerUnavailable(
+                    "Private Cloud Compute requires macOS 27 / iOS 27 or later"
+                )
+            }
+            return try buildFoundationModelsSession(
+                apiKeys: apiKeys,
+                invoker: invoker,
+                agentNode: agentNode,
+                onNewSession: onNewSession,
+                sessionFactory: AppleAISession.privateCloudComputeSessionFactory(),
+                reasoningLevel: options.reasoningLevel
+            )
+        #else
+        case .privateCloudCompute:
+            throw RTSError.providerUnavailable(
+                "Private Cloud Compute requires building with the OS 27 SDK (Xcode 27)"
+            )
+        #endif
 
         // XCODE26-SDK: `sessionFactory()` needs the OS 27 SDK (Xcode 27, Swift 6.4). Built with an
         // older SDK nothing can construct a `.foundationModel`, so this branch is unreachable there.
@@ -77,7 +102,9 @@ public struct RTSLLMGateway: Sendable {
                 invoker: invoker,
                 agentNode: agentNode,
                 onNewSession: onNewSession,
-                sessionFactory: try languageModel.sessionFactory()
+                sessionFactory: try languageModel.sessionFactory(),
+                // Reasoning levels are PCC-only, so a wrapped `LanguageModel` has none to set.
+                reasoningLevel: nil
             )
         #else
         case .foundationModel:
@@ -136,14 +163,17 @@ public struct RTSLLMGateway: Sendable {
 
     /// Builds a session on `LanguageModelSession`: the on-device system model when
     /// `sessionFactory` is `nil` (`.appleAI`), otherwise the factory's `LanguageModel`
-    /// (`.foundationModel`). Tool bridging is identical for both.
+    /// (`.foundationModel`, `.privateCloudCompute`). Tool bridging is identical for all three.
+    /// `reasoningLevel` is passed explicitly at every call site, so a new case cannot silently skip
+    /// forwarding one.
     @available(macOS 26, iOS 26, *)
     private static func buildFoundationModelsSession(
         apiKeys: [RTSLLMProviderKind: String],
         invoker: RTSNodeInvoker,
         agentNode: any RTSAgentNode,
         onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
-        sessionFactory: AppleAISession.MakeSession?
+        sessionFactory: AppleAISession.MakeSession?,
+        reasoningLevel: RTSPrivateCloudComputeReasoningLevel?
     ) throws -> RTSLLMSession {
         let (appleAISession, unsupported) = try AppleAISession.build(
             fromAgentTools: agentNode.tools,
@@ -158,7 +188,8 @@ public struct RTSLLMGateway: Sendable {
                 )
             },
             onNewSession: onNewSession,
-            sessionFactory: sessionFactory
+            sessionFactory: sessionFactory,
+            reasoningLevel: reasoningLevel
         )
         if !unsupported.isEmpty {
             log.warning("⚠️ [\(agentNode.agentName)] \(unsupported.count) tool(s) ignored — conform to RTSAppleAIToolNode to use tools with \(agentNode.llmProvider.providerName) via FoundationModels: [\(unsupported.map(\.toolName))]")
