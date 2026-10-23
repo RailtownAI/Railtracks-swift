@@ -54,6 +54,18 @@ public enum RTSError: Error {
         reason: String,
         context: RTSErrorContext
     )
+    /// The provider's usage limit was reached — for Private Cloud Compute, the user's daily
+    /// limit, counted against their iCloud account and raised by iCloud+.
+    ///
+    /// `resetDate` is when requests work again, when the provider says; an app can show it, or
+    /// disable the action until then rather than retrying.
+    case quotaLimitReached(provider: String, resetDate: Date?, context: RTSErrorContext)
+    /// The app lacks an entitlement the provider requires — for Private Cloud Compute,
+    /// `com.apple.developer.private-cloud-compute`.
+    ///
+    /// Raised only when a request fails: Private Cloud Compute reports itself available without
+    /// the entitlement, so no availability check can catch this first.
+    case missingEntitlement(name: String, context: RTSErrorContext)
 }
 
 // MARK: - Call-site capturing factories
@@ -183,6 +195,27 @@ extension RTSError {
             context: context
         )
     }
+
+    public static func quotaLimitReached(
+        provider: String,
+        resetDate: Date?,
+        file: String = #fileID,
+        line: UInt = #line,
+        function: String = #function
+    ) -> RTSError {
+        let context = RTSErrorContext(file: file, line: line, function: function)
+        return .quotaLimitReached(provider: provider, resetDate: resetDate, context: context)
+    }
+
+    public static func missingEntitlement(
+        name: String,
+        file: String = #fileID,
+        line: UInt = #line,
+        function: String = #function
+    ) -> RTSError {
+        let context = RTSErrorContext(file: file, line: line, function: function)
+        return .missingEntitlement(name: name, context: context)
+    }
 }
 
 // MARK: - Context access
@@ -200,7 +233,9 @@ extension RTSError {
              .invalidSchema(_, let context),
              .missingAPIKey(_, let context),
              .providerUnavailable(_, let context),
-             .guardrailBlocked(_, _, _, let context):
+             .guardrailBlocked(_, _, _, let context),
+             .quotaLimitReached(_, _, let context),
+             .missingEntitlement(_, let context):
             return context
         }
     }
@@ -240,6 +275,14 @@ extension RTSError: CustomStringConvertible {
             let stageText = String(reflecting: stage)
             return "guardrailBlocked(guardrailName: \(name), "
                 + "stage: \(stageText), reason: \(String(reflecting: reason)))"
+        case .quotaLimitReached(let provider, let resetDate, _):
+            // ISO 8601 in UTC, so the trace carries an unambiguous time rather than `Date`'s
+            // reflected form.
+            let resetText = resetDate.map { String(reflecting: $0.ISO8601Format()) } ?? "nil"
+            return "quotaLimitReached(provider: \(String(reflecting: provider)), "
+                + "resetDate: \(resetText))"
+        case .missingEntitlement(let name, _):
+            return "missingEntitlement(name: \(String(reflecting: name)))"
         }
     }
 }

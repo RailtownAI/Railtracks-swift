@@ -107,6 +107,116 @@ struct PrivateCloudComputeProviderTests {
     }
 }
 
+// MARK: - Errors
+
+@Suite("Private Cloud Compute errors")
+struct PrivateCloudComputeErrorTests {
+
+    private static let resetDate = Date(timeIntervalSince1970: 1_800_000_000)
+
+    /// The error a request failed with on an un-entitled macOS 27 Mac, rebuilt: three deep through
+    /// `NSMultipleUnderlyingErrorsKey`, with the telling code only at the bottom.
+    private static func entitlementFailure(innermostCode: Int = 1046) -> NSError {
+        let innermost = NSError(
+            domain: "ModelManagerServices.ModelManagerError",
+            code: innermostCode
+        )
+        let middle = NSError(
+            domain: "FoundationModels.LanguageModelError",
+            code: -1,
+            userInfo: [NSMultipleUnderlyingErrorsKey: [innermost]]
+        )
+        return NSError(
+            domain: "FoundationModels.LanguageModelError",
+            code: -1,
+            userInfo: [NSMultipleUnderlyingErrorsKey: [middle]]
+        )
+    }
+
+    @Test("A quota error's description carries its reset date")
+    func quotaDescriptionCarriesDate() {
+        let error = RTSError.quotaLimitReached(
+            provider: "AppleAIPrivateCloudCompute",
+            resetDate: Self.resetDate
+        )
+
+        #expect(error.description == """
+            quotaLimitReached(provider: "AppleAIPrivateCloudCompute", \
+            resetDate: "2027-01-15T08:00:00Z")
+            """)
+    }
+
+    @Test("A quota error without a date says so")
+    func quotaDescriptionWithoutDate() {
+        let error = RTSError.quotaLimitReached(
+            provider: "AppleAIPrivateCloudCompute",
+            resetDate: nil
+        )
+
+        #expect(error.description
+            == #"quotaLimitReached(provider: "AppleAIPrivateCloudCompute", resetDate: nil)"#)
+    }
+
+    @Test("The missing-entitlement error names the entitlement")
+    func entitlementDescription() {
+        let error = RTSError.missingEntitlement(name: "com.apple.developer.private-cloud-compute")
+
+        #expect(error.description
+            == #"missingEntitlement(name: "com.apple.developer.private-cloud-compute")"#)
+    }
+
+    @Test("The missing-entitlement failure maps to missingEntitlement")
+    func entitlementFailureMaps() {
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: Self.entitlementFailure(),
+            provider: .privateCloudCompute(),
+            currentQuotaResetDate: { nil }
+        )
+
+        guard case .missingEntitlement(let name, _)? = rtsError else {
+            Issue.record("expected missingEntitlement, got \(String(describing: rtsError))")
+            return
+        }
+        #expect(name == "com.apple.developer.private-cloud-compute")
+    }
+
+    @Test("The same shape without code 1046 has no RTSError")
+    func otherCodeHasNoRTSError() {
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: Self.entitlementFailure(innermostCode: 1047),
+            provider: .privateCloudCompute(),
+            currentQuotaResetDate: { nil }
+        )
+
+        #expect(rtsError == nil)
+    }
+
+    @Test("Code 1046 under another provider has no RTSError")
+    func entitlementCodeElsewhereHasNoRTSError() {
+        // Undocumented, so only trusted where it was measured: Private Cloud Compute.
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: Self.entitlementFailure(),
+            provider: .appleAI,
+            currentQuotaResetDate: { nil }
+        )
+
+        #expect(rtsError == nil)
+    }
+
+    @Test("An unrelated error has no RTSError, so it is rethrown as it is")
+    func unrelatedErrorHasNoRTSError() {
+        struct Unrelated: Error {}
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: Unrelated(),
+            provider: .privateCloudCompute(),
+            currentQuotaResetDate: { nil }
+        )
+
+        #expect(rtsError == nil)
+    }
+}
+
 // MARK: - Foundation Models
 
 #if canImport(FoundationModels)
@@ -172,6 +282,182 @@ struct PrivateCloudComputeSessionTests {
         // Construction only: no request is sent, so this needs neither the entitlement nor a
         // network, and must not throw `providerUnavailable` on macOS 27.
         _ = try gateway.session(invoker: invoker, agentNode: agent, onNewSession: { _ in })
+    }
+}
+
+@Suite("Private Cloud Compute quota and entitlement mapping")
+struct PrivateCloudComputeQuotaMappingTests {
+
+    private static let thrownResetDate = Date(timeIntervalSince1970: 1_800_000_000)
+    private static let currentResetDate = Date(timeIntervalSince1970: 1_800_086_400)
+
+    /// The quota error's provider and reset date, or `nil` when `rtsError` is not one.
+    private static func quota(_ rtsError: RTSError?) -> (provider: String, resetDate: Date?)? {
+        guard case .quotaLimitReached(let provider, let resetDate, _)? = rtsError else {
+            return nil
+        }
+        return (provider, resetDate)
+    }
+
+    @Test("PCC's quota error maps with its own reset date")
+    func quotaErrorKeepsItsDate() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let thrown = PrivateCloudComputeLanguageModel.Error.quotaLimitReached(
+            .init(resetDate: Self.thrownResetDate, debugDescription: "daily limit")
+        )
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: thrown,
+            provider: .privateCloudCompute(),
+            currentQuotaResetDate: { Self.currentResetDate }
+        )
+
+        let quota = Self.quota(rtsError)
+        #expect(quota?.provider == "AppleAIPrivateCloudCompute")
+        #expect(quota?.resetDate == Self.thrownResetDate)
+    }
+
+    @Test("Without a date on the error, the quota's current reset date is used")
+    func quotaErrorFallsBackToCurrentDate() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let thrown = PrivateCloudComputeLanguageModel.Error.quotaLimitReached(
+            .init(resetDate: nil, debugDescription: "daily limit")
+        )
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: thrown,
+            provider: .privateCloudCompute(),
+            currentQuotaResetDate: { Self.currentResetDate }
+        )
+
+        #expect(Self.quota(rtsError)?.resetDate == Self.currentResetDate)
+    }
+
+    @Test("With no date anywhere, the quota error still maps, dateless")
+    func quotaErrorWithNoDateAnywhere() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let thrown = PrivateCloudComputeLanguageModel.Error.quotaLimitReached(
+            .init(resetDate: nil, debugDescription: "daily limit")
+        )
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: thrown,
+            provider: .privateCloudCompute(),
+            currentQuotaResetDate: { nil }
+        )
+
+        let quota = Self.quota(rtsError)
+        #expect(quota != nil)
+        #expect(quota?.resetDate == nil)
+    }
+
+    @Test("A rate limit on PCC maps to the quota error, with its date")
+    func rateLimitOnPrivateCloudComputeMaps() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let thrown = LanguageModelError.rateLimited(
+            .init(resetDate: Self.thrownResetDate, debugDescription: "rate limited")
+        )
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: thrown,
+            provider: .privateCloudCompute(),
+            currentQuotaResetDate: { nil }
+        )
+
+        #expect(Self.quota(rtsError)?.resetDate == Self.thrownResetDate)
+    }
+
+    @Test("A rate limit on another model has no RTSError")
+    func rateLimitElsewhereHasNoRTSError() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let claude = RTSFoundationLanguageModel(
+            SystemLanguageModel.default,
+            kind: .anthropic,
+            modelID: "claude-sonnet-4-6"
+        )
+        let thrown = LanguageModelError.rateLimited(
+            .init(resetDate: Self.thrownResetDate, debugDescription: "rate limited")
+        )
+
+        // From Claude, a rate limit is the provider's, not a daily quota.
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: thrown,
+            provider: .foundationModel(claude),
+            currentQuotaResetDate: { nil }
+        )
+
+        #expect(rtsError == nil)
+    }
+
+    @Test("A PCC model wrapped in .foundationModel gets the entitlement error too")
+    func wrappedPrivateCloudComputeMapsEntitlement() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let wrapped = RTSFoundationLanguageModel(
+            PrivateCloudComputeLanguageModel(),
+            kind: .privateCloudCompute,
+            modelID: "private-cloud-compute"
+        )
+        let innermost = NSError(domain: "ModelManagerServices.ModelManagerError", code: 1046)
+        let failure = NSError(
+            domain: "FoundationModels.LanguageModelError",
+            code: -1,
+            userInfo: [NSMultipleUnderlyingErrorsKey: [innermost]]
+        )
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: failure,
+            provider: .foundationModel(wrapped),
+            currentQuotaResetDate: { nil }
+        )
+
+        guard case .missingEntitlement? = rtsError else {
+            Issue.record("expected missingEntitlement, got \(String(describing: rtsError))")
+            return
+        }
+    }
+
+    /// Live, and only meaningful *without* the entitlement — which a test binary never has. Sends
+    /// one real request through the gateway; skips where PCC reports itself unavailable.
+    @Test("A run on this un-entitled machine throws missingEntitlement")
+    func liveRunWithoutEntitlement() async throws {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        guard PrivateCloudComputeLanguageModel().isAvailable else {
+            print("⏭️ Private Cloud Compute unavailable; skipping live entitlement check")
+            return
+        }
+        let agent = RTSAgent(llmProvider: .privateCloudCompute(), name: "PCC Entitlement Probe")
+        let gateway = RTSLLMGateway(apiKeys: [:])
+        let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+        let session = try gateway.session(
+            invoker: invoker,
+            agentNode: agent,
+            onNewSession: { _ in }
+        )
+
+        do {
+            _ = try await session.run("Reply with the single word: hello", runID: UUID())
+            Issue.record("expected the request to fail without the entitlement")
+        } catch {
+            guard case .missingEntitlement(let name, _) = error as? RTSError else {
+                Issue.record("expected missingEntitlement, got \(error)")
+                return
+            }
+            #expect(name == "com.apple.developer.private-cloud-compute")
+        }
     }
 }
 #endif
