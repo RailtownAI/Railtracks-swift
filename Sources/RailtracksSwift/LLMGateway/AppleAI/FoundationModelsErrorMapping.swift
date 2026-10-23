@@ -29,6 +29,13 @@ enum FoundationModelsErrorMapping {
     /// only guards against a cycle.
     private static let maximumUnderlyingDepth = 8
 
+    /// The user's Private Cloud Compute quota at one moment, in a type that needs no OS 27
+    /// availability, so it can be injected in tests.
+    struct QuotaState: Sendable, Equatable {
+        var isLimitReached: Bool
+        var resetDate: Date?
+    }
+
     /// The `RTSError` an app should see instead of `error`, or `nil` when there is none and
     /// `error` should be rethrown as it is.
     ///
@@ -37,26 +44,44 @@ enum FoundationModelsErrorMapping {
     ///   - provider: The agent's provider. Only Private Cloud Compute's kind enables the
     ///     entitlement and rate-limit mappings, whether chosen as `.privateCloudCompute` or wrapped
     ///     in `.foundationModel`.
-    ///   - currentQuotaResetDate: The quota's reset date right now, used when the thrown error
-    ///     carries none. Injected so tests can control it.
+    ///   - currentQuota: The quota right now. Read only when needed: to tell a rate limit from the
+    ///     daily limit, and for a reset date the thrown error lacks. Injected so tests can control
+    ///     it.
     static func rtsError(
         for error: Error,
         provider: RTSLLMProvider,
-        currentQuotaResetDate: () -> Date? = Self.privateCloudComputeQuotaResetDate
+        currentQuota: () -> QuotaState = Self.privateCloudComputeQuota
     ) -> RTSError? {
+        if let surfaced = errorFromToolCall(error) {
+            return surfaced
+        }
         let isPrivateCloudCompute = provider.kind == .privateCloudCompute
         // XCODE26-SDK: both error types exist only in the OS 27 SDK (Xcode 27, Swift 6.4).
         #if compiler(>=6.4)
         // OS26-FLOOR: both are OS 27 API, and nothing below OS 27 can throw them.
-        if #available(macOS 27, iOS 27, *),
-           let thrownResetDate = quotaResetDate(
-               of: error,
-               includingRateLimit: isPrivateCloudCompute
-           ) {
-            return RTSError.quotaLimitReached(
-                provider: provider.providerName,
-                resetDate: thrownResetDate ?? currentQuotaResetDate()
-            )
+        if #available(macOS 27, iOS 27, *) {
+            if let quotaError = error as? PrivateCloudComputeLanguageModel.Error,
+               case .quotaLimitReached(let info) = quotaError {
+                return RTSError.quotaLimitReached(
+                    provider: provider.providerName,
+                    resetDate: info.resetDate ?? currentQuota().resetDate
+                )
+            }
+            if isPrivateCloudCompute,
+               let modelError = error as? LanguageModelError,
+               case .rateLimited(let info) = modelError {
+                // A rate limit is the daily limit only when the quota says so. Otherwise it may
+                // clear in seconds, and reporting it as the daily limit — with the daily reset
+                // date, hours away — would have an app disable the feature until tomorrow.
+                let quota = currentQuota()
+                guard quota.isLimitReached else {
+                    return nil
+                }
+                return RTSError.quotaLimitReached(
+                    provider: provider.providerName,
+                    resetDate: info.resetDate ?? quota.resetDate
+                )
+            }
         }
         #endif
         if isPrivateCloudCompute, hasMissingEntitlementError(error) {
@@ -65,38 +90,48 @@ enum FoundationModelsErrorMapping {
         return nil
     }
 
-    // XCODE26-SDK: as above.
-    #if compiler(>=6.4)
-    /// For a quota error, the reset date it carries (which may itself be `nil`); `nil` when the
-    /// error is not a quota error at all.
+    /// A quota or entitlement `RTSError` that a sub-agent raised inside one of this agent's tool
+    /// calls.
     ///
-    /// `LanguageModelError.rateLimited` counts only for Private Cloud Compute, in case Apple
-    /// reports the daily limit through it. From another model, Claude say, it means a provider rate
-    /// limit, not a quota, and is left as it is.
-    @available(macOS 27, iOS 27, *)
-    private static func quotaResetDate(of error: Error, includingRateLimit: Bool) -> Date?? {
-        if let quotaError = error as? PrivateCloudComputeLanguageModel.Error,
-           case .quotaLimitReached(let info) = quotaError {
-            return .some(info.resetDate)
+    /// The sub-agent's own session already mapped it, but the tool bridge rethrows it into Apple's
+    /// tool loop, which wraps it in `LanguageModelSession.ToolCallError` — so without this the app
+    /// would see the wrapper. Surfaced whatever this agent's provider is: an on-device orchestrator
+    /// can call a Private Cloud Compute sub-agent. Other errors stay wrapped, as before.
+    private static func errorFromToolCall(_ error: Error) -> RTSError? {
+        guard #available(macOS 26, iOS 26, *) else {
+            return nil
         }
-        if includingRateLimit,
-           let modelError = error as? LanguageModelError,
-           case .rateLimited(let info) = modelError {
-            return .some(info.resetDate)
+        var current = error
+        for _ in 0..<maximumUnderlyingDepth {
+            guard let toolCallError = current as? LanguageModelSession.ToolCallError else {
+                break
+            }
+            current = toolCallError.underlyingError
         }
-        return nil
+        guard let rtsError = current as? RTSError else {
+            return nil
+        }
+        switch rtsError {
+        case .quotaLimitReached, .missingEntitlement:
+            return rtsError
+        default:
+            return nil
+        }
     }
-    #endif
 
-    /// The PCC quota's reset date now, or `nil` below OS 27 or when Apple gives none.
-    static func privateCloudComputeQuotaResetDate() -> Date? {
-        // XCODE26-SDK and OS26-FLOOR: as in `map`.
+    /// The PCC quota now: not reached, with no reset date, below OS 27.
+    static func privateCloudComputeQuota() -> QuotaState {
+        // XCODE26-SDK and OS26-FLOOR: as in `rtsError(for:provider:currentQuota:)`.
         #if compiler(>=6.4)
         if #available(macOS 27, iOS 27, *) {
-            return PrivateCloudComputeLanguageModel().quotaUsage.resetDate
+            let quotaUsage = PrivateCloudComputeLanguageModel().quotaUsage
+            return QuotaState(
+                isLimitReached: quotaUsage.isLimitReached,
+                resetDate: quotaUsage.resetDate
+            )
         }
         #endif
-        return nil
+        return QuotaState(isLimitReached: false, resetDate: nil)
     }
 
     /// Whether the missing-entitlement error is `error` or anywhere among its underlying errors.

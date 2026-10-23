@@ -76,7 +76,7 @@ let result = try await flow.run(agent: agent, prompt: "What is 12 + 8?", gateway
 
 ### Apple Intelligence (on-device)
 
-Tools for Apple Intelligence must conform to `RTSAppleAIToolNode`, which bridges to FoundationModels and auto-derives the parameter schema from `@Generable Arguments`.
+Tools for Apple Intelligence must conform to `RTSAppleAIToolNode`, which bridges to FoundationModels and auto-derives the parameter schema from `@Generable Arguments`. This applies to every provider that runs through FoundationModels — `.appleAI`, `.privateCloudCompute` and `.foundationModel` — so moving an agent from OpenAI, Anthropic or Gemini to one of them needs its tools converted: a plain `RTSToolNode` is dropped there, with only a log warning. (`RTSAgentTool` and `RTSOrchestratorTool` work on both paths.)
 
 ```swift
 import RailtracksSwift
