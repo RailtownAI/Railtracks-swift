@@ -158,6 +158,7 @@ public enum RTSLLMProviderKind: Hashable, CaseIterable, Sendable {
     case anthropic
     case gemini
     case appleAI
+    case privateCloudCompute
 }
 
 /// LLM Providers that store model ID as string in its associated value
@@ -166,8 +167,22 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     case anthropic(modelIDString: String)
     case gemini(modelIDString: String, options: RTSGeminiOptions = RTSGeminiOptions())
     case appleAI
+    /// Apple's server model on Private Cloud Compute, through `LanguageModelSession`. Requires
+    /// macOS 27 / iOS 27 at run time, an Apple Intelligence device, a network connection, and the
+    /// app's `com.apple.developer.private-cloud-compute` entitlement.
+    ///
+    /// No cost to the developer: each user has a daily limit, counted against their iCloud account
+    /// and raised by iCloud+. See `docs/private-cloud-compute.md`.
+    case privateCloudCompute(options: RTSPrivateCloudComputeOptions = .init())
     /// Any FoundationModels `LanguageModel` — e.g. Claude via `ClaudeForFoundationModels` —
     /// run through `LanguageModelSession`. Requires macOS 27 / iOS 27 at run time.
+    ///
+    /// For third-party models the library does not ship. **For Apple's own models, use
+    /// ``appleAI`` (on-device) or ``privateCloudCompute(options:)``.** Wrapping
+    /// `SystemLanguageModel` or `PrivateCloudComputeLanguageModel` here also works, but the app
+    /// must then build the model behind its own `#available` check, its labelling depends on the
+    /// `kind` passed, and Private Cloud Compute's reasoning level cannot be set, so the model's
+    /// default applies.
     ///
     /// Reports the wrapped model's `kind` as its own, so it is priced, traced and rate-limited
     /// as that provider. It is therefore absent from `allCases`, which lists one case per kind.
@@ -183,6 +198,8 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             return "Gemini-\(modelIDString)"
         case .appleAI:
             return "AppleAI-AppleFoundationModel-on-device"
+        case .privateCloudCompute:
+            return "AppleAI-PrivateCloudCompute"
         case .foundationModel(let languageModel):
             return "FoundationModels-\(providerName)-\(languageModel.modelID)"
         }
@@ -198,6 +215,8 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             return "Gemini"
         case .appleAI:
             return "AppleAI"
+        case .privateCloudCompute:
+            return "AppleAIPrivateCloudCompute"
         case .foundationModel(let languageModel):
             // `allCases` holds exactly one case per kind, so this always finds one.
             return Self.allCases.first { $0.kind == languageModel.kind }?.providerName ?? "Unknown"
@@ -214,6 +233,8 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             return .gemini
         case .appleAI:
             return .appleAI
+        case .privateCloudCompute:
+            return .privateCloudCompute
         case .foundationModel(let languageModel):
             return languageModel.kind
         }
@@ -229,26 +250,47 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             return modelIDString
         case .appleAI:
             return "on-device"
+        case .privateCloudCompute:
+            return "private-cloud-compute"
         case .foundationModel(let languageModel):
             return languageModel.modelID
         }
     }
 
+    /// Whether the model runs on the device itself. Private Cloud Compute does not — it is a
+    /// network call — even though, like the on-device model, it costs the developer nothing; that
+    /// is ``isBilled``'s question, not this one.
     public var isLocal: Bool {
         switch self {
         case .appleAI:
             return true
-        case .openAI, .anthropic, .gemini:
+        case .openAI, .anthropic, .gemini, .privateCloudCompute:
             return false
         case .foundationModel(let languageModel):
             return languageModel.kind == .appleAI
         }
     }
 
-    /// Returns whether a provider name string belongs to a local (zero-cost) provider.
+    /// Whether calls cost the developer money, and so are priced in traces.
+    ///
+    /// Separate from ``isLocal``, which once answered both: Private Cloud Compute is remote but
+    /// free to the developer, so the two no longer coincide.
+    var isBilled: Bool {
+        switch self {
+        case .appleAI, .privateCloudCompute:
+            return false
+        case .openAI, .anthropic, .gemini:
+            return true
+        case .foundationModel(let languageModel):
+            return languageModel.kind != .appleAI && languageModel.kind != .privateCloudCompute
+        }
+    }
+
+    /// Returns whether a provider name string belongs to a billed provider. An unrecognised name
+    /// counts as billed, so it is looked up in the pricing map rather than silently priced at zero.
     /// Used by the JSON export layer, which only has the name string from message metadata.
-    static func isLocal(providerName: String) -> Bool {
-        return allCases.first { $0.providerName == providerName }?.isLocal ?? false
+    static func isBilled(providerName: String) -> Bool {
+        return allCases.first { $0.providerName == providerName }?.isBilled ?? true
     }
 
     public static var allCases: [RTSLLMProvider] {
@@ -262,6 +304,8 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
                 return .gemini(modelIDString: "")
             case .appleAI:
                 return .appleAI
+            case .privateCloudCompute:
+                return .privateCloudCompute()
             }
         }
     }

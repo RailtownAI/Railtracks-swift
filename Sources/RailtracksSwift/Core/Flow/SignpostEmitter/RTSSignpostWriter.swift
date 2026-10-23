@@ -473,15 +473,15 @@ final class RTSSignpostWriter: Sendable {
     }
 
     /// USD cost from token usage via `RTSCostCalculator`, the way the trace's `llm_details` gets
-    /// it. 0 for local providers (AppleAI), when no tokens were used, or when the model has no
-    /// pricing entry or the pricing map is unavailable.
+    /// it. 0 for unbilled providers (AppleAI and Private Cloud Compute), when no tokens were used,
+    /// or when the model has no pricing entry or the pricing map is unavailable.
     static func cost(
         model: String,
         provider: String,
         inputTokens: Int,
         outputTokens: Int
     ) async -> Double {
-        guard !RTSLLMProvider.isLocal(providerName: provider),
+        guard RTSLLMProvider.isBilled(providerName: provider),
               inputTokens > 0 || outputTokens > 0 else {
             return 0
         }

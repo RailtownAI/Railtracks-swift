@@ -26,6 +26,10 @@ import FoundationModels
 /// RailtracksSwift depends only on Apple's protocol, never on a vendor package, so the app owns
 /// that dependency — and the OS 27 deployment target that comes with it.
 ///
+/// Meant for third-party models. Apple's own have dedicated cases, `RTSLLMProvider.appleAI` and
+/// `RTSLLMProvider.privateCloudCompute(options:)`, which need no app-side `#available` check,
+/// always label correctly, and (for Private Cloud Compute) accept a reasoning level.
+///
 /// The model is stored type-erased, so `RTSLLMProvider` carries no availability annotation; only
 /// this initializer does.
 ///
