@@ -113,6 +113,10 @@ struct PrivateCloudComputeProviderTests {
 struct PrivateCloudComputeErrorTests {
 
     private static let resetDate = Date(timeIntervalSince1970: 1_800_000_000)
+    private static let quotaNotReached = FoundationModelsErrorMapping.QuotaState(
+        isLimitReached: false,
+        resetDate: nil
+    )
 
     /// The error a request failed with on an un-entitled macOS 27 Mac, rebuilt: three deep through
     /// `NSMultipleUnderlyingErrorsKey`, with the telling code only at the bottom.
@@ -170,7 +174,7 @@ struct PrivateCloudComputeErrorTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: Self.entitlementFailure(),
             provider: .privateCloudCompute(),
-            currentQuotaResetDate: { nil }
+            currentQuota: { Self.quotaNotReached }
         )
 
         guard case .missingEntitlement(let name, _)? = rtsError else {
@@ -185,7 +189,7 @@ struct PrivateCloudComputeErrorTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: Self.entitlementFailure(innermostCode: 1047),
             provider: .privateCloudCompute(),
-            currentQuotaResetDate: { nil }
+            currentQuota: { Self.quotaNotReached }
         )
 
         #expect(rtsError == nil)
@@ -197,7 +201,7 @@ struct PrivateCloudComputeErrorTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: Self.entitlementFailure(),
             provider: .appleAI,
-            currentQuotaResetDate: { nil }
+            currentQuota: { Self.quotaNotReached }
         )
 
         #expect(rtsError == nil)
@@ -210,7 +214,7 @@ struct PrivateCloudComputeErrorTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: Unrelated(),
             provider: .privateCloudCompute(),
-            currentQuotaResetDate: { nil }
+            currentQuota: { Self.quotaNotReached }
         )
 
         #expect(rtsError == nil)
@@ -223,6 +227,22 @@ struct PrivateCloudComputeErrorTests {
 // XCODE26-SDK: `ContextOptions` and `PrivateCloudComputeLanguageModel` need the OS 27 SDK
 // (Xcode 27, Swift 6.4).
 #if compiler(>=6.4)
+/// Stands in for the sub-agent tool a `ToolCallError` names; never called.
+@available(macOS 26, iOS 26, *)
+private struct SubAgentProbeTool: Tool {
+    let name = "subAgentProbe"
+    let description = "Stands in for a sub-agent tool."
+
+    @Generable
+    struct Arguments {
+        var prompt: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        ""
+    }
+}
+
 @Suite("Private Cloud Compute session")
 struct PrivateCloudComputeSessionTests {
 
@@ -290,6 +310,14 @@ struct PrivateCloudComputeQuotaMappingTests {
 
     private static let thrownResetDate = Date(timeIntervalSince1970: 1_800_000_000)
     private static let currentResetDate = Date(timeIntervalSince1970: 1_800_086_400)
+    private static let quotaNotReached = FoundationModelsErrorMapping.QuotaState(
+        isLimitReached: false,
+        resetDate: nil
+    )
+    private static let quotaReached = FoundationModelsErrorMapping.QuotaState(
+        isLimitReached: true,
+        resetDate: currentResetDate
+    )
 
     /// The quota error's provider and reset date, or `nil` when `rtsError` is not one.
     private static func quota(_ rtsError: RTSError?) -> (provider: String, resetDate: Date?)? {
@@ -311,7 +339,7 @@ struct PrivateCloudComputeQuotaMappingTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: thrown,
             provider: .privateCloudCompute(),
-            currentQuotaResetDate: { Self.currentResetDate }
+            currentQuota: { Self.quotaReached }
         )
 
         let quota = Self.quota(rtsError)
@@ -331,7 +359,7 @@ struct PrivateCloudComputeQuotaMappingTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: thrown,
             provider: .privateCloudCompute(),
-            currentQuotaResetDate: { Self.currentResetDate }
+            currentQuota: { Self.quotaReached }
         )
 
         #expect(Self.quota(rtsError)?.resetDate == Self.currentResetDate)
@@ -349,7 +377,7 @@ struct PrivateCloudComputeQuotaMappingTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: thrown,
             provider: .privateCloudCompute(),
-            currentQuotaResetDate: { nil }
+            currentQuota: { Self.quotaNotReached }
         )
 
         let quota = Self.quota(rtsError)
@@ -369,10 +397,48 @@ struct PrivateCloudComputeQuotaMappingTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: thrown,
             provider: .privateCloudCompute(),
-            currentQuotaResetDate: { nil }
+            currentQuota: { Self.quotaReached }
         )
 
         #expect(Self.quota(rtsError)?.resetDate == Self.thrownResetDate)
+    }
+
+    @Test("A rate limit on PCC is not the daily limit while the quota is not reached")
+    func rateLimitBelowQuotaHasNoRTSError() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let thrown = LanguageModelError.rateLimited(
+            .init(resetDate: nil, debugDescription: "rate limited")
+        )
+
+        // A short rate limit: reporting it as the daily limit, with tomorrow's reset date, would
+        // have an app disable the feature for hours over something that clears in seconds.
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: thrown,
+            provider: .privateCloudCompute(),
+            currentQuota: { Self.quotaNotReached }
+        )
+
+        #expect(rtsError == nil)
+    }
+
+    @Test("A dateless rate limit at the daily limit takes the quota's reset date")
+    func rateLimitAtQuotaTakesQuotaDate() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let thrown = LanguageModelError.rateLimited(
+            .init(resetDate: nil, debugDescription: "rate limited")
+        )
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: thrown,
+            provider: .privateCloudCompute(),
+            currentQuota: { Self.quotaReached }
+        )
+
+        #expect(Self.quota(rtsError)?.resetDate == Self.currentResetDate)
     }
 
     @Test("A rate limit on another model has no RTSError")
@@ -393,7 +459,80 @@ struct PrivateCloudComputeQuotaMappingTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: thrown,
             provider: .foundationModel(claude),
-            currentQuotaResetDate: { nil }
+            currentQuota: { Self.quotaNotReached }
+        )
+
+        #expect(rtsError == nil)
+    }
+
+    @Test("A sub-agent's quota error surfaces through the tool call that wrapped it")
+    func subAgentQuotaErrorSurfaces() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let subAgentError = RTSError.quotaLimitReached(
+            provider: "AppleAIPrivateCloudCompute",
+            resetDate: Self.thrownResetDate
+        )
+        // How Apple's tool loop hands back a sub-agent failure: wrapped, here twice over, as an
+        // orchestrator calling an orchestrator would.
+        let inner = LanguageModelSession.ToolCallError(
+            tool: SubAgentProbeTool(),
+            underlyingError: subAgentError
+        )
+        let outer = LanguageModelSession.ToolCallError(
+            tool: SubAgentProbeTool(),
+            underlyingError: inner
+        )
+
+        // An on-device parent: surfaced whatever the parent's provider is.
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: outer,
+            provider: .appleAI,
+            currentQuota: { Self.quotaNotReached }
+        )
+
+        #expect(Self.quota(rtsError)?.resetDate == Self.thrownResetDate)
+    }
+
+    @Test("A sub-agent's missing entitlement surfaces through the tool call that wrapped it")
+    func subAgentEntitlementErrorSurfaces() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let wrapped = LanguageModelSession.ToolCallError(
+            tool: SubAgentProbeTool(),
+            underlyingError: RTSError.missingEntitlement(
+                name: "com.apple.developer.private-cloud-compute"
+            )
+        )
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: wrapped,
+            provider: .privateCloudCompute(),
+            currentQuota: { Self.quotaNotReached }
+        )
+
+        guard case .missingEntitlement? = rtsError else {
+            Issue.record("expected missingEntitlement, got \(String(describing: rtsError))")
+            return
+        }
+    }
+
+    @Test("Other sub-agent errors stay wrapped")
+    func otherSubAgentErrorsStayWrapped() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let wrapped = LanguageModelSession.ToolCallError(
+            tool: SubAgentProbeTool(),
+            underlyingError: RTSError.missingInput("prompt")
+        )
+
+        let rtsError = FoundationModelsErrorMapping.rtsError(
+            for: wrapped,
+            provider: .privateCloudCompute(),
+            currentQuota: { Self.quotaNotReached }
         )
 
         #expect(rtsError == nil)
@@ -419,7 +558,7 @@ struct PrivateCloudComputeQuotaMappingTests {
         let rtsError = FoundationModelsErrorMapping.rtsError(
             for: failure,
             provider: .foundationModel(wrapped),
-            currentQuotaResetDate: { nil }
+            currentQuota: { Self.quotaNotReached }
         )
 
         guard case .missingEntitlement? = rtsError else {
