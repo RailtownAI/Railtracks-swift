@@ -133,6 +133,16 @@ extension RTSLLMSession {
                     return response.text
                 } catch {
                     recordNewMessages(nil)
+                    // A few Foundation Models failures have an `RTSError` an app can act on (PCC's
+                    // quota and missing entitlement); everything else is rethrown untouched.
+                    // Checked here rather than in `AppleAISession`, which does not know the
+                    // provider, and the entitlement check applies only to Private Cloud Compute.
+                    if let rtsError = FoundationModelsErrorMapping.rtsError(
+                        for: error,
+                        provider: provider
+                    ) {
+                        throw rtsError
+                    }
                     throw error
                 }
             },
