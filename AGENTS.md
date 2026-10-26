@@ -257,6 +257,15 @@ makes the default splitter and embedder Apple-only. Both sit behind protocols, s
 supplies different conformers rather than changing anything else. The `Spotlight/` folder (below)
 adds Core Spotlight, and is Apple-only by nature.
 
+`RTSRAGAppleEmbedding`'s assets may need an OS download, which reports no progress, cannot be
+cancelled, and may never answer (in a Simulator, or on an offline device), and whose answer may
+never come even when the model does arrive. So `prepare(timeout:)` bounds the wait (60 s by
+default, `nil` for unbounded), checks `hasAvailableAssets` every 2 s while waiting, and throws
+`RTSRAGError.embeddingModelNotReady` when the timeout passes, leaving the download running. Later
+calls, from any embedder for that asset, join the same request (`RTSRAGAssetRequest`) for its first
+30 s, then ask again. `loadIfAvailable()` never downloads, and
+`assetsAvailable(revision:language:)` checks without loading. See `docs/apple-embedding-prepare.md`.
+
 Chunk size is capped in **characters** (`RTSRAGLimits.defaultMaxChunkCharacters`), not tokens. A
 chunker enforces that by construction, so oversized input is impossible rather than detected —
 which is what lets the port ship without a token counter, since nothing in Swift can count OpenAI

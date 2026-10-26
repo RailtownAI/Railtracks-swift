@@ -27,6 +27,7 @@ class ContentViewModel {
         case vision
         case rag
         case ragSpotlight
+        case appleEmbedding
         case resumeSearch
     }
 
