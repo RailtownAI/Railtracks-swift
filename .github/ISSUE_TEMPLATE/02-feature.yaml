@@ -17,7 +17,7 @@ body:
         - Agents / Nodes / Flow
         - Tools
         - LLM Providers (OpenAI / Anthropic / Gemini)
-        - Apple Foundation Models (.appleAI / .foundationModel)
+        - Apple Foundation Models (.appleAI / .privateCloudCompute / .foundationModel)
         - Structured Output
         - Guardrails
         - Knowledge Tool
@@ -59,4 +59,4 @@ body:
     id: platform
     attributes:
       label: Platform constraints
-      description: Optional. Does this need a particular OS or SDK (e.g. macOS / iOS 26 for `.appleAI`, 27 for `.foundationModel`), Apple Intelligence, or an entitlement? Anything that would affect the package's macOS 15 / iOS 18 floor?
+      description: Optional. Does this need a particular OS or SDK (e.g. macOS / iOS 26 for `.appleAI`, 27 for `.privateCloudCompute` and `.foundationModel`), Apple Intelligence, or an entitlement? Anything that would affect the package's macOS 15 / iOS 18 floor?

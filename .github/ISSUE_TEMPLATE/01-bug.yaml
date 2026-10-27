@@ -12,7 +12,7 @@ body:
         - Agents / Nodes / Flow
         - Tools
         - LLM Providers (OpenAI / Anthropic / Gemini)
-        - Apple Foundation Models (.appleAI / .foundationModel)
+        - Apple Foundation Models (.appleAI / .privateCloudCompute / .foundationModel)
         - Structured Output
         - Guardrails
         - Knowledge Tool
