@@ -65,6 +65,12 @@ public enum RTSError: Error {
     ///
     /// Raised only when a request fails: Private Cloud Compute reports itself available without
     /// the entitlement, so no availability check can catch this first.
+    ///
+    /// **A signed app never gets this error.** There, Apple's framework stops the app with a fatal
+    /// error ("Missing entitlement: …") before the library can map anything; the thrown form is
+    /// what unsigned processes, such as `swift test`, see. Treat the entitlement as a setup
+    /// requirement: granted to the team, enabled on the App ID, and present in the app's
+    /// entitlements file before any agent uses ``RTSLLMProvider/privateCloudCompute(options:)``.
     case missingEntitlement(name: String, context: RTSErrorContext)
 }
 

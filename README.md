@@ -31,7 +31,7 @@ The providers are checked at run time: below their OS, the gateway throws `RTSEr
 
 `RTSGeminiOptions` carries Gemini-only settings, such as `mediaResolution` for image input. `RTSPrivateCloudComputeOptions` carries Private Cloud Compute's `reasoningLevel` (`.light`, `.moderate`, `.deep`; unset leaves Apple's default).
 
-Private Cloud Compute costs the developer nothing: each user has a daily limit counted against their iCloud account, higher with iCloud+, so traces record no cost for it. The app needs Apple's managed entitlement, available to developers in the App Store Small Business Program with under 2 million first-time downloads. Without the entitlement, Apple still reports the model as available, and requests fail with `RTSError.missingEntitlement`; a user over their daily limit gets `RTSError.quotaLimitReached`, with the reset date when Apple gives one (see [Error Handling](#error-handling)).
+Private Cloud Compute costs the developer nothing: each user has a daily limit counted against their iCloud account, higher with iCloud+, so traces record no cost for it. The app needs Apple's managed entitlement, available to developers in the App Store Small Business Program with under 2 million first-time downloads. Set it up before any agent uses `.privateCloudCompute`: Apple reports the model as available without it, and a signed app that lacks it is stopped with a fatal error on its first request, which nothing can catch. A user over their daily limit gets `RTSError.quotaLimitReached`, with the reset date when Apple gives one (see [Error Handling](#error-handling)).
 
 For Apple's own models, use `.appleAI` and `.privateCloudCompute`: the library builds the model itself, so the app needs no `#available` check or FoundationModels import. `.foundationModel` is for third-party models.
 
@@ -479,10 +479,13 @@ do {
     // The user's daily limit. Disable the action until `resetDate` (nil when Apple gives none),
     // or switch the agent to another provider.
 } catch let RTSError.missingEntitlement(name, _) {
-    // The app lacks `name` ("com.apple.developer.private-cloud-compute"). Apple reports PCC as
-    // available without it, so only a failed request reveals this.
+    // The process lacks `name` ("com.apple.developer.private-cloud-compute"). Seen in unsigned
+    // processes such as `swift test`; a signed app without it is stopped by Apple instead.
 }
 ```
+
+`missingEntitlement` is not a substitute for setting the entitlement up: in a signed app, Apple's
+framework ends the app with a fatal error before the library can throw it.
 
 ### Call-site context
 
