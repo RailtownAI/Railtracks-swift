@@ -171,6 +171,10 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     /// macOS 27 / iOS 27 at run time, an Apple Intelligence device, a network connection, and the
     /// app's `com.apple.developer.private-cloud-compute` entitlement.
     ///
+    /// **The entitlement must be in place before any agent uses this case.** If a signed app lacks
+    /// it, Apple's framework stops the app with a fatal error on the first request, and nothing can
+    /// catch it: grant it to the team, enable it on the App ID, and add it to the entitlements file.
+    ///
     /// No cost to the developer: each user has a daily limit, counted against their iCloud account
     /// and raised by iCloud+. See `docs/private-cloud-compute.md`.
     case privateCloudCompute(options: RTSPrivateCloudComputeOptions = .init())

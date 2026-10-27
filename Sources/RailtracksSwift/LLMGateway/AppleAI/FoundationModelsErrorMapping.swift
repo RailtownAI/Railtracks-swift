@@ -19,9 +19,11 @@ enum FoundationModelsErrorMapping {
 
     static let privateCloudComputeEntitlement = "com.apple.developer.private-cloud-compute"
 
-    /// The error a request fails with when the app lacks the PCC entitlement, measured on macOS 27:
-    /// a plain `NSError` nesting this one beneath two `FoundationModels.LanguageModelError` code -1
-    /// wrappers. Undocumented, so only trusted when the provider is Private Cloud Compute.
+    /// The error a request fails with when the process lacks the PCC entitlement, measured on
+    /// macOS 27 from an unsigned command-line program: a plain `NSError` nesting this one beneath
+    /// two `FoundationModels.LanguageModelError` code -1 wrappers. Undocumented, so only trusted
+    /// when the provider is Private Cloud Compute. A signed app lacking the entitlement never
+    /// reaches this mapping: Apple stops it with a fatal error instead.
     static let missingEntitlementDomain = "ModelManagerServices.ModelManagerError"
     static let missingEntitlementCode = 1046
 
