@@ -17,11 +17,12 @@ body:
         - Agents / Nodes / Flow
         - Tools
         - LLM Providers (OpenAI / Anthropic / Gemini)
-        - Apple Foundation Models (.appleAI / .privateCloudCompute / .foundationModel)
+        - Apple Foundation Models (.appleAI / .foundationModel)
         - Structured Output
         - Guardrails
         - Knowledge Tool
         - RAG / Retrieval (RailtracksSwiftRAG)
+        - SwiftUI views (RailtracksSwiftUI)
         - Observability / Flow-graph Trace / Instruments
         - Evaluations
         - Demo App
@@ -58,4 +59,4 @@ body:
     id: platform
     attributes:
       label: Platform constraints
-      description: Optional. Does this need a particular OS or SDK (e.g. macOS / iOS 27 for Foundation Models), Apple Intelligence, or an entitlement? Anything that would affect the package's macOS 15 / iOS 18 floor?
+      description: Optional. Does this need a particular OS or SDK (e.g. macOS / iOS 26 for `.appleAI`, 27 for `.foundationModel`), Apple Intelligence, or an entitlement? Anything that would affect the package's macOS 15 / iOS 18 floor?

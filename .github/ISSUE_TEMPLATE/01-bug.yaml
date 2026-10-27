@@ -12,11 +12,12 @@ body:
         - Agents / Nodes / Flow
         - Tools
         - LLM Providers (OpenAI / Anthropic / Gemini)
-        - Apple Foundation Models (.appleAI / .privateCloudCompute / .foundationModel)
+        - Apple Foundation Models (.appleAI / .foundationModel)
         - Structured Output
         - Guardrails
         - Knowledge Tool
         - RAG / Retrieval (RailtracksSwiftRAG)
+        - SwiftUI views (RailtracksSwiftUI)
         - Observability / Flow-graph Trace / Instruments
         - Evaluations
         - Demo App
@@ -38,7 +39,7 @@ body:
     id: reproduction
     attributes:
       label: Reproduction
-      description: Minimal, self-contained example. Should run in a fresh Swift package or app that depends only on RailtracksSwift.
+      description: Minimal, self-contained example. Should run in a fresh Swift package or app that depends only on the RailtracksSwift products involved (RailtracksSwift, RailtracksSwiftUI, RailtracksSwiftRAG).
       render: swift
       placeholder: |
         import RailtracksSwift
@@ -79,7 +80,7 @@ body:
     id: traceback
     attributes:
       label: Error / logs
-      description: The thrown error (including `RTSError` cases and their context), crash log, or relevant console output. Attach the flow-graph JSON trace if it helps. Leave blank if the bug is behavioral (no error).
+      description: The thrown error (including `RTSError` cases and their context), crash log, or relevant console output. Attach the flow-graph JSON trace if it helps, but redact it first. It contains full prompts, system messages and tool inputs and outputs, so remove API keys, personal data and anything confidential. Leave blank if the bug is behavioral (no error).
       render: shell
 
   - type: textarea
