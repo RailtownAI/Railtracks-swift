@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability 🔒
+    url: https://github.com/RailtownAI/Railtracks-swift/security/advisories/new
+    about: Please report security issues privately, not as a public issue. See SECURITY.md.
+  - name: Ask a question / share an idea 🤔❓💬
+    url: https://github.com/RailtownAI/Railtracks-swift/discussions
+    about: For questions, ideas, and open-ended discussion.
+  # Documentation site is not live yet. Uncomment and set the URL once it is.
+  # - name: Documentation 📚📖📝
+  #   url: https://<documentation-site>/
+  #   about: Read the documentation and examples for RailtracksSwift.
