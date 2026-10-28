@@ -252,7 +252,13 @@ public class RTSNodeInvoker: @unchecked Sendable {
         var guardTraces: [RTSGuardrailTrace] = []
         var workingInput = input
         var guardError: Error?
-        if let runInputGuardrails {
+        // A cancelled run stops at the next node, even if a provider ignores cancellation. The node
+        // is still created and finished below, so the trace stays balanced and the root always
+        // completes the collector, but neither its guardrails nor its body runs.
+        if Task.isCancelled {
+            guardError = RTSError.runTerminated(reason: .cancelled)
+        }
+        if guardError == nil, let runInputGuardrails {
             let result = await runInputGuardrails(input, invocationID)
             workingInput = result.value
             guardTraces.append(contentsOf: result.traces)
@@ -316,7 +322,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
                     try await execute(runID, workingInput)
                 }
             } catch {
-                invokeError = error
+                invokeError = RTSRunCancellation.normalized(error)
                 output = [:]
                 log.error("☠️ [\(node.name())] invocation failed: \(error)")
             }

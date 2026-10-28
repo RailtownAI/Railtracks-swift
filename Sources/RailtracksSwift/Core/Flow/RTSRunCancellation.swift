@@ -1,0 +1,56 @@
+//
+//  RTSRunCancellation.swift
+//  RailtracksSwift
+//
+
+import Foundation
+
+/// How a cancelled run reports itself, in one place.
+///
+/// A run is cancelled by cancelling the Swift `Task` that awaits `RTSFlow.run`. Providers then
+/// throw whatever they throw on cancel (`URLError.cancelled`, Conduit's own errors, Foundation
+/// Models' errors, `CancellationError`), so a caller would otherwise see a different error per
+/// provider. Everything thrown while the task is cancelled becomes one shape:
+/// `RTSError.runTerminated(reason: .cancelled)`. See `docs/flow-timeout.md`.
+enum RTSRunCancellation {
+
+    /// `error` as the run should report it: `.runTerminated(reason: .cancelled)` when the current
+    /// task has been cancelled, otherwise `error` unchanged.
+    ///
+    /// A `CancellationError` thrown by the app's own code while the run was *not* cancelled passes
+    /// through as itself, matching Python, which keeps a user's own `TimeoutError` apart from its
+    /// global timeout. An error that already says how the run was stopped is kept, so the first
+    /// stop observed is the one reported.
+    static func normalized(
+        _ error: Error,
+        file: String = #fileID,
+        line: UInt = #line,
+        function: String = #function
+    ) -> Error {
+        guard Task.isCancelled else {
+            return error
+        }
+        if case .runTerminated? = error as? RTSError {
+            return error
+        }
+        log.debug("🛑 run cancelled; reporting \(error) as runTerminated(reason: cancelled)")
+        return RTSError.runTerminated(
+            reason: .cancelled,
+            file: file,
+            line: line,
+            function: function
+        )
+    }
+
+    /// Whether `error` is a run the app cancelled itself. Such a run is not a bug, so it is not
+    /// sent to error reporting.
+    static func isCancellation(_ error: Error) -> Bool {
+        guard case .runTerminated(let reason, _)? = error as? RTSError else {
+            return false
+        }
+        guard case .cancelled = reason else {
+            return false
+        }
+        return true
+    }
+}

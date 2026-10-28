@@ -271,8 +271,18 @@ actor RTSFlowGraphCollector {
 
     // MARK: - Completion
 
+    /// Waits until the trace has been finalized, even when the calling task is cancelled.
+    ///
+    /// An `AsyncStream` loop ends as soon as its task is cancelled, so awaiting the stream directly
+    /// would let a cancelled run return before its trace is written. The loop runs in an
+    /// unstructured task instead, which doesn't inherit cancellation, and awaiting its `value` isn't
+    /// interrupted by cancellation either.
     func awaitCompletion() async {
-        for await _ in completionStream {}
+        let stream = completionStream
+        let drain = Task {
+            for await _ in stream {}
+        }
+        await drain.value
     }
 
     private func finishCollection() async {

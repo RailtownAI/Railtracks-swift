@@ -468,6 +468,36 @@ public enum RTSRunTerminationReason: Sendable {
 }
 ```
 
+### Stopping a run
+
+Cancel the Swift `Task` that awaits `flow.run`, for example from a Stop button:
+
+```swift
+let run = Task {
+    try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+}
+
+// Later, when the user taps Stop:
+run.cancel()
+
+do {
+    let answer = try await run.value
+} catch let RTSError.runTerminated(reason, _) {
+    // reason == .cancelled
+}
+```
+
+- **One error, whatever the provider.** Anything thrown because of the cancellation
+  (`CancellationError`, `URLError.cancelled`, a provider's own error) is reported as
+  `RTSError.runTerminated(reason: .cancelled)`. A `CancellationError` your own code throws while the
+  run was not cancelled comes through as itself.
+- **The run stops at the next node at the latest.** Provider calls stop straight away when they
+  honour cancellation (Conduit's network calls and on-device generation do). Tool code that never
+  checks for cancellation finishes its current call, but no further node runs.
+- **The trace is still written.** A cancelled run writes its trace (status `Failed`) and
+  `session.completed` before `run` returns.
+- **Not reported as an error.** A cancelled run isn't sent to RailtownLogger error reporting.
+
 ### Call-site context
 
 Every case carries an `RTSErrorContext` describing where the error was raised. You never construct

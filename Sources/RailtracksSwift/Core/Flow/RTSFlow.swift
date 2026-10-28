@@ -247,15 +247,9 @@ public class RTSFlow: @unchecked Sendable {
             }
             outcome = .success(result)
         } catch {
-            outcome = .failure(error)
-            // Fire-and-forget upload to Conductr; no-op unless the app configured
-            // RailtownLogger with auto-capture enabled. The error rethrows unchanged below.
-            RailtownLogger.captureRailtracks(
-                error,
-                flowTitle: title,
-                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
-                callSite: (error as? RTSError)?.railtownCallSite
-            )
+            let reported = RTSRunCancellation.normalized(error)
+            outcome = .failure(reported)
+            reportFailure(reported)
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
@@ -300,15 +294,9 @@ public class RTSFlow: @unchecked Sendable {
         do {
             outcome = .success(try await nodeInvoker.invokeFunction(node, input: input, context: context))
         } catch {
-            outcome = .failure(error)
-            // Fire-and-forget upload to Conductr; no-op unless the app configured
-            // RailtownLogger with auto-capture enabled. The error rethrows unchanged below.
-            RailtownLogger.captureRailtracks(
-                error,
-                flowTitle: title,
-                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
-                callSite: (error as? RTSError)?.railtownCallSite
-            )
+            let reported = RTSRunCancellation.normalized(error)
+            outcome = .failure(reported)
+            reportFailure(reported)
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
@@ -318,6 +306,24 @@ public class RTSFlow: @unchecked Sendable {
         // still complete by the time `run` returns.
         await flushEvents()
         return try outcome.get()
+    }
+
+    // MARK: - Error reporting
+
+    /// Fire-and-forget upload of a failed run to Conductr; a no-op unless the app configured
+    /// RailtownLogger with auto-capture enabled. The caller still rethrows `error` unchanged.
+    ///
+    /// A run the app cancelled itself is not a bug, so it is not reported.
+    private func reportFailure(_ error: Error) {
+        guard !RTSRunCancellation.isCancellation(error) else {
+            return
+        }
+        RailtownLogger.captureRailtracks(
+            error,
+            flowTitle: title,
+            properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
+            callSite: (error as? RTSError)?.railtownCallSite
+        )
     }
 
     // MARK: - Session events
