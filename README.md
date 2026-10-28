@@ -458,6 +458,13 @@ public enum RTSError: Error {
         reason: String,
         context: RTSErrorContext
     )
+    case runTerminated(reason: RTSRunTerminationReason, context: RTSErrorContext)
+}
+
+public enum RTSRunTerminationReason: Sendable {
+    case cancelled                                          // the task running the flow was cancelled
+    case timeout(after: TimeInterval)                       // the flow's timeout elapsed
+    case endOnError(nodeName: String, underlying: any Error) // a node failed under endOnError
 }
 ```
 

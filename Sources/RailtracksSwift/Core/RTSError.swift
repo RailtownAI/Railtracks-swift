@@ -54,6 +54,24 @@ public enum RTSError: Error {
         reason: String,
         context: RTSErrorContext
     )
+    /// The run was stopped before it finished, and `reason` says how: cancelled, timed out, or
+    /// ended by a node failure under `endOnError`. See `docs/flow-timeout.md`.
+    case runTerminated(reason: RTSRunTerminationReason, context: RTSErrorContext)
+}
+
+/// How a run was stopped before it finished. Carried by ``RTSError/runTerminated(reason:context:)``.
+///
+/// One error case with a reason, rather than one case per way of stopping, so that a new way of
+/// stopping extends this enum instead of `RTSError`, which apps switch over far more often.
+public enum RTSRunTerminationReason: Sendable {
+    /// The task running the flow was cancelled, for example by an app's Stop button. Any error a
+    /// provider throws because of that cancellation is reported as this, whatever its own type.
+    case cancelled
+    /// The flow's timeout elapsed. `after` is the timeout that was set, in seconds.
+    case timeout(after: TimeInterval)
+    /// A node failed while the flow had `endOnError` set, which stops the whole run. `nodeName`
+    /// is the node that failed and `underlying` is its error.
+    case endOnError(nodeName: String, underlying: any Error)
 }
 
 // MARK: - Call-site capturing factories
@@ -183,6 +201,16 @@ extension RTSError {
             context: context
         )
     }
+
+    public static func runTerminated(
+        reason: RTSRunTerminationReason,
+        file: String = #fileID,
+        line: UInt = #line,
+        function: String = #function
+    ) -> RTSError {
+        let context = RTSErrorContext(file: file, line: line, function: function)
+        return .runTerminated(reason: reason, context: context)
+    }
 }
 
 // MARK: - Context access
@@ -200,7 +228,8 @@ extension RTSError {
              .invalidSchema(_, let context),
              .missingAPIKey(_, let context),
              .providerUnavailable(_, let context),
-             .guardrailBlocked(_, _, _, let context):
+             .guardrailBlocked(_, _, _, let context),
+             .runTerminated(_, let context):
             return context
         }
     }
@@ -240,6 +269,24 @@ extension RTSError: CustomStringConvertible {
             let stageText = String(reflecting: stage)
             return "guardrailBlocked(guardrailName: \(name), "
                 + "stage: \(stageText), reason: \(String(reflecting: reason)))"
+        case .runTerminated(let reason, _):
+            return "runTerminated(reason: \(reason))"
+        }
+    }
+}
+
+/// The reason as it appears inside ``RTSError``'s description, in the same reflected style:
+/// `cancelled`, `timeout(after: 30.0)`, `endOnError(nodeName: "Search", underlying: …)`.
+extension RTSRunTerminationReason: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .cancelled:
+            return "cancelled"
+        case .timeout(let seconds):
+            return "timeout(after: \(seconds))"
+        case .endOnError(let nodeName, let underlying):
+            let name = String(reflecting: nodeName)
+            return "endOnError(nodeName: \(name), underlying: \(underlying))"
         }
     }
 }

@@ -1,5 +1,5 @@
 {
-  "originHash" : "6c7165718fd92f0125d9c7b9b2a806b4f08c5eef1035d6f50752fbcef17667f4",
+  "originHash" : "17b428e8ff1c182450578fa7572c84476107bfce8f92967933b87cbb35ace9af",
   "pins" : [
     {
       "identity" : "claudeforfoundationmodels",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/Conduit",
       "state" : {
-        "revision" : "32669fe8e5047c76d247f1537881171e06fa20cb",
-        "version" : "0.3.23"
+        "revision" : "d344434312a244ba0065624e2d8c691ce8e1abe5",
+        "version" : "0.3.24"
       }
     },
     {

@@ -36,7 +36,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/RailtownAI/Conduit",
-            exact: "0.3.23",
+            .upToNextMinor(from: "0.3.24"),
             traits: [
                 .trait(name: "OpenAI"),
                 .trait(name: "OpenRouter"),
