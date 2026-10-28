@@ -15,12 +15,20 @@ struct MathVerifyView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Prompt: " + viewModel.prompt)
-            Button("Run") {
-                viewModel.startPrompt()
+            HStack {
+                Button("Run") {
+                    viewModel.startPrompt()
+                }
+                .disabled(viewModel.isRunning)
+                .buttonStyle(.bordered)
+
+                Button("Stop", role: .cancel) {
+                    viewModel.stopPrompt()
+                }
+                .disabled(!viewModel.isRunning)
+                .buttonStyle(.bordered)
             }
-            .disabled(viewModel.isRunning)
-            .buttonStyle(.bordered)
-            
+
             if !viewModel.nodeStatusLines.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Node Activity:").font(.caption).foregroundStyle(.secondary)

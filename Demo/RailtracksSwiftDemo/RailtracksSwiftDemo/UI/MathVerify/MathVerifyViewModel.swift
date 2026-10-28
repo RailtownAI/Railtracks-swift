@@ -23,6 +23,12 @@ class MathVerifyViewModel {
     /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
     /// per run — the model outlives them and accumulates each run as its own root.
     @MainActor let nodeTree = RTSNodeTreeViewModel()
+    /// The task awaiting `flow.run`. Cancelling it is how a run is stopped.
+    private var runTask: Task<Void, Never>?
+
+    func stopPrompt() {
+        runTask?.cancel()
+    }
 
     func startPrompt() {
         guard let apiKey = KeychainHelper.readOpenAIKey() else {
@@ -31,8 +37,9 @@ class MathVerifyViewModel {
         }
         let prompt = self.prompt
         nodeStatusLines = []
+        promptResult = nil
         isRunning = true
-        Task { [weak self] in
+        runTask = Task { [weak self] in
             defer { self?.isRunning = false }
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
 
@@ -105,8 +112,14 @@ class MathVerifyViewModel {
                 }
                 .store(in: &cancellables)
 
-            self?.promptResult = try? await flow.run(agent: solverAgent, prompt: prompt, gateway: gateway)
-            Log.debug("obtained math verify result")
+            do {
+                self?.promptResult = try await flow.run(agent: solverAgent, prompt: prompt, gateway: gateway)
+                Log.debug("obtained math verify result")
+            } catch {
+                // A Stop arrives here as `runTerminated(reason: cancelled)`, after the trace is written.
+                self?.promptResult = "Stopped: \(error)"
+                Log.debug("math verify run ended with \(error)")
+            }
         }
     }
 }
