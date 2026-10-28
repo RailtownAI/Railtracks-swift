@@ -37,7 +37,8 @@ public class RTSFlow: @unchecked Sendable {
     )
     /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions
     /// state: `.queued` when it is created, `.executing` once its input guardrails have run and its
-    /// body starts, and `.completed` or `.failed` when it finishes.
+    /// body starts, and `.completed`, `.failed` or `.cancelled` when it finishes. `.cancelled` means
+    /// the run was stopped, by cancelling its task or by a timeout.
     ///
     /// Each status carries `parentNodeID` — the invocation that triggered it, `nil` at the flow root —
     /// so consumers can reconstruct the call tree. Ids are per-invocation, so a node invoked N times
@@ -361,7 +362,8 @@ public class RTSFlow: @unchecked Sendable {
         return startedAt
     }
 
-    /// Emits `session.completed`, deriving status from whether the run produced an error.
+    /// Emits `session.completed`, deriving status from whether the run produced an error, and
+    /// `fatal` and `termination_reason` from whether that error says the run was stopped.
     ///
     /// One instant serves as both the event's `timestamp` and the end of the measured
     /// window, for the same reason ``emitSessionStarted(entryPointName:)`` returns its own.
@@ -370,6 +372,8 @@ public class RTSFlow: @unchecked Sendable {
         error: Error?
     ) {
         let completedAt = RTSEventTimestamp.now()
+        let terminationReason = RTSRunCancellation.terminationReason(of: error)
+            .map(RTSSessionTerminationReason.init)
         eventEmitter.emit(
             RTSSessionCompletedEvent(
                 sessionID: id.uuidString,
@@ -377,6 +381,8 @@ public class RTSFlow: @unchecked Sendable {
                 // ANSI-stripped, mirroring Python's `format_error`.
                 error: error.map(RTSSessionCompletedEvent.formatError),
                 durationSeconds: completedAt.timeIntervalSince(startedAt),
+                fatal: terminationReason?.isFatal ?? false,
+                terminationReason: terminationReason,
                 timestamp: completedAt
             )
         )
@@ -432,10 +438,7 @@ public class RTSFlow: @unchecked Sendable {
             .store(in: &subscriptions)
         nodeInvoker.nodeInvokeEventPublisher
             .map { event -> RTSNodeStatus in
-                let state: RTSNodeStatus.State = event.error == nil
-                    ? .completed
-                    : .failed(event.error ?? "unknown")
-                return statusOf(event, state)
+                statusOf(event, RTSFlow.finishedState(of: event))
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
             .store(in: &subscriptions)
@@ -451,6 +454,20 @@ public class RTSFlow: @unchecked Sendable {
         )
         await collector.setup()
         return (nodeInvoker, collector, subscriptions)
+    }
+
+    /// The state a finish event reports. A cancel and a timeout both stop the node from outside, so
+    /// both are `.cancelled`; an end-on-error stop and any other error are `.failed`.
+    static func finishedState(of event: RTSNodeEvent) -> RTSNodeStatus.State {
+        switch event.terminationReason {
+        case .cancelled?, .timeout?:
+            return .cancelled
+        case .endOnError?, nil:
+            guard let error = event.error else {
+                return .completed
+            }
+            return .failed(error)
+        }
     }
 
 }

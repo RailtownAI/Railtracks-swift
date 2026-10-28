@@ -19,6 +19,10 @@ public struct RTSNodeStatus: Sendable {
         case executing
         case completed
         case failed(String)
+        /// Stopped from outside the node: the run was cancelled or timed out. Its body was cut short
+        /// or never started. A node that fails on its own, including the one that triggers
+        /// `endOnError`, is `.failed`.
+        case cancelled
     }
     public let nodeID: UUID
     /// The invocation that triggered this one; `nil` at the flow root.

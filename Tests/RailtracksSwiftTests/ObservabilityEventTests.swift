@@ -358,11 +358,46 @@ extension RailtracksSwiftTestSuite {
                 Set(payload.keys) == [
                     "timestamp", "spatial_parent_type", "session_id",
                     "status", "error", "duration_seconds",
+                    "fatal", "termination_reason",
                 ]
             )
             #expect(payload["status"] == .string("success"))
             #expect(payload["error"] == .null)
             #expect(payload["duration_seconds"] == .number(2.25))
+            #expect(payload["fatal"] == .bool(false))
+            #expect(payload["termination_reason"] == .null)
+        }
+
+        @Test("session.completed carries fatal and the termination reason's wire value")
+        func sessionCompletedTerminationPayload() {
+            let event = RTSSessionCompletedEvent(
+                sessionID: "s1",
+                status: .failure,
+                error: "runTerminated(reason: endOnError(…))",
+                durationSeconds: 1,
+                fatal: true,
+                terminationReason: .endOnError
+            )
+            let payload = event.encodePayload()
+            #expect(payload["fatal"] == .bool(true))
+            #expect(payload["termination_reason"] == .string("end_on_error"))
+        }
+
+        /// A user cancel isn't fatal; the engine's own stops are, as Python's `fatal` means.
+        @Test("termination reasons map from the run's reason, with fatal for engine stops only")
+        func sessionTerminationReasonMapping() {
+            let cancelled = RTSSessionTerminationReason(.cancelled)
+            let timeout = RTSSessionTerminationReason(.timeout(after: 30))
+            let endOnError = RTSSessionTerminationReason(
+                .endOnError(nodeName: "Tool", underlying: URLError(.badServerResponse))
+            )
+
+            #expect(cancelled == .cancelled)
+            #expect(timeout == .timeout)
+            #expect(endOnError == .endOnError)
+            #expect(!cancelled.isFatal)
+            #expect(timeout.isFatal)
+            #expect(endOnError.isFatal)
         }
 
         @Test("session.completed strips ANSI escapes from the error, like Python's format_error")
@@ -458,7 +493,9 @@ extension RailtracksSwiftTestSuite {
                 "session_id": "session-1",
                 "status": "failure",
                 "error": "boom",
-                "duration_seconds": 3
+                "duration_seconds": 3,
+                "fatal": false,
+                "termination_reason": null
               }
             }
             """

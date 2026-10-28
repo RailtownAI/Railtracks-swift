@@ -45,12 +45,18 @@ enum RTSRunCancellation {
     /// Whether `error` is a run the app cancelled itself. Such a run is not a bug, so it is not
     /// sent to error reporting.
     static func isCancellation(_ error: Error) -> Bool {
-        guard case .runTerminated(let reason, _)? = error as? RTSError else {
-            return false
-        }
-        guard case .cancelled = reason else {
+        guard case .cancelled? = terminationReason(of: error) else {
             return false
         }
         return true
+    }
+
+    /// The reason the run was stopped, when `error` says it was; `nil` for any other error,
+    /// including `nil` itself.
+    static func terminationReason(of error: Error?) -> RTSRunTerminationReason? {
+        guard case .runTerminated(let reason, _)? = error as? RTSError else {
+            return nil
+        }
+        return reason
     }
 }

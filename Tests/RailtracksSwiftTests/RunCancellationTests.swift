@@ -122,6 +122,64 @@ private final class TraceURLRecorder: @unchecked Sendable {
     }
 }
 
+/// Records each node's last reported state. `nodeStatusPublisher` delivers on its own queue, which
+/// `run` doesn't wait for, so a test waits for the state it expects.
+private final class NodeStatusRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var states: [String: RTSNodeStatus.State] = [:]
+    private var cancellable: AnyCancellable?
+
+    init(_ publisher: AnyPublisher<RTSNodeStatus, Never>) {
+        cancellable = publisher.sink { [weak self] status in
+            guard let self else {
+                return
+            }
+            self.lock.lock()
+            self.states[status.nodeName] = status.state
+            self.lock.unlock()
+        }
+    }
+
+    /// `nodeName`'s state once it has finished, waiting up to `timeout` for delivery.
+    func finalState(
+        of nodeName: String,
+        timeout: Duration = .seconds(2)
+    ) async -> RTSNodeStatus.State? {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if let state = state(of: nodeName), Self.isFinal(state) {
+                return state
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return state(of: nodeName)
+    }
+
+    private func state(of nodeName: String) -> RTSNodeStatus.State? {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return states[nodeName]
+    }
+
+    private static func isFinal(_ state: RTSNodeStatus.State) -> Bool {
+        switch state {
+        case .queued, .executing:
+            return false
+        case .completed, .failed, .cancelled:
+            return true
+        }
+    }
+}
+
+private func isCancelledState(_ state: RTSNodeStatus.State?) -> Bool {
+    guard case .cancelled? = state else {
+        return false
+    }
+    return true
+}
+
 private func isCancelledRun(_ error: Error?) -> Bool {
     guard let error else {
         return false
@@ -197,13 +255,70 @@ extension RailtracksSwiftTestSuite {
             #expect(isCancelledRun(thrown))
 
             let url = try #require(urlWhenRunReturned, "the trace must be written before run returns")
-            let graph = try JSONDecoder().decode(RTSFlowGraph.self, from: Data(contentsOf: url))
+            let data = try Data(contentsOf: url)
+            let graph = try JSONDecoder().decode(RTSFlowGraph.self, from: data)
             let run = try #require(graph.runs.first, "trace should contain a run")
             #expect(run.status == .failed)
+            // The trace has no stopped status of its own, so the reason lives in the error text.
+            let traceText = try #require(String(data: data, encoding: .utf8))
+            #expect(traceText.contains("runTerminated(reason: cancelled)"))
 
             let completed = try #require(recorder.first(ofType: "session.completed"))
             #expect(completed.payload["status"] == .string("failure"))
             #expect(completed.payload["error"] == .string("runTerminated(reason: cancelled)"))
+            #expect(completed.payload["fatal"] == .bool(false))
+            #expect(completed.payload["termination_reason"] == .string("cancelled"))
+        }
+
+        /// The node that was running when the run was cancelled, and a node reached after it, both
+        /// report `.cancelled` rather than `.failed`.
+        @Test("a cancelled run reports its nodes as cancelled")
+        func cancelledRunReportsCancelledNodes() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let started = StartSignal()
+            let child = StubOrchestrator(nodeName: "Child") { _, _ in
+                ["result": .string("ran")]
+            }
+            let root = StubOrchestrator(nodeName: "IgnoresCancel") { _, context in
+                started.fire()
+                try? await Task.sleep(for: .seconds(30))
+                return try await context.call(child, input: [:])
+            }
+            let flow = RTSFlow(title: "CancelNodeStatus", savesTrace: false)
+            let statuses = NodeStatusRecorder(flow.nodeStatusPublisher)
+
+            let thrown = await cancelWhileRunning(flow, root: root, started: started)
+
+            #expect(isCancelledRun(thrown))
+            let rootState = await statuses.finalState(of: "IgnoresCancel")
+            let childState = await statuses.finalState(of: "Child")
+            #expect(isCancelledState(rootState), "root should be cancelled, got \(String(describing: rootState))")
+            #expect(isCancelledState(childState), "child should be cancelled, got \(String(describing: childState))")
+        }
+
+        /// An ordinary failure is neither fatal nor a stop: no termination reason, and the node
+        /// reports `.failed` with its error.
+        @Test("an ordinary failure has no termination reason and reports the node as failed")
+        func ordinaryFailureIsNotATermination() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let root = StubOrchestrator(nodeName: "Throws") { _, _ in
+                throw URLError(.badServerResponse)
+            }
+            let flow = RTSFlow(title: "OrdinaryFailure", savesTrace: false)
+            let recorder = EventRecorder(flow.eventPublisher)
+            let statuses = NodeStatusRecorder(flow.nodeStatusPublisher)
+
+            _ = try? await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            let completed = try #require(recorder.first(ofType: "session.completed"))
+            #expect(completed.payload["status"] == .string("failure"))
+            #expect(completed.payload["fatal"] == .bool(false))
+            #expect(completed.payload["termination_reason"] == .null)
+            let rootState = await statuses.finalState(of: "Throws")
+            guard case .failed? = rootState else {
+                Issue.record("expected .failed, got \(String(describing: rootState))")
+                return
+            }
         }
 
         /// A node body that ignores cancellation still can't start more work: the next node it
@@ -325,6 +440,47 @@ extension RailtracksSwiftTestSuite {
         let normalized = await task.value
 
         #expect(RTSRunCancellation.isCancellation(normalized))
+    }
+
+    /// A cancel and a timeout both stop a node from outside, so both report `.cancelled`.
+    @Test func cancelAndTimeoutFinishAsCancelled() {
+        let cancelled = finishEvent(error: RTSError.runTerminated(reason: .cancelled))
+        let timedOut = finishEvent(error: RTSError.runTerminated(reason: .timeout(after: 5)))
+
+        #expect(isCancelledState(RTSFlow.finishedState(of: cancelled)))
+        #expect(isCancelledState(RTSFlow.finishedState(of: timedOut)))
+    }
+
+    /// An end-on-error stop is a failure, with the error text; no error at all is a completion.
+    @Test func endOnErrorFinishesAsFailedAndSuccessAsCompleted() {
+        let reason = RTSRunTerminationReason.endOnError(
+            nodeName: "Tool",
+            underlying: URLError(.badServerResponse)
+        )
+        let endOnError = finishEvent(error: RTSError.runTerminated(reason: reason))
+        let succeeded = finishEvent(error: nil)
+
+        guard case .failed(let message) = RTSFlow.finishedState(of: endOnError) else {
+            Issue.record("expected .failed for an end-on-error stop")
+            return
+        }
+        #expect(message.contains("endOnError"))
+        guard case .completed = RTSFlow.finishedState(of: succeeded) else {
+            Issue.record("expected .completed with no error")
+            return
+        }
+    }
+
+    /// A finish event the way `RTSNodeInvoker` builds one for `error`.
+    private func finishEvent(error: Error?) -> RTSNodeEvent {
+        RTSNodeEvent(
+            nodeID: UUID(),
+            name: "Node",
+            nodeType: .tool,
+            stamp: RTSStamp(stepIndex: 0, event: .finishExecution("Node")),
+            error: error.map { "\($0)" },
+            terminationReason: RTSRunCancellation.terminationReason(of: error)
+        )
     }
 
     /// An error that already says how the run stopped is kept: the first stop observed wins.

@@ -526,6 +526,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 input: input,
                 output: error == nil ? output : nil,
                 error: error.map { "\($0)" },
+                terminationReason: RTSRunCancellation.terminationReason(of: error),
                 runID: runID,
                 runtime: runtime,
                 guardTraces: guardTraces,

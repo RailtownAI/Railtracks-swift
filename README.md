@@ -146,12 +146,16 @@ flow.nodeStatusPublisher
     .receive(on: DispatchQueue.main)
     .sink { status in
         switch status.state {
-        case .executing: 
+        case .queued:
+            print("🕒 \(status.nodeName)")
+        case .executing:
             print("⏳ \(status.nodeName)")
-        case .completed: 
+        case .completed:
             print("✅ \(status.nodeName)")
-        case .failed(let error): 
+        case .failed(let error):
             print("❌ \(status.nodeName): \(error)")
+        case .cancelled:
+            print("🛑 \(status.nodeName)")
         }
     }
     .store(in: &cancellables)
@@ -160,6 +164,8 @@ let result = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
 ```
 
 `nodeStatusPublisher` emits for every node — agents, tools, and sub-agents — using the same `runID`-stamped event infrastructure as the JSON trace. Subscribe before calling `run` to capture all events.
+
+A node is `.cancelled` when the run was stopped while it was running or before it started, by cancelling the task that awaits `run` (see [Stopping a run](#stopping-a-run)). A node that fails with its own error is `.failed`.
 
 ### RTSAgent
 
@@ -494,8 +500,11 @@ do {
 - **The run stops at the next node at the latest.** Provider calls stop straight away when they
   honour cancellation (Conduit's network calls and on-device generation do). Tool code that never
   checks for cancellation finishes its current call, but no further node runs.
-- **The trace is still written.** A cancelled run writes its trace (status `Failed`) and
-  `session.completed` before `run` returns.
+- **The trace is still written.** A cancelled run writes its trace (status `Failed`, with the
+  reason in the error text) and `session.completed` before `run` returns. `session.completed`
+  carries `termination_reason: "cancelled"` and `fatal: false`.
+- **Nodes report `.cancelled`.** On `nodeStatusPublisher`, the nodes the stop cut short report
+  `.cancelled` rather than `.failed`.
 - **Not reported as an error.** A cancelled run isn't sent to RailtownLogger error reporting.
 
 ### Call-site context

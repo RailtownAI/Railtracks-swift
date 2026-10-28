@@ -107,6 +107,8 @@ class MathVerifyViewModel {
                         label = "✅ \(status.nodeName)"
                     case .failed(let error):
                         label = "❌ \(status.nodeName): \(error)"
+                    case .cancelled:
+                        label = "🛑 \(status.nodeName): cancelled"
                     }
                     self?.nodeStatusLines.append(label)
                 }
