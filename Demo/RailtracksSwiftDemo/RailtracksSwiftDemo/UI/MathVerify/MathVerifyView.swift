@@ -41,12 +41,31 @@ struct MathVerifyView: View {
             if !viewModel.nodeStatusLines.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Node Activity:").font(.caption).foregroundStyle(.secondary)
-                    let log = viewModel.nodeStatusLines.joined(separator: "\n")
-                    TextField("", text: .constant(log), axis: .vertical)
-                        .font(.caption.monospaced())
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(1...8)
-                        .disabled(true)
+                    // A scroll view rather than a disabled text field: the field stopped growing at
+                    // its line limit and couldn't be scrolled, hiding the last lines, which are the
+                    // ones a stop produces.
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(viewModel.nodeStatusLines.indices, id: \.self) { index in
+                                    Text(viewModel.nodeStatusLines[index])
+                                        .font(.caption.monospaced())
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .id(index)
+                                }
+                            }
+                            .padding(6)
+                        }
+                        .textSelection(.enabled)
+                        .frame(height: 140)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(.secondary.opacity(0.4))
+                        )
+                        .onChange(of: viewModel.nodeStatusLines.count) { _, count in
+                            proxy.scrollTo(count - 1, anchor: .bottom)
+                        }
+                    }
                 }
             }
             Text("Result: " + (viewModel.promptResult ?? ""))
