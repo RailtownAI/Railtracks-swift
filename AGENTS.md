@@ -52,6 +52,12 @@ public init(
 }
 ```
 
+- **Locks: `Mutex` over `NSLock`.** Guard shared state with `Synchronization`'s `Mutex<Value>`, which
+  holds the value inside the lock so it can only be reached through `withLock`, and lets the type
+  be plain `Sendable` instead of `@unchecked Sendable`. The package's minimum, macOS 15 / iOS 18, is
+  `Mutex`'s. Use `NSLock` only for a strong reason, such as a lock that guards an operation rather
+  than a value, for example `RTSNodeInvoker.lockedSend` serializing Combine `send` calls, and say
+  so in a comment. Older `NSLock` uses are being moved over, not copied.
 - **Modifier order.** When any declaration carries multiple modifiers — properties, computed
   properties, subscripts, methods, or types — order them by category:
   1. **Access control** — `open`, `public`, `internal`, `fileprivate`, `private`
@@ -332,8 +338,8 @@ The codebase targets Swift 6 strict concurrency. `RTSFlowGraphCollector` is an a
 
 **Publishing must never run subscriber code on an invocation's thread.** `PassthroughSubject.send` delivers sinks synchronously on the caller's thread, so anything a subscriber does lands on the agent's critical path — and if the send is inside a lock (as `RTSNodeInvoker.lockedSend` still is), one slow subscriber blocks *every* node from publishing. The public streams are therefore isolated: `RTSEventEmitter` hands each envelope to a serial `DispatchQueue` that performs the send (no lock — the queue is the serialization), and `RTSFlow.nodeStatusPublisher` is `receive(on:)`-isolated. `RTSNodeInvoker`'s publishers stay synchronous because they are `internal` and both in-library subscribers do only bounded work (the collector yields into an `AsyncStream`; `RTSFlow` enqueues) — keep that invariant when adding one. Always a **serial** queue, never a `Task` per event: unordered dispatch is the race documented in `docs/duplicate-node-id.md`. The cost is asynchronous delivery, so `RTSFlow.run` joins the backlog on every exit path and `RTSFlow.flushEvents()` exposes the same barrier.
 
-**Cancellation.** A run is stopped by cancelling the `Task` that awaits `RTSFlow.run`. Three rules keep that safe — keep them when touching the run path:
-- **Errors are normalized.** Anything thrown while the task is cancelled becomes `RTSError.runTerminated(reason: .cancelled)` (`RTSRunCancellation.normalized`), in `invokeCore`'s catch and in `RTSFlow.run`'s. An app's own `CancellationError` thrown while the task is *not* cancelled passes through, and an existing `runTerminated` is kept (first stop wins).
+**Cancellation.** A run is stopped by cancelling the `Task` that awaits `RTSFlow.run`, or by the flow's `timeout`, which runs the root next to a timer in a task group (`RTSFlow.withinTimeout`) and cancels the work at the deadline, then waits for it to unwind. These rules keep that safe — keep them when touching the run path:
+- **Errors are normalized.** Anything thrown while the task is cancelled becomes `RTSError.runTerminated(reason:)` (`RTSRunCancellation.normalized`), in `invokeCore`'s catch and in `RTSFlow.run`'s. The reason is `.cancelled` unless the run stopped itself: the flow's timeout records `.timeout` on the run's `RTSRunStop` (held by its per-run `RTSNodeInvoker`) **before** cancelling the work, and normalization and the node-boundary check read it back. A stop from inside the run must follow the same order: record, then cancel. An app's own `CancellationError` thrown while the task is *not* cancelled passes through, and an existing `runTerminated` is kept (first stop wins).
 - **Nodes are checked, not skipped.** `invokeCore` checks `Task.isCancelled` after publishing the node's creation; a cancelled node still gets its finish events, but neither its guardrails nor its body runs. Never return before the node is created: the collector only finalizes on the root's finish events, so a root that skipped them would hang `awaitCompletion()` forever.
 - **Finalization is shielded.** An `AsyncStream` loop ends as soon as its task is cancelled, so `RTSFlowGraphCollector.awaitCompletion()` drains `completionStream` in an unstructured task; otherwise a cancelled run returns before its trace is written. Any new wait on the run's exit path needs the same treatment (continuations, like `flushEvents()`'s, are already unaffected).
 - **The reason travels as a value.** `invokeCore`'s finish event carries `RTSNodeEvent.terminationReason`, which `RTSFlow.finishedState(of:)` maps to `RTSNodeStatus.State.cancelled` (for a cancel or a timeout). `session.completed`'s `fatal` and `termination_reason` come from the run's error through `RTSRunCancellation.terminationReason(of:)`. Never parse the error string to recover a reason.

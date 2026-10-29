@@ -165,7 +165,7 @@ let result = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
 
 `nodeStatusPublisher` emits for every node — agents, tools, and sub-agents — using the same `runID`-stamped event infrastructure as the JSON trace. Subscribe before calling `run` to capture all events.
 
-A node is `.cancelled` when the run was stopped while it was running or before it started, by cancelling the task that awaits `run` (see [Stopping a run](#stopping-a-run)). A node that fails with its own error is `.failed`.
+A node is `.cancelled` when the run was stopped while it was running or before it started, by cancelling the task that awaits `run` or by the flow's timeout (see [Stopping a run](#stopping-a-run)). A node that fails with its own error is `.failed`.
 
 ### RTSAgent
 
@@ -506,6 +506,34 @@ do {
 - **Nodes report `.cancelled`.** On `nodeStatusPublisher`, the nodes the stop cut short report
   `.cancelled` rather than `.failed`.
 - **Not reported as an error.** A cancelled run isn't sent to RailtownLogger error reporting.
+
+#### Timeout
+
+Give the flow a limit, in seconds, and any run that outlasts it is stopped:
+
+```swift
+let flow = RTSFlow(title: "Support", timeout: 30)
+
+do {
+    let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+} catch let RTSError.runTerminated(reason, _) {
+    // reason == .timeout(after: 30)
+}
+```
+
+- **Stopped the same way as a cancel.** At the deadline the run is cancelled, and `run` waits for
+  it to unwind before throwing `.timeout(after:)`. Everything above applies: no node starts after
+  the deadline, the trace and `session.completed` are written, and the nodes cut short report
+  `.cancelled`.
+- **Tools should honour cancellation.** A node body that ignores it finishes its current call
+  before the run can return, so `run` can come back later than the deadline.
+- **The clock** runs from invoking the root node until it finishes, for each run on the flow. The
+  default, `nil`, is no limit.
+- **Reported as a stop.** `session.started` carries the `timeout`, and `session.completed` carries
+  `termination_reason: "timeout"` and `fatal: true`. A timed-out run is sent to RailtownLogger
+  error reporting.
+- **Cancelling first wins.** Cancelling the task before the deadline reports `.cancelled`; a
+  cancel that arrives while a timed-out run is unwinding doesn't change it from `.timeout`.
 
 ### Call-site context
 

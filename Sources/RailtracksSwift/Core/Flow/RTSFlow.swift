@@ -14,6 +14,9 @@ public class RTSFlow: @unchecked Sendable {
     let id: UUID = UUID()
     let title: String
     let savesTrace: Bool
+    /// The most seconds a run may take, or `nil` for no limit. A run past it is cancelled and throws
+    /// `RTSError.runTerminated(reason: .timeout(after:))` once it has unwound.
+    public let timeout: TimeInterval?
     let signpostEmitter: any RTSSignpostEmitting
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never> = .init(nil)
     /// Publishes the outcome of the JSON trace write after each completed run.
@@ -135,15 +138,23 @@ public class RTSFlow: @unchecked Sendable {
     ///     `RAILTRACKS_DISABLE_EVENTS` is set. Set false to skip it entirely — payloads are
     ///     never built, so a flow with no event consumer pays no encoding cost.
     ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
+    ///   - timeout: The most seconds each run may take, from invoking its root node to that node
+    ///     finishing. At the deadline the run is cancelled, and `run` throws
+    ///     `RTSError.runTerminated(reason: .timeout(after:))` once it has unwound. No node starts
+    ///     after the deadline, but a node body that ignores cancellation finishes its current call
+    ///     first, so `run` can return later than the deadline. Defaults to `nil`, no limit, as in
+    ///     Python's `Flow(timeout=None)`.
     public init(
         title: String,
         savesTrace: Bool = true,
         savesEvents: Bool? = nil,
         emitsEvents: Bool = true,
-        signpostEmitter: (any RTSSignpostEmitting)? = nil
+        signpostEmitter: (any RTSSignpostEmitting)? = nil,
+        timeout: TimeInterval? = nil
     ) {
         self.title = title
         self.savesTrace = savesTrace
+        self.timeout = timeout
         self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
         // Held as a local as well: `self` cannot be used to reach the emitter until every
         // stored property is assigned, and the writer has to subscribe before `init` returns.
@@ -242,13 +253,15 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<String, Error>
         do {
-            let output = try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+            let output = try await withinTimeout(stop: nodeInvoker.runStop) { [input] in
+                try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+            }
             guard case let .string(result) = output[agent.outputKeyResult] else {
                 throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
             }
             outcome = .success(result)
         } catch {
-            let reported = RTSRunCancellation.normalized(error)
+            let reported = RTSRunCancellation.normalized(error, stopReason: nodeInvoker.runStop.reason)
             outcome = .failure(reported)
             reportFailure(reported)
         }
@@ -293,9 +306,12 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<RTSOutput, Error>
         do {
-            outcome = .success(try await nodeInvoker.invokeFunction(node, input: input, context: context))
+            let output = try await withinTimeout(stop: nodeInvoker.runStop) {
+                try await nodeInvoker.invokeFunction(node, input: input, context: context)
+            }
+            outcome = .success(output)
         } catch {
-            let reported = RTSRunCancellation.normalized(error)
+            let reported = RTSRunCancellation.normalized(error, stopReason: nodeInvoker.runStop.reason)
             outcome = .failure(reported)
             reportFailure(reported)
         }
@@ -307,6 +323,64 @@ public class RTSFlow: @unchecked Sendable {
         // still complete by the time `run` returns.
         await flushEvents()
         return try outcome.get()
+    }
+
+    // MARK: - Timeout
+
+    /// Runs `work`, the run's root invocation, under the flow's `timeout`.
+    ///
+    /// With no timeout, `work` runs directly. Otherwise it runs in a task group next to a timer. When
+    /// the timer fires first, the timeout is recorded on `stop` **before** the work is cancelled, so
+    /// every node that then sees cancellation reports `.timeout` rather than `.cancelled`. The group
+    /// then waits for the work to unwind, so the trace is complete when this returns.
+    ///
+    /// A user cancel reaches both children: the timer stops without recording anything, and the work
+    /// reports `.cancelled`. Work that finishes successfully despite the deadline returns its value,
+    /// since nothing was actually stopped.
+    private func withinTimeout<Output: Sendable>(
+        stop: RTSRunStop,
+        _ work: @escaping @Sendable () async throws -> Output
+    ) async throws -> Output {
+        guard let timeout else {
+            return try await work()
+        }
+        return try await withThrowingTaskGroup(of: TimedStep<Output>.self) { group in
+            group.addTask {
+                .finished(try await work())
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeout))
+                return Task.isCancelled ? .timerCancelled : .deadline
+            }
+            var deadlinePassed = false
+            do {
+                for try await step in group {
+                    switch step {
+                    case .finished(let output):
+                        group.cancelAll()
+                        return output
+                    case .deadline:
+                        deadlinePassed = true
+                        log.info("⏱️ [\(title)] run passed its \(timeout)s timeout; cancelling it")
+                        stop.request(.timeout(after: timeout))
+                        group.cancelAll()
+                    case .timerCancelled:
+                        continue
+                    }
+                }
+            } catch {
+                // After the deadline, whatever the unwinding work throws is the timeout. Nodes already
+                // report it, so this only catches an error raised outside every node.
+                guard deadlinePassed,
+                      RTSRunCancellation.terminationReason(of: error) == nil,
+                      let reason = stop.reason else {
+                    throw error
+                }
+                throw RTSError.runTerminated(reason: reason)
+            }
+            // The work child always returns or throws, so the loop exits through one of those first.
+            throw RTSError.runTerminated(reason: stop.reason ?? .cancelled)
+        }
     }
 
     // MARK: - Error reporting
@@ -351,9 +425,8 @@ public class RTSFlow: @unchecked Sendable {
                 flowID: RailtracksSwift.equalityHash(title),
                 sessionName: nil,
                 entryPointName: entryPointName,
-                // Swift has no flow-level timeout or end-on-error setting; Python's
-                // equivalents come from its executor config.
-                timeout: nil,
+                timeout: timeout,
+                // Swift has no end-on-error setting yet; Python's comes from its executor config.
                 endOnError: false,
                 saveState: savesTrace,
                 timestamp: startedAt
@@ -470,6 +543,18 @@ public class RTSFlow: @unchecked Sendable {
         }
     }
 
+}
+
+// MARK: - TimedStep
+
+/// What finished first in `RTSFlow.withinTimeout`'s task group.
+private enum TimedStep<Output: Sendable>: Sendable {
+    /// The run's work returned.
+    case finished(Output)
+    /// The timer reached the deadline.
+    case deadline
+    /// The timer was cancelled before the deadline, because the work finished or the app cancelled.
+    case timerCancelled
 }
 
 // MARK: - Result

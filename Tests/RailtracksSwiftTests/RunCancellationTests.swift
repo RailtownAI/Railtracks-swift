@@ -368,6 +368,150 @@ extension RailtracksSwiftTestSuite {
     }
 }
 
+private func isTimedOutRun(_ error: Error?) -> Bool {
+    guard case .timeout? = RTSRunCancellation.terminationReason(of: error) else {
+        return false
+    }
+    return true
+}
+
+extension RailtracksSwiftTestSuite {
+    @Suite("Run timeout", .serialized)
+    struct RunTimeoutTests {
+
+        /// Runs `root` on `flow` and returns what it threw, or `nil` when it returned.
+        private func runCapturingError(
+            _ flow: RTSFlow,
+            root: some RTSOrchestratorNode
+        ) async -> Error? {
+            do {
+                _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+                return nil
+            } catch {
+                return error
+            }
+        }
+
+        /// A node still running at the deadline is stopped, and the run reports the timeout
+        /// everywhere: the thrown error, `session.started` / `session.completed`, the node's status
+        /// and the trace's error text.
+        @Test("a run past its timeout stops with runTerminated(timeout)")
+        func timeoutStopsTheRun() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let root = StubOrchestrator(nodeName: "Slow") { _, _ in
+                try await Task.sleep(for: .seconds(30))
+                return ["result": .string("never")]
+            }
+            let flow = RTSFlow(title: "TimeoutSlowNode", timeout: 0.2)
+            let recorder = EventRecorder(flow.eventPublisher)
+            let statuses = NodeStatusRecorder(flow.nodeStatusPublisher)
+            let traceURL = TraceURLRecorder(flow.outputFileURLPublisher)
+
+            let clock = ContinuousClock()
+            let begin = clock.now
+            let thrown = await runCapturingError(flow, root: root)
+            let elapsed = clock.now - begin
+
+            #expect(isTimedOutRun(thrown), "expected runTerminated(timeout), got \(String(describing: thrown))")
+            #expect(elapsed < .seconds(5), "the run should stop promptly after the deadline, took \(elapsed)")
+
+            let started = try #require(recorder.first(ofType: "session.started"))
+            #expect(started.payload["timeout"] == .number(0.2))
+            let completed = try #require(recorder.first(ofType: "session.completed"))
+            #expect(completed.payload["error"] == .string("runTerminated(reason: timeout(after: 0.2))"))
+            #expect(completed.payload["fatal"] == .bool(true))
+            #expect(completed.payload["termination_reason"] == .string("timeout"))
+
+            let rootState = await statuses.finalState(of: "Slow")
+            #expect(isCancelledState(rootState), "a timed-out node is cancelled, got \(String(describing: rootState))")
+
+            let url = try #require(traceURL.writtenURL, "the trace must be written before run returns")
+            let traceText = try String(contentsOf: url, encoding: .utf8)
+            #expect(traceText.contains("runTerminated(reason: timeout(after: 0.2))"))
+        }
+
+        /// A body that swallows the cancellation can't start another node after the deadline, and
+        /// that node reports the timeout too.
+        @Test("no node starts after the deadline, even if a body ignores cancellation")
+        func noNodeStartsAfterTheDeadline() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let childRan = RanFlag()
+            let child = StubOrchestrator(nodeName: "Child") { _, _ in
+                childRan.set()
+                return ["result": .string("ran")]
+            }
+            let root = StubOrchestrator(nodeName: "IgnoresCancel") { _, context in
+                try? await Task.sleep(for: .seconds(30))
+                return try await context.call(child, input: [:])
+            }
+            let flow = RTSFlow(title: "TimeoutNextNode", savesTrace: false, timeout: 0.2)
+            let statuses = NodeStatusRecorder(flow.nodeStatusPublisher)
+
+            let thrown = await runCapturingError(flow, root: root)
+
+            #expect(isTimedOutRun(thrown), "expected runTerminated(timeout), got \(String(describing: thrown))")
+            #expect(!childRan.didRun, "the child's body must not run after the deadline")
+            let childState = await statuses.finalState(of: "Child")
+            #expect(isCancelledState(childState), "the child should be cancelled, got \(String(describing: childState))")
+        }
+
+        /// A run that finishes inside its timeout is untouched: it returns its output, and the
+        /// events report the timeout setting but no termination.
+        @Test("a run within its timeout returns normally")
+        func runWithinTimeoutReturns() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let root = StubOrchestrator(nodeName: "Fast") { _, _ in
+                ["result": .string("done")]
+            }
+            let flow = RTSFlow(title: "TimeoutFastNode", savesTrace: false, timeout: 30)
+            let recorder = EventRecorder(flow.eventPublisher)
+
+            let output = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            #expect(output["result"] == .string("done"))
+            let completed = try #require(recorder.first(ofType: "session.completed"))
+            #expect(completed.payload["status"] == .string("success"))
+            #expect(completed.payload["fatal"] == .bool(false))
+            #expect(completed.payload["termination_reason"] == .null)
+        }
+
+        /// The app cancelling a run that has a timeout is a user cancel, not a timeout.
+        @Test("cancelling a run that has a timeout reports cancelled")
+        func cancelBeforeTheDeadlineIsACancel() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let started = StartSignal()
+            let root = StubOrchestrator(nodeName: "Slow") { _, _ in
+                started.fire()
+                try await Task.sleep(for: .seconds(30))
+                return ["result": .string("never")]
+            }
+            let flow = RTSFlow(title: "TimeoutThenCancel", savesTrace: false, timeout: 20)
+            let recorder = EventRecorder(flow.eventPublisher)
+
+            let run = Task {
+                try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+            }
+            await started.wait()
+            let clock = ContinuousClock()
+            let cancelledAt = clock.now
+            run.cancel()
+            var thrown: Error?
+            do {
+                _ = try await run.value
+            } catch {
+                thrown = error
+            }
+            let stopTime = clock.now - cancelledAt
+
+            #expect(isCancelledRun(thrown), "expected runTerminated(cancelled), got \(String(describing: thrown))")
+            #expect(stopTime < .seconds(5), "the run should stop promptly after cancel, took \(stopTime)")
+            let completed = try #require(recorder.first(ofType: "session.completed"))
+            #expect(completed.payload["fatal"] == .bool(false))
+            #expect(completed.payload["termination_reason"] == .string("cancelled"))
+        }
+    }
+}
+
 extension RailtracksSwiftTestSuite {
     @Suite("Run cancellation, live", .serialized)
     struct RunCancellationLiveTests {
@@ -414,6 +558,42 @@ extension RailtracksSwiftTestSuite {
             #expect(isCancelledRun(thrown), "expected runTerminated(cancelled), got \(String(describing: thrown))")
             #expect(stopTime < .seconds(5), "the run should stop promptly after cancel, took \(stopTime)")
         }
+
+        /// A real on-device generation that outlasts the flow's timeout is stopped at the deadline
+        /// and reports the timeout. Skips when the on-device model is unavailable.
+        @Test("a live AppleAI run past its timeout stops promptly")
+        func liveAppleAIRunTimesOut() async throws {
+            guard #available(macOS 26, iOS 26, *) else {
+                print("⏭️  live AppleAI timeout skipped — requires macOS 26 / iOS 26.")
+                return
+            }
+            let availability = SystemLanguageModel.default.availability
+            guard case .available = availability else {
+                print("⏭️  live AppleAI timeout skipped — on-device model unavailable: \(availability).")
+                return
+            }
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+
+            let agent = RTSAgent(llmProvider: .appleAI, name: "Essayist")
+            let flow = RTSFlow(title: "TimeoutLiveAppleAI", savesTrace: false, timeout: 1)
+            let clock = ContinuousClock()
+            let begin = clock.now
+            var thrown: Error?
+            do {
+                _ = try await flow.run(
+                    agent: agent,
+                    prompt: "Write a detailed 1500-word essay on the history of railways.",
+                    gateway: RTSLLMGateway(apiKeys: [:])
+                )
+            } catch {
+                thrown = error
+            }
+            let elapsed = clock.now - begin
+            print("⏱️ live AppleAI run with a 1 s timeout returned after \(elapsed); threw \(String(describing: thrown))")
+
+            #expect(isTimedOutRun(thrown), "expected runTerminated(timeout), got \(String(describing: thrown))")
+            #expect(elapsed < .seconds(5), "the run should stop promptly after the deadline, took \(elapsed)")
+        }
     }
 }
 
@@ -422,7 +602,7 @@ extension RailtracksSwiftTestSuite {
     @Test func anErrorIsUnchangedWhenNotCancelled() {
         let error = URLError(.cancelled)
 
-        let normalized = RTSRunCancellation.normalized(error)
+        let normalized = RTSRunCancellation.normalized(error, stopReason: nil)
 
         #expect(normalized is URLError)
     }
@@ -433,13 +613,46 @@ extension RailtracksSwiftTestSuite {
             while !Task.isCancelled {
                 await Task.yield()
             }
-            return RTSRunCancellation.normalized(URLError(.cancelled))
+            return RTSRunCancellation.normalized(URLError(.cancelled), stopReason: nil)
         }
         task.cancel()
 
         let normalized = await task.value
 
         #expect(RTSRunCancellation.isCancellation(normalized))
+    }
+
+    /// When the run stopped itself, the recorded reason is reported instead of `.cancelled`.
+    @Test func aRecordedStopReasonIsReported() async {
+        let task = Task { () -> Error in
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+            return RTSRunCancellation.normalized(URLError(.cancelled), stopReason: .timeout(after: 5))
+        }
+        task.cancel()
+
+        let normalized = await task.value
+
+        guard case .timeout? = RTSRunCancellation.terminationReason(of: normalized) else {
+            Issue.record("expected the recorded timeout, got \(normalized)")
+            return
+        }
+    }
+
+    /// The first stop requested is the one kept.
+    @Test func theFirstStopRequestWins() {
+        let stop = RTSRunStop()
+
+        let first = stop.request(.timeout(after: 5))
+        let second = stop.request(.cancelled)
+
+        #expect(first)
+        #expect(!second)
+        guard case .timeout? = stop.reason else {
+            Issue.record("expected the first stop, got \(String(describing: stop.reason))")
+            return
+        }
     }
 
     /// A cancel and a timeout both stop a node from outside, so both report `.cancelled`.
@@ -489,7 +702,10 @@ extension RailtracksSwiftTestSuite {
             while !Task.isCancelled {
                 await Task.yield()
             }
-            return RTSRunCancellation.normalized(RTSError.runTerminated(reason: .timeout(after: 5)))
+            return RTSRunCancellation.normalized(
+                RTSError.runTerminated(reason: .timeout(after: 5)),
+                stopReason: nil
+            )
         }
         task.cancel()
 

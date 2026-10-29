@@ -27,6 +27,15 @@ struct MathVerifyView: View {
                 }
                 .disabled(!viewModel.isRunning)
                 .buttonStyle(.bordered)
+
+                Picker("Timeout", selection: $viewModel.timeout) {
+                    Text("None").tag(TimeInterval?.none)
+                    Text("3 s").tag(TimeInterval?.some(3))
+                    Text("8 s").tag(TimeInterval?.some(8))
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(viewModel.isRunning)
             }
 
             if !viewModel.nodeStatusLines.isEmpty {

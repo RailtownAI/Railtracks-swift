@@ -20,6 +20,9 @@ class MathVerifyViewModel {
     var nodeStatusLines: [String] = []
     var isRunning = false
     var isShowingKeyPrompt = false
+    /// The flow's timeout in seconds, or `nil` for none. A full run takes about 15 s, so a short
+    /// timeout stops it partway.
+    var timeout: TimeInterval?
     /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
     /// per run — the model outlives them and accumulates each run as its own root.
     @MainActor let nodeTree = RTSNodeTreeViewModel()
@@ -36,6 +39,7 @@ class MathVerifyViewModel {
             return
         }
         let prompt = self.prompt
+        let timeout = self.timeout
         nodeStatusLines = []
         promptResult = nil
         isRunning = true
@@ -89,7 +93,7 @@ class MathVerifyViewModel {
                 "After computing your final answer, use the MathVerifier tool to confirm it is correct before responding."
             )
 
-            let flow = RTSFlow(title: "Math Verify flow")
+            let flow = RTSFlow(title: "Math Verify flow", timeout: timeout)
             self?.nodeTree.attach(to: flow)
             var cancellables = Set<AnyCancellable>()
             flow.nodeStatusPublisher
@@ -118,7 +122,8 @@ class MathVerifyViewModel {
                 self?.promptResult = try await flow.run(agent: solverAgent, prompt: prompt, gateway: gateway)
                 Log.debug("obtained math verify result")
             } catch {
-                // A Stop arrives here as `runTerminated(reason: cancelled)`, after the trace is written.
+                // A Stop arrives here as `runTerminated(reason: cancelled)` and a timeout as
+                // `runTerminated(reason: timeout(after:))`, both after the trace is written.
                 self?.promptResult = "Stopped: \(error)"
                 Log.debug("math verify run ended with \(error)")
             }

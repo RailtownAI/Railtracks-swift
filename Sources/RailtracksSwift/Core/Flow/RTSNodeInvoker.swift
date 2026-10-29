@@ -59,16 +59,22 @@ public class RTSNodeInvoker: @unchecked Sendable {
     /// invoker without one; `nil` means node and guardrail events are simply not emitted.
     let eventEmitter: RTSEventEmitter?
 
+    /// Why this run was stopped, when it stopped itself. An invoker is built per run, so this is
+    /// the run's handle; normalization reads it to report a timeout rather than a plain cancel.
+    let runStop: RTSRunStop
+
     init(
         stampFactory: RTSStampFactory,
         sessionID: UUID,
         signpostEmitter: (any RTSSignpostEmitting)? = nil,
-        eventEmitter: RTSEventEmitter? = nil
+        eventEmitter: RTSEventEmitter? = nil,
+        runStop: RTSRunStop = RTSRunStop()
     ) {
         self.stampFactory = stampFactory
         self.sessionID = sessionID
         self.signpostEmitter = signpostEmitter
         self.eventEmitter = eventEmitter
+        self.runStop = runStop
     }
     
     func invokeAgent(
@@ -256,7 +262,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
         // is still created and finished below, so the trace stays balanced and the root always
         // completes the collector, but neither its guardrails nor its body runs.
         if Task.isCancelled {
-            guardError = RTSError.runTerminated(reason: .cancelled)
+            guardError = RTSError.runTerminated(reason: runStop.reason ?? .cancelled)
         }
         if guardError == nil, let runInputGuardrails {
             let result = await runInputGuardrails(input, invocationID)
@@ -322,7 +328,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
                     try await execute(runID, workingInput)
                 }
             } catch {
-                invokeError = RTSRunCancellation.normalized(error)
+                invokeError = RTSRunCancellation.normalized(error, stopReason: runStop.reason)
                 output = [:]
                 log.error("☠️ [\(node.name())] invocation failed: \(error)")
             }

@@ -11,11 +11,15 @@ import Foundation
 /// throw whatever they throw on cancel (`URLError.cancelled`, Conduit's own errors, Foundation
 /// Models' errors, `CancellationError`), so a caller would otherwise see a different error per
 /// provider. Everything thrown while the task is cancelled becomes one shape:
-/// `RTSError.runTerminated(reason: .cancelled)`. See `docs/flow-timeout.md`.
+/// `RTSError.runTerminated(reason:)`, `.cancelled` unless the run recorded another reason on its
+/// `RTSRunStop` (a timeout). See `docs/flow-timeout.md`.
 enum RTSRunCancellation {
 
-    /// `error` as the run should report it: `.runTerminated(reason: .cancelled)` when the current
-    /// task has been cancelled, otherwise `error` unchanged.
+    /// `error` as the run should report it: `.runTerminated` when the current task has been
+    /// cancelled, otherwise `error` unchanged.
+    ///
+    /// The reason is `stopReason`, what the run recorded when it stopped itself (its timeout), or
+    /// `.cancelled` when nothing was recorded, meaning the app cancelled the task.
     ///
     /// A `CancellationError` thrown by the app's own code while the run was *not* cancelled passes
     /// through as itself, matching Python, which keeps a user's own `TimeoutError` apart from its
@@ -23,6 +27,7 @@ enum RTSRunCancellation {
     /// stop observed is the one reported.
     static func normalized(
         _ error: Error,
+        stopReason: RTSRunTerminationReason?,
         file: String = #fileID,
         line: UInt = #line,
         function: String = #function
@@ -33,9 +38,10 @@ enum RTSRunCancellation {
         if case .runTerminated? = error as? RTSError {
             return error
         }
-        log.debug("🛑 run cancelled; reporting \(error) as runTerminated(reason: cancelled)")
+        let reason = stopReason ?? .cancelled
+        log.debug("🛑 run stopped; reporting \(error) as runTerminated(reason: \(reason))")
         return RTSError.runTerminated(
-            reason: .cancelled,
+            reason: reason,
             file: file,
             line: line,
             function: function
