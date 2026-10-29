@@ -475,6 +475,43 @@ extension RailtracksSwiftTestSuite {
             #expect(completed.payload["termination_reason"] == .null)
         }
 
+        /// A flow can be re-run with a different timeout. A change made while a run is going doesn't
+        /// reach that run, which keeps the deadline it started with; the next run uses the new one.
+        @Test("a timeout change applies to later runs, not the one already going")
+        func timeoutChangeAppliesToLaterRuns() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let started = StartSignal()
+            let root = StubOrchestrator(nodeName: "Slow") { _, _ in
+                started.fire()
+                try await Task.sleep(for: .seconds(30))
+                return ["result": .string("never")]
+            }
+            let flow = RTSFlow(title: "TimeoutAdjusted", savesTrace: false, timeout: 0.3)
+
+            let first = Task {
+                await runCapturingError(flow, root: root)
+            }
+            await started.wait()
+            // Too long to fire within the test; the running run must ignore it.
+            flow.timeout = 30
+            let firstThrown = await first.value
+
+            guard case .timeout(let firstLimit)? = RTSRunCancellation.terminationReason(of: firstThrown) else {
+                Issue.record("expected the first run to time out, got \(String(describing: firstThrown))")
+                return
+            }
+            #expect(firstLimit == 0.3, "the running run keeps the timeout it started with")
+
+            flow.timeout = 0.1
+            let secondThrown = await runCapturingError(flow, root: root)
+
+            guard case .timeout(let secondLimit)? = RTSRunCancellation.terminationReason(of: secondThrown) else {
+                Issue.record("expected the second run to time out, got \(String(describing: secondThrown))")
+                return
+            }
+            #expect(secondLimit == 0.1, "a later run uses the new timeout")
+        }
+
         /// The app cancelling a run that has a timeout is a user cancel, not a timeout.
         @Test("cancelling a run that has a timeout reports cancelled")
         func cancelBeforeTheDeadlineIsACancel() async throws {

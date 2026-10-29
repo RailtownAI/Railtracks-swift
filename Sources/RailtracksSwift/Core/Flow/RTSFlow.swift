@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import Synchronization
 import RailtownLogger
 
 /// Representation of Agent node in Railtracks pipeline
@@ -16,7 +17,20 @@ public class RTSFlow: @unchecked Sendable {
     let savesTrace: Bool
     /// The most seconds a run may take, or `nil` for no limit. A run past it is cancelled and throws
     /// `RTSError.runTerminated(reason: .timeout(after:))` once it has unwound.
-    public let timeout: TimeInterval?
+    ///
+    /// Adjustable between runs. Each run reads it once, when it starts, so a change affects runs
+    /// started afterwards; a run already going keeps the deadline it started with.
+    public var timeout: TimeInterval? {
+        get {
+            storedTimeout.withLock { $0 }
+        }
+        set {
+            storedTimeout.withLock { $0 = newValue }
+        }
+    }
+    /// Backs `timeout`. Locked because runs can overlap: one may read the value as it starts while
+    /// the app sets it from another thread.
+    private let storedTimeout: Mutex<TimeInterval?>
     let signpostEmitter: any RTSSignpostEmitting
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never> = .init(nil)
     /// Publishes the outcome of the JSON trace write after each completed run.
@@ -154,7 +168,7 @@ public class RTSFlow: @unchecked Sendable {
     ) {
         self.title = title
         self.savesTrace = savesTrace
-        self.timeout = timeout
+        self.storedTimeout = Mutex(timeout)
         self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
         // Held as a local as well: `self` cannot be used to reach the emitter until every
         // stored property is assigned, and the writer has to subscribe before `init` returns.
@@ -211,7 +225,9 @@ public class RTSFlow: @unchecked Sendable {
         systemMessage: String? = nil,
         images: [RTSImage] = []
     ) async throws -> String {
-        let startedAt = emitSessionStarted(entryPointName: agent.agentName)
+        // Read once: this run keeps this deadline even if the app changes `timeout` meanwhile.
+        let timeout = self.timeout
+        let startedAt = emitSessionStarted(entryPointName: agent.agentName, timeout: timeout)
         let (nodeInvoker, collector, subscriptions) = await startCollecting()
         let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
             Task { await collector.subscribeMessage(session) }
@@ -253,7 +269,7 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<String, Error>
         do {
-            let output = try await withinTimeout(stop: nodeInvoker.runStop) { [input] in
+            let output = try await withinTimeout(timeout, stop: nodeInvoker.runStop) { [input] in
                 try await nodeInvoker.invokeAgent(agent, input: input, session: session)
             }
             guard case let .string(result) = output[agent.outputKeyResult] else {
@@ -285,7 +301,9 @@ public class RTSFlow: @unchecked Sendable {
         input: RTSInput,
         gateway: RTSLLMGateway
     ) async throws -> RTSOutput {
-        let startedAt = emitSessionStarted(entryPointName: node.name())
+        // Read once: this run keeps this deadline even if the app changes `timeout` meanwhile.
+        let timeout = self.timeout
+        let startedAt = emitSessionStarted(entryPointName: node.name(), timeout: timeout)
         let (nodeInvoker, collector, subscriptions) = await startCollecting()
         let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
             Task { await collector.subscribeMessage(session) }
@@ -306,7 +324,7 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<RTSOutput, Error>
         do {
-            let output = try await withinTimeout(stop: nodeInvoker.runStop) {
+            let output = try await withinTimeout(timeout, stop: nodeInvoker.runStop) {
                 try await nodeInvoker.invokeFunction(node, input: input, context: context)
             }
             outcome = .success(output)
@@ -327,7 +345,8 @@ public class RTSFlow: @unchecked Sendable {
 
     // MARK: - Timeout
 
-    /// Runs `work`, the run's root invocation, under the flow's `timeout`.
+    /// Runs `work`, the run's root invocation, under `timeout`: the flow's `timeout` as this run
+    /// read it when it started.
     ///
     /// With no timeout, `work` runs directly. Otherwise it runs in a task group next to a timer. When
     /// the timer fires first, the timeout is recorded on `stop` **before** the work is cancelled, so
@@ -338,6 +357,7 @@ public class RTSFlow: @unchecked Sendable {
     /// reports `.cancelled`. Work that finishes successfully despite the deadline returns its value,
     /// since nothing was actually stopped.
     private func withinTimeout<Output: Sendable>(
+        _ timeout: TimeInterval?,
         stop: RTSRunStop,
         _ work: @escaping @Sendable () async throws -> Output
     ) async throws -> Output {
@@ -416,7 +436,10 @@ public class RTSFlow: @unchecked Sendable {
     /// itself stays constant for the life of the session object. So two runs on one
     /// `RTSFlow` legitimately share a `scope_id` and are told apart by `entry_point_name`
     /// and their timestamps.
-    private func emitSessionStarted(entryPointName: String) -> Date {
+    private func emitSessionStarted(
+        entryPointName: String,
+        timeout: TimeInterval?
+    ) -> Date {
         let startedAt = RTSEventTimestamp.now()
         eventEmitter.emit(
             RTSSessionStartedEvent(
@@ -439,7 +462,7 @@ public class RTSFlow: @unchecked Sendable {
     /// `fatal` and `termination_reason` from whether that error says the run was stopped.
     ///
     /// One instant serves as both the event's `timestamp` and the end of the measured
-    /// window, for the same reason ``emitSessionStarted(entryPointName:)`` returns its own.
+    /// window, for the same reason ``emitSessionStarted(entryPointName:timeout:)`` returns its own.
     private func emitSessionCompleted(
         startedAt: Date,
         error: Error?

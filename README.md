@@ -529,6 +529,8 @@ do {
   before the run can return, so `run` can come back later than the deadline.
 - **The clock** runs from invoking the root node until it finishes, for each run on the flow. The
   default, `nil`, is no limit.
+- **Adjustable between runs.** Set `flow.timeout` at any time. Each run reads it when it starts, so
+  the change applies to runs started afterwards; a run already going keeps its deadline.
 - **Reported as a stop.** `session.started` carries the `timeout`, and `session.completed` carries
   `termination_reason: "timeout"` and `fatal: true`. A timed-out run is sent to RailtownLogger
   error reporting.
