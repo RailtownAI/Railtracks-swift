@@ -610,7 +610,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 targetName: target.name(),
                 input: input,
                 output: error == nil ? output : nil,
-                error: error.map { "\($0)" }
+                error: error.map { "\($0)" },
+                failure: error.map(RTSEdgeFailure.init)
             )
         )
     }

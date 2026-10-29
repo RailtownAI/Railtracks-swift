@@ -192,6 +192,7 @@ Per-agent input/output guardrails live in `Guardrails/` (abstraction + runner) a
 - `flow_id` is a SHA-256 hex hash of `flow_name`. `session_id` is a UUID generated per collector instance.
 - `input_kwargs` values are encoded as bare JSON scalars via `RTSValue`'s custom encoder, not as typed wrapper objects.
 - Run status reflects actual outcome: `.failed` if any edge event carries an error, `.completed` otherwise.
+- A failed edge's `output` is Python's `Failure.encode` object, `{"type", "message", "traceback"}`, for every node type. The v1 visualizer shows its error panel only for that shape. It comes from `RTSEdgeEvent.failure` (`RTSEdgeFailure`), built from the thrown error in `publishEdgeFinished`, since the type and the `RTSError.context` call site (the `traceback`, `null` for other errors) are lost once the error is a string. `type` and `message` match the events' `exception_name` / `exception_message`; Foundation errors arrive bridged, so their `type` reads `NSError`.
 
 ### Extension points
 
