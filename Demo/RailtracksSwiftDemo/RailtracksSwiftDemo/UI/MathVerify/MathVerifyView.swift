@@ -31,7 +31,7 @@ struct MathVerifyView: View {
                 Picker("Timeout", selection: $viewModel.timeout) {
                     Text("None").tag(TimeInterval?.none)
                     Text("3 s").tag(TimeInterval?.some(3))
-                    Text("8 s").tag(TimeInterval?.some(8))
+                    Text("30 s").tag(TimeInterval?.some(30))
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()

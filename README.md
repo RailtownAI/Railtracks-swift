@@ -531,9 +531,9 @@ do {
   default, `nil`, is no limit.
 - **Adjustable between runs.** Set `flow.timeout` at any time. Each run reads it when it starts, so
   the change applies to runs started afterwards; a run already going keeps its deadline.
-- **Reported as a stop.** `session.started` carries the `timeout`, and `session.completed` carries
-  `termination_reason: "timeout"` and `fatal: true`. A timed-out run is sent to RailtownLogger
-  error reporting.
+- **Reported as a stop.** `session.started` carries the `timeout`. `session.completed` carries
+  `termination_reason: "timeout"` and `fatal: false`: as in Python, a timeout on its own isn't
+  fatal. A timed-out run is sent to RailtownLogger error reporting.
 - **Cancelling first wins.** Cancelling the task before the deadline reports `.cancelled`; a
   cancel that arrives while a timed-out run is unwinding doesn't change it from `.timeout`.
 

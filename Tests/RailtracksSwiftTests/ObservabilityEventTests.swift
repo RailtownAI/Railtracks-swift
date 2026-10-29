@@ -383,8 +383,7 @@ extension RailtracksSwiftTestSuite {
             #expect(payload["termination_reason"] == .string("end_on_error"))
         }
 
-        /// A user cancel isn't fatal; the engine's own stops are, as Python's `fatal` means.
-        @Test("termination reasons map from the run's reason, with fatal for engine stops only")
+        @Test("termination reasons map from the run's reason")
         func sessionTerminationReasonMapping() {
             let cancelled = RTSSessionTerminationReason(.cancelled)
             let timeout = RTSSessionTerminationReason(.timeout(after: 30))
@@ -395,9 +394,21 @@ extension RailtracksSwiftTestSuite {
             #expect(cancelled == .cancelled)
             #expect(timeout == .timeout)
             #expect(endOnError == .endOnError)
-            #expect(!cancelled.isFatal)
-            #expect(timeout.isFatal)
-            #expect(endOnError.isFatal)
+        }
+
+        /// Python's rule: fatal only when the run failed under end-on-error. A timeout or cancel on
+        /// its own is not fatal, matching Python's `GlobalTimeOutError`.
+        @Test("fatal follows Python's rule: a failure under end-on-error, never a stop alone")
+        func fatalFollowsPythonsRule() {
+            let timeout = RTSError.runTerminated(reason: .timeout(after: 30))
+            let cancel = RTSError.runTerminated(reason: .cancelled)
+
+            #expect(!RTSFlow.isFatal(timeout, endOnError: false))
+            #expect(!RTSFlow.isFatal(cancel, endOnError: false))
+            #expect(!RTSFlow.isFatal(URLError(.badServerResponse), endOnError: false))
+            #expect(!RTSFlow.isFatal(nil, endOnError: true))
+            #expect(RTSFlow.isFatal(URLError(.badServerResponse), endOnError: true))
+            #expect(RTSFlow.isFatal(timeout, endOnError: true))
         }
 
         @Test("session.completed strips ANSI escapes from the error, like Python's format_error")

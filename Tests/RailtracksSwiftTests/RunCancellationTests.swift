@@ -419,7 +419,8 @@ extension RailtracksSwiftTestSuite {
             #expect(started.payload["timeout"] == .number(0.2))
             let completed = try #require(recorder.first(ofType: "session.completed"))
             #expect(completed.payload["error"] == .string("runTerminated(reason: timeout(after: 0.2))"))
-            #expect(completed.payload["fatal"] == .bool(true))
+            // Python's rule: a timeout alone isn't fatal (`GlobalTimeOutError` doesn't set it).
+            #expect(completed.payload["fatal"] == .bool(false))
             #expect(completed.payload["termination_reason"] == .string("timeout"))
 
             let rootState = await statuses.finalState(of: "Slow")

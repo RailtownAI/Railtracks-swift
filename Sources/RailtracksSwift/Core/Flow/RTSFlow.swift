@@ -459,7 +459,8 @@ public class RTSFlow: @unchecked Sendable {
     }
 
     /// Emits `session.completed`, deriving status from whether the run produced an error, and
-    /// `fatal` and `termination_reason` from whether that error says the run was stopped.
+    /// `termination_reason` from whether that error says the run was stopped, and `fatal` by
+    /// Python's rule (``isFatal(_:endOnError:)``).
     ///
     /// One instant serves as both the event's `timestamp` and the end of the measured
     /// window, for the same reason ``emitSessionStarted(entryPointName:timeout:)`` returns its own.
@@ -477,7 +478,8 @@ public class RTSFlow: @unchecked Sendable {
                 // ANSI-stripped, mirroring Python's `format_error`.
                 error: error.map(RTSSessionCompletedEvent.formatError),
                 durationSeconds: completedAt.timeIntervalSince(startedAt),
-                fatal: terminationReason?.isFatal ?? false,
+                // Swift has no end-on-error setting yet, so no run is fatal until it does.
+                fatal: RTSFlow.isFatal(error, endOnError: false),
                 terminationReason: terminationReason,
                 timestamp: completedAt
             )
@@ -550,6 +552,14 @@ public class RTSFlow: @unchecked Sendable {
         )
         await collector.setup()
         return (nodeInvoker, collector, subscriptions)
+    }
+
+    /// `session.completed`'s `fatal`, by Python's rule: the run failed, and either the flow ends on
+    /// error or the error is itself fatal (`error is not None and (end_on_error or
+    /// is_fatal(error))`). Swift has no fatal-error marker, so only the first half applies. A
+    /// timeout or a cancel alone is not fatal; `termination_reason` reports those.
+    static func isFatal(_ error: Error?, endOnError: Bool) -> Bool {
+        error != nil && endOnError
     }
 
     /// The state a finish event reports. A cancel and a timeout both stop the node from outside, so

@@ -42,17 +42,6 @@ public enum RTSSessionTerminationReason: String, Sendable, Codable {
             self = .endOnError
         }
     }
-
-    /// Mirrors Python's `fatal`: the run was ended by the engine (timeout, end-on-error) rather
-    /// than by the app. A user cancel is not fatal.
-    var isFatal: Bool {
-        switch self {
-        case .cancelled:
-            return false
-        case .timeout, .endOnError:
-            return true
-        }
-    }
 }
 
 // MARK: - RTSSessionStartedEvent
@@ -148,7 +137,9 @@ public struct RTSSessionCompletedEvent: RTSObservabilityEvent {
     public let status: RTSSessionStatus
     public let error: String?
     public let durationSeconds: TimeInterval
-    /// Python's `fatal`: true when the engine ended the run (a timeout or an end-on-error stop).
+    /// Python's `fatal`: the run failed and either the flow ends on error or the error is itself
+    /// fatal. Not the same as being stopped: a timeout or a cancel alone isn't fatal, and
+    /// ``terminationReason`` says how a run was stopped.
     public let fatal: Bool
     public let terminationReason: RTSSessionTerminationReason?
 
