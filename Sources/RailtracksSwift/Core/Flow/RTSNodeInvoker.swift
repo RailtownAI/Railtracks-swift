@@ -350,6 +350,13 @@ public class RTSNodeInvoker: @unchecked Sendable {
             }
         }
 
+        // The outcome is final here, whichever of guardrails or body produced the error. Under
+        // `endOnError`, a failure stops the run before this node's finish events go out, so its
+        // siblings see the stop as early as possible.
+        if let invokeError {
+            runStop.nodeFailed(name: node.name(), error: invokeError)
+        }
+
         // The node's single terminal event. Both arms live here, outside the block above,
         // because `invokeError` is only final at this point:
         //

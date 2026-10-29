@@ -409,6 +409,8 @@ extension RailtracksSwiftTestSuite {
             #expect(!RTSFlow.isFatal(nil, endOnError: true))
             #expect(RTSFlow.isFatal(URLError(.badServerResponse), endOnError: true))
             #expect(RTSFlow.isFatal(timeout, endOnError: true))
+            // The one departure from Python, which has no user cancel: it's never fatal.
+            #expect(!RTSFlow.isFatal(cancel, endOnError: true))
         }
 
         @Test("session.completed strips ANSI escapes from the error, like Python's format_error")

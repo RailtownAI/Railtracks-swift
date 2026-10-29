@@ -165,7 +165,7 @@ let result = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
 
 `nodeStatusPublisher` emits for every node — agents, tools, and sub-agents — using the same `runID`-stamped event infrastructure as the JSON trace. Subscribe before calling `run` to capture all events.
 
-A node is `.cancelled` when the run was stopped while it was running or before it started, by cancelling the task that awaits `run` or by the flow's timeout (see [Stopping a run](#stopping-a-run)). A node that fails with its own error is `.failed`.
+A node is `.cancelled` when the run was stopped while it was running or before it started: by cancelling the task that awaits `run`, by the flow's timeout, or by another node failing under `endOnError` (see [Stopping a run](#stopping-a-run)). A node that fails with its own error is `.failed`.
 
 ### RTSAgent
 
@@ -536,6 +536,35 @@ do {
   fatal. A timed-out run is sent to RailtownLogger error reporting.
 - **Cancelling first wins.** Cancelling the task before the deadline reports `.cancelled`; a
   cancel that arrives while a timed-out run is unwinding doesn't change it from `.timeout`.
+
+#### End on error
+
+Set `endOnError` and the first node to fail stops the whole run:
+
+```swift
+let flow = RTSFlow(title: "Support", endOnError: true)
+
+do {
+    let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+} catch let RTSError.runTerminated(.endOnError(nodeName, underlying), _) {
+    // nodeName is the node that failed, underlying its error
+}
+```
+
+- **Every failure counts**, wherever it happens: a tool or agent throwing, or a guardrail
+  blocking or throwing. A node cut short by the stop doesn't count again.
+- **Parallel work stops too.** Nodes still running alongside the failed one, such as `async let`
+  children or parallel tool calls, are cancelled, and no node starts afterwards. Without
+  `endOnError` they would run to the end.
+- **A caught failure still fails the run.** A parent that catches the error and carries on, or
+  even returns, doesn't save it: `run` throws `.endOnError` once any node failed. This includes the
+  root failing on its own.
+- **Reported as a stop.** The failed node is `.failed` with its own error; every node the stop cut
+  short is `.cancelled`. `session.started` carries `end_on_error: true`. `session.completed`
+  carries `termination_reason: "end_on_error"` and `fatal: true`, as in Python, where any failure
+  under `end_on_error` is fatal; a user cancel stays non-fatal.
+- **Adjustable between runs**, like `timeout`: set `flow.endOnError`, and each run reads it when it
+  starts. The default is `false`.
 
 ### Call-site context
 

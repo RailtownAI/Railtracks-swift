@@ -550,6 +550,186 @@ extension RailtracksSwiftTestSuite {
     }
 }
 
+private struct BoomError: Error {}
+
+/// The failing node's name, when `error` is an end-on-error stop.
+private func endOnErrorNodeName(_ error: Error?) -> String? {
+    guard case .endOnError(let nodeName, _)? = RTSRunCancellation.terminationReason(of: error) else {
+        return nil
+    }
+    return nodeName
+}
+
+extension RailtracksSwiftTestSuite {
+    @Suite("End on error", .serialized)
+    struct EndOnErrorTests {
+
+        /// Runs `root` on `flow` and returns what it threw, or `nil` when it returned.
+        private func runCapturingError(
+            _ flow: RTSFlow,
+            root: some RTSOrchestratorNode
+        ) async -> Error? {
+            do {
+                _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+                return nil
+            } catch {
+                return error
+            }
+        }
+
+        /// One node failing stops a slow sibling running in parallel. The failing node is
+        /// `.failed`, the sibling and the root are `.cancelled`, and the events report the stop.
+        @Test("a node failure stops a slow parallel sibling")
+        func failureStopsAParallelSibling() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let slowFinished = RanFlag()
+            let failing = StubOrchestrator(nodeName: "Failing") { _, _ in
+                try await Task.sleep(for: .milliseconds(100))
+                throw BoomError()
+            }
+            let slow = StubOrchestrator(nodeName: "Slow") { _, _ in
+                try await Task.sleep(for: .seconds(30))
+                slowFinished.set()
+                return ["result": .string("slow")]
+            }
+            let root = StubOrchestrator(nodeName: "Root") { _, context in
+                async let failingResult = context.call(failing, input: [:])
+                async let slowResult = context.call(slow, input: [:])
+                // Awaits the slow one first, so without endOnError nothing would stop it for 30 s.
+                _ = try await slowResult
+                _ = try await failingResult
+                return ["result": .string("never")]
+            }
+            let flow = RTSFlow(title: "EndOnErrorSibling", endOnError: true)
+            let recorder = EventRecorder(flow.eventPublisher)
+            let statuses = NodeStatusRecorder(flow.nodeStatusPublisher)
+            let traceURL = TraceURLRecorder(flow.outputFileURLPublisher)
+
+            let clock = ContinuousClock()
+            let begin = clock.now
+            let thrown = await runCapturingError(flow, root: root)
+            let elapsed = clock.now - begin
+
+            #expect(endOnErrorNodeName(thrown) == "Failing", "expected endOnError(Failing), got \(String(describing: thrown))")
+            #expect(elapsed < .seconds(5), "the sibling should be stopped promptly, took \(elapsed)")
+            #expect(!slowFinished.didRun, "the slow sibling must not run to completion")
+
+            let failingState = await statuses.finalState(of: "Failing")
+            guard case .failed? = failingState else {
+                Issue.record("the failing node should be .failed, got \(String(describing: failingState))")
+                return
+            }
+            let slowState = await statuses.finalState(of: "Slow")
+            let rootState = await statuses.finalState(of: "Root")
+            #expect(isCancelledState(slowState), "the sibling should be cancelled, got \(String(describing: slowState))")
+            #expect(isCancelledState(rootState), "the root should be cancelled, got \(String(describing: rootState))")
+
+            let started = try #require(recorder.first(ofType: "session.started"))
+            #expect(started.payload["end_on_error"] == .bool(true))
+            let completed = try #require(recorder.first(ofType: "session.completed"))
+            #expect(completed.payload["fatal"] == .bool(true))
+            #expect(completed.payload["termination_reason"] == .string("end_on_error"))
+
+            let url = try #require(traceURL.writtenURL, "the trace must be written before run returns")
+            let traceText = try String(contentsOf: url, encoding: .utf8)
+            #expect(traceText.contains("runTerminated(reason: endOnError(nodeName: \\\"Failing\\\""))
+        }
+
+        /// A parent that catches the failure and returns anyway doesn't save the run: endOnError
+        /// promises that a node failure fails it.
+        @Test("a caught failure still fails the run")
+        func caughtFailureStillFailsTheRun() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let failing = StubOrchestrator(nodeName: "Failing") { _, _ in
+                throw BoomError()
+            }
+            let root = StubOrchestrator(nodeName: "Recovers") { _, context in
+                _ = try? await context.call(failing, input: [:])
+                return ["result": .string("recovered")]
+            }
+            let flow = RTSFlow(title: "EndOnErrorCaught", savesTrace: false, endOnError: true)
+
+            let thrown = await runCapturingError(flow, root: root)
+
+            #expect(endOnErrorNodeName(thrown) == "Failing", "expected endOnError(Failing), got \(String(describing: thrown))")
+        }
+
+        /// The same parent without endOnError recovers: the setting is what makes the difference.
+        @Test("without endOnError a caught failure lets the run succeed")
+        func caughtFailureWithoutEndOnErrorSucceeds() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let failing = StubOrchestrator(nodeName: "Failing") { _, _ in
+                throw BoomError()
+            }
+            let root = StubOrchestrator(nodeName: "Recovers") { _, context in
+                _ = try? await context.call(failing, input: [:])
+                return ["result": .string("recovered")]
+            }
+            let flow = RTSFlow(title: "NoEndOnErrorCaught", savesTrace: false)
+            let recorder = EventRecorder(flow.eventPublisher)
+
+            let output = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            #expect(output["result"] == .string("recovered"))
+            let completed = try #require(recorder.first(ofType: "session.completed"))
+            #expect(completed.payload["fatal"] == .bool(false))
+            #expect(completed.payload["termination_reason"] == .null)
+        }
+
+        /// When the root itself fails, the run still throws the wrapper, naming the root and
+        /// carrying its error.
+        @Test("a failing root throws the end-on-error wrapper")
+        func failingRootThrowsTheWrapper() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let root = StubOrchestrator(nodeName: "FailingRoot") { _, _ in
+                throw BoomError()
+            }
+            let flow = RTSFlow(title: "EndOnErrorRoot", savesTrace: false, endOnError: true)
+
+            let thrown = await runCapturingError(flow, root: root)
+
+            guard case .endOnError(let nodeName, let underlying)? = RTSRunCancellation.terminationReason(of: thrown) else {
+                Issue.record("expected endOnError, got \(String(describing: thrown))")
+                return
+            }
+            #expect(nodeName == "FailingRoot")
+            #expect(underlying is BoomError)
+        }
+
+        /// A user cancel on a flow with endOnError is a cancel: not fatal, and not an end-on-error
+        /// stop, even though the cancel makes the running node throw.
+        @Test("cancelling a run with endOnError reports cancelled, not fatal")
+        func cancelUnderEndOnErrorIsACancel() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let started = StartSignal()
+            let root = StubOrchestrator(nodeName: "Slow") { _, _ in
+                started.fire()
+                try await Task.sleep(for: .seconds(30))
+                return ["result": .string("never")]
+            }
+            let flow = RTSFlow(title: "EndOnErrorCancel", savesTrace: false, endOnError: true)
+            let recorder = EventRecorder(flow.eventPublisher)
+
+            let run = Task {
+                try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+            }
+            await started.wait()
+            run.cancel()
+            var thrown: Error?
+            do {
+                _ = try await run.value
+            } catch {
+                thrown = error
+            }
+
+            #expect(isCancelledRun(thrown), "expected runTerminated(cancelled), got \(String(describing: thrown))")
+            let completed = try #require(recorder.first(ofType: "session.completed"))
+            #expect(completed.payload["fatal"] == .bool(false))
+            #expect(completed.payload["termination_reason"] == .string("cancelled"))
+        }
+    }
+}
+
 extension RailtracksSwiftTestSuite {
     @Suite("Run cancellation, live", .serialized)
     struct RunCancellationLiveTests {
@@ -702,24 +882,78 @@ extension RailtracksSwiftTestSuite {
         #expect(isCancelledState(RTSFlow.finishedState(of: timedOut)))
     }
 
-    /// An end-on-error stop is a failure, with the error text; no error at all is a completion.
-    @Test func endOnErrorFinishesAsFailedAndSuccessAsCompleted() {
-        let reason = RTSRunTerminationReason.endOnError(
-            nodeName: "Tool",
-            underlying: URLError(.badServerResponse)
-        )
-        let endOnError = finishEvent(error: RTSError.runTerminated(reason: reason))
+    /// A node an end-on-error stop cut short is `.cancelled`, like any stopped node. The node that
+    /// failed has its own error and is `.failed`; no error at all is a completion.
+    @Test func endOnErrorStopFinishesAsCancelledAndOwnErrorAsFailed() {
+        let underlying = URLError(.badServerResponse)
+        let reason = RTSRunTerminationReason.endOnError(nodeName: "Tool", underlying: underlying)
+        let stopped = finishEvent(error: RTSError.runTerminated(reason: reason))
+        let failing = finishEvent(error: underlying)
         let succeeded = finishEvent(error: nil)
 
-        guard case .failed(let message) = RTSFlow.finishedState(of: endOnError) else {
-            Issue.record("expected .failed for an end-on-error stop")
+        #expect(isCancelledState(RTSFlow.finishedState(of: stopped)))
+        guard case .failed = RTSFlow.finishedState(of: failing) else {
+            Issue.record("expected .failed for the node's own error")
             return
         }
-        #expect(message.contains("endOnError"))
         guard case .completed = RTSFlow.finishedState(of: succeeded) else {
             Issue.record("expected .completed with no error")
             return
         }
+    }
+
+    /// Under `endOnError`, a node failure requests the stop and names the node.
+    @Test func aNodeFailureStopsTheRunUnderEndOnError() {
+        let stop = RTSRunStop(endsOnError: true)
+
+        stop.nodeFailed(name: "Tool", error: URLError(.badServerResponse))
+
+        guard case .endOnError(let nodeName, let underlying)? = stop.reason else {
+            Issue.record("expected an end-on-error stop, got \(String(describing: stop.reason))")
+            return
+        }
+        #expect(nodeName == "Tool")
+        #expect(underlying is URLError)
+    }
+
+    /// Without `endOnError`, a failure stops nothing; with it, a stop error never starts another.
+    @Test func aNodeFailureIsIgnoredWithoutEndOnErrorOrWhenItIsAStop() {
+        let off = RTSRunStop(endsOnError: false)
+        let on = RTSRunStop(endsOnError: true)
+
+        off.nodeFailed(name: "Tool", error: URLError(.badServerResponse))
+        on.nodeFailed(name: "Tool", error: RTSError.runTerminated(reason: .cancelled))
+
+        #expect(off.reason == nil)
+        #expect(on.reason == nil)
+    }
+
+    /// The listener wakes when a stop is requested after it started waiting.
+    @Test func theListenerWakesOnARequest() async {
+        let stop = RTSRunStop()
+        let listener = Task {
+            await stop.stopRequested()
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        stop.request(.timeout(after: 1))
+        await listener.value
+
+        #expect(stop.reason != nil)
+    }
+
+    /// The listener also returns, with nothing recorded, when its own task is cancelled.
+    @Test func theListenerReturnsWhenCancelled() async {
+        let stop = RTSRunStop()
+        let listener = Task {
+            await stop.stopRequested()
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        listener.cancel()
+        await listener.value
+
+        #expect(stop.reason == nil)
     }
 
     /// A finish event the way `RTSNodeInvoker` builds one for `error`.

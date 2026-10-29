@@ -20,6 +20,9 @@ class MathErrorViewModel {
     var traceStatus: String = ""
     var isRunning = false
     var isShowingKeyPrompt = false
+    /// Builds both flows with `endOnError`. The failing node then stays red while the nodes the
+    /// stop cut short turn orange, and the error names the node that failed.
+    var endOnError = false
     /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
     /// per run — the model outlives them and accumulates each run as its own root. Both buttons on
     /// this screen therefore stack into one history, which is the point: the failing run's tree sits
@@ -50,12 +53,13 @@ class MathErrorViewModel {
     /// Deterministically drives `flow.run` down its error path via an orchestrator that
     /// throws — no LLM/API key needed. Confirms the run rethrows *and* the trace is written.
     func startForceThrow() {
+        let endOnError = self.endOnError
         resetOutput()
         isRunning = true
         Task { [weak self] in
             defer { self?.isRunning = false }
             self?.promptResult = "waiting..."
-            let flow = RTSFlow(title: "Throwing Workflow")
+            let flow = RTSFlow(title: "Throwing Workflow", endOnError: endOnError)
             self?.observe(flow)
             do {
                 _ = try await flow.run(ThrowingWorkflow(), input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
@@ -92,6 +96,7 @@ class MathErrorViewModel {
             return
         }
         let prompt = self.prompt
+        let endOnError = self.endOnError
         resetOutput()
         isRunning = true
         Task { [weak self] in
@@ -105,7 +110,7 @@ class MathErrorViewModel {
                 DivisionErrorTool()
             ]
 
-            let flow = RTSFlow(title: "Math Error")
+            let flow = RTSFlow(title: "Math Error", endOnError: endOnError)
             self?.observe(flow)
 
             let agent = RTSAgent(
