@@ -513,6 +513,24 @@ extension RailtracksSwiftTestSuite {
             #expect(secondLimit == 0.1, "a later run uses the new timeout")
         }
 
+        /// `timeout = .infinity` runs with no limit rather than trapping in `Duration.seconds`, and
+        /// `session.started` reports no timeout (infinity isn't valid JSON).
+        @Test("an infinite timeout runs with no limit")
+        func infiniteTimeoutRunsWithNoLimit() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let root = StubOrchestrator(nodeName: "Fast") { _, _ in
+                ["result": .string("done")]
+            }
+            let flow = RTSFlow(title: "TimeoutInfinite", savesTrace: false, timeout: .infinity)
+            let recorder = EventRecorder(flow.eventPublisher)
+
+            let output = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            #expect(output["result"] == .string("done"))
+            let started = try #require(recorder.first(ofType: "session.started"))
+            #expect(started.payload["timeout"] == .null)
+        }
+
         /// The app cancelling a run that has a timeout is a user cancel, not a timeout.
         @Test("cancelling a run that has a timeout reports cancelled")
         func cancelBeforeTheDeadlineIsACancel() async throws {
@@ -730,6 +748,113 @@ extension RailtracksSwiftTestSuite {
     }
 }
 
+/// Records whether a guardrail's `check` ran.
+private final class CheckedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    func set() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+
+    var didCheck: Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return value
+    }
+}
+
+extension RailtracksSwiftTestSuite {
+    @Suite("Guardrails and run stops", .serialized)
+    struct GuardrailRunStopTests {
+
+        // Drives `RTSNodeInvoker.invokeAgent` directly with a stub session: guardrails only reach
+        // the invoker through an agent, and a real `RTSFlow` run would need a provider.
+
+        /// An `RTSLLMSession` whose reply ignores cancellation, like a body that swallows a stop.
+        private func stubSession(after delay: Duration) -> RTSLLMSession {
+            RTSLLMSession(
+                run: { _, _, _ in
+                    try? await Task.sleep(for: delay)
+                    return "unchecked reply"
+                },
+                setSystemPrompt: { _, _ in },
+                message: { [] },
+                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
+                agentName: "Stub"
+            )
+        }
+
+        /// A body that ignores the stop and returns: its output guardrails don't run, and the node
+        /// fails with the stop instead of passing unchecked output as a success.
+        @Test("output guardrails are skipped, and the node fails, when the run was stopped")
+        func outputGuardrailsSkippedAfterAStop() async throws {
+            let checked = CheckedFlag()
+            let redact = RTSClosureOutputGuardrail(name: "redact") { output in
+                checked.set()
+                return .allow()
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                outputGuardrails: [redact]
+            )
+            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let session = stubSession(after: .milliseconds(200))
+
+            let call = Task {
+                try await invoker.invokeAgent(agent, input: ["prompt": .string("hi")], session: session)
+            }
+            try await Task.sleep(for: .milliseconds(50))
+            call.cancel()
+            var thrown: Error?
+            do {
+                _ = try await call.value
+            } catch {
+                thrown = error
+            }
+
+            #expect(isCancelledRun(thrown), "expected runTerminated(cancelled), got \(String(describing: thrown))")
+            #expect(!checked.didCheck, "the output guardrail must not run after a stop")
+        }
+
+        /// An input guardrail block is a node failure, so under endOnError it stops the run.
+        @Test("a guardrail block stops the run under endOnError")
+        func guardrailBlockTriggersEndOnError() async throws {
+            let block = RTSClosureInputGuardrail(name: "block") { _ in
+                .block("nope")
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                inputGuardrails: [block]
+            )
+            let stop = RTSRunStop(endsOnError: true)
+            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID(), runStop: stop)
+
+            _ = try? await invoker.invokeAgent(
+                agent,
+                input: ["prompt": .string("hi")],
+                session: stubSession(after: .zero)
+            )
+
+            guard case .endOnError(let nodeName, let underlying)? = stop.reason else {
+                Issue.record("expected an end-on-error stop, got \(String(describing: stop.reason))")
+                return
+            }
+            #expect(nodeName == "Guarded")
+            guard case .guardrailBlocked? = underlying as? RTSError else {
+                Issue.record("expected the guardrail block as the underlying error, got \(underlying)")
+                return
+            }
+        }
+    }
+}
+
 extension RailtracksSwiftTestSuite {
     @Suite("Run cancellation, live", .serialized)
     struct RunCancellationLiveTests {
@@ -856,6 +981,17 @@ extension RailtracksSwiftTestSuite {
             Issue.record("expected the recorded timeout, got \(normalized)")
             return
         }
+    }
+
+    /// A timeout that can't be timed means no limit instead of a crash; anything else is kept,
+    /// zero or less included.
+    @Test func anUntimeableTimeoutMeansNoLimit() {
+        #expect(RTSFlow.effectiveTimeout(.infinity) == nil)
+        #expect(RTSFlow.effectiveTimeout(.nan) == nil)
+        #expect(RTSFlow.effectiveTimeout(1e300) == nil)
+        #expect(RTSFlow.effectiveTimeout(nil) == nil)
+        #expect(RTSFlow.effectiveTimeout(30) == 30)
+        #expect(RTSFlow.effectiveTimeout(-1) == -1)
     }
 
     /// The first stop requested is the one kept.

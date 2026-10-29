@@ -528,7 +528,8 @@ do {
 - **Tools should honour cancellation.** A node body that ignores it finishes its current call
   before the run can return, so `run` can come back later than the deadline.
 - **The clock** runs from invoking the root node until it finishes, for each run on the flow. The
-  default, `nil`, is no limit.
+  default, `nil`, is no limit, and so is a value that can't be timed: `.infinity`, NaN, or more
+  than about 31 years.
 - **Adjustable between runs.** Set `flow.timeout` at any time. Each run reads it when it starts, so
   the change applies to runs started afterwards; a run already going keeps its deadline.
 - **Reported as a stop.** `session.started` carries the `timeout`. `session.completed` carries

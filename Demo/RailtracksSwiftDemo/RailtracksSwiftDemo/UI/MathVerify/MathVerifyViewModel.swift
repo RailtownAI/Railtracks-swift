@@ -119,7 +119,11 @@ class MathVerifyViewModel {
                 .store(in: &cancellables)
 
             do {
-                self?.promptResult = try await flow.run(agent: solverAgent, prompt: prompt, gateway: gateway)
+                self?.promptResult = try await flow.run(
+                    agent: solverAgent,
+                    prompt: prompt,
+                    gateway: gateway
+                )
                 Log.debug("obtained math verify result")
             } catch {
                 // A Stop arrives here as `runTerminated(reason: cancelled)` and a timeout as

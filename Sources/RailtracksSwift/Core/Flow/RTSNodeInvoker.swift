@@ -343,10 +343,19 @@ public class RTSNodeInvoker: @unchecked Sendable {
             // Output guardrails only run when the agent itself produced a result. They run after the
             // measured window (not counted as node runtime), matching Python measuring only invoke().
             if invokeError == nil, let runOutputGuardrails {
-                let result = await runOutputGuardrails(output, invocationID)
-                output = result.value
-                guardTraces.append(contentsOf: result.traces)
-                invokeError = result.error
+                if Task.isCancelled {
+                    // The body ignored a stop and returned anyway. Its output is not checked, since
+                    // the run is ending (a model-based guardrail would be one more model call), and
+                    // unchecked output must not pass as a success: it could be text a redacting
+                    // guardrail never saw. So the node fails with the stop.
+                    invokeError = RTSError.runTerminated(reason: runStop.reason ?? .cancelled)
+                    output = [:]
+                } else {
+                    let result = await runOutputGuardrails(output, invocationID)
+                    output = result.value
+                    guardTraces.append(contentsOf: result.traces)
+                    invokeError = result.error
+                }
             }
         }
 

@@ -19,7 +19,8 @@ public class RTSFlow: @unchecked Sendable {
     /// `RTSError.runTerminated(reason: .timeout(after:))` once it has unwound.
     ///
     /// Adjustable between runs. Each run reads it once, when it starts, so a change affects runs
-    /// started afterwards; a run already going keeps the deadline it started with.
+    /// started afterwards; a run already going keeps the deadline it started with. A value that
+    /// can't be timed (NaN, infinity, or more than about 31 years) means no limit.
     public var timeout: TimeInterval? {
         get {
             storedTimeout.withLock { $0 }
@@ -297,7 +298,10 @@ public class RTSFlow: @unchecked Sendable {
             }
             outcome = .success(result)
         } catch {
-            let reported = RTSRunCancellation.normalized(error, stopReason: nodeInvoker.runStop.reason)
+            let reported = RTSRunCancellation.normalized(
+                error,
+                stopReason: nodeInvoker.runStop.reason
+            )
             outcome = .failure(reported)
             reportFailure(reported)
         }
@@ -348,7 +352,10 @@ public class RTSFlow: @unchecked Sendable {
             }
             outcome = .success(output)
         } catch {
-            let reported = RTSRunCancellation.normalized(error, stopReason: nodeInvoker.runStop.reason)
+            let reported = RTSRunCancellation.normalized(
+                error,
+                stopReason: nodeInvoker.runStop.reason
+            )
             outcome = .failure(reported)
             reportFailure(reported)
         }
@@ -367,7 +374,25 @@ public class RTSFlow: @unchecked Sendable {
     /// The flow's adjustable settings, read once at the start of a run. The run keeps these even if
     /// the app changes `timeout` or `endOnError` while it's going.
     private func currentRunSettings() -> RunSettings {
-        RunSettings(timeout: timeout, endOnError: endOnError)
+        RunSettings(timeout: RTSFlow.effectiveTimeout(timeout), endOnError: endOnError)
+    }
+
+    /// The longest timeout a run will time, in seconds: about 31 years. Anything longer is no limit
+    /// in practice, and far beyond it `Duration.seconds` traps.
+    static let maximumTimeout: TimeInterval = 1_000_000_000
+
+    /// `timeout` as a run can use it. A value that can't be timed, NaN, infinity or anything past
+    /// `maximumTimeout`, means no limit: `Duration.seconds` traps on it, and `session.started`
+    /// couldn't encode it as JSON. Zero or less is kept, and times out at once.
+    static func effectiveTimeout(_ timeout: TimeInterval?) -> TimeInterval? {
+        guard let timeout else {
+            return nil
+        }
+        guard timeout.isFinite, timeout <= maximumTimeout else {
+            log.warning("⏱️ timeout \(timeout) can't be timed; running with no limit")
+            return nil
+        }
+        return timeout
     }
 
     /// Runs `work`, the run's root invocation, so that a stop from inside the run can end it: the
@@ -501,7 +526,7 @@ public class RTSFlow: @unchecked Sendable {
     /// Python's rule (``isFatal(_:endOnError:)``).
     ///
     /// One instant serves as both the event's `timestamp` and the end of the measured
-    /// window, for the same reason ``emitSessionStarted(entryPointName:timeout:)`` returns its own.
+    /// window, for the same reason ``emitSessionStarted(entryPointName:settings:)`` returns its own.
     private func emitSessionCompleted(
         startedAt: Date,
         error: Error?,
