@@ -99,7 +99,12 @@ class MathAppleViewModel {
             do {
                 self?.promptResult = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
                 Log.debug("obtained prompt result")
-            } catch {
+            } catch let error as RTSError {
+                guard case .runTerminated = error else {
+                    self?.promptResult = "Failed: \(error)"
+                    Log.debug("math AppleAI run failed with \(error)")
+                    return
+                }
                 // A Stop arrives here as `runTerminated(reason: cancelled)`, after the trace and
                 // events are written.
                 var result = "Stopped: \(error)"
@@ -108,7 +113,10 @@ class MathAppleViewModel {
                     result += "\nStopped \(stopTime.formatted(.units(allowed: [.milliseconds]))) after Stop"
                 }
                 self?.promptResult = result
-                Log.debug("math AppleAI run ended with \(error)")
+                Log.debug("math AppleAI run stopped with \(error)")
+            } catch {
+                self?.promptResult = "Failed: \(error)"
+                Log.debug("math AppleAI run failed with \(error)")
             }
         }
     }

@@ -128,8 +128,8 @@ final class AppleAISession: @unchecked Sendable {
     /// the second of two tool calls left only the instructions entry, losing the prompt, the first
     /// call and its output. So the prompt is recorded from what was sent, stamped `startedAt`,
     /// when it was sent. The rollback is measured, not documented, so anything the transcript
-    /// did keep is used instead, rather than recording the prompt twice. Success is unaffected:
-    /// its messages come from the transcript.
+    /// did keep is used too, with the prompt added only when no user entry was kept, so it is
+    /// never recorded twice. Success is unaffected: its messages come from the transcript.
     ///
     /// The session's usage does keep the failed call's tokens. Python's `llm.failure` has no
     /// token fields, so they are only logged.
@@ -140,23 +140,26 @@ final class AppleAISession: @unchecked Sendable {
         transcriptCountBefore: Int,
         usageBefore: TokenTotals?
     ) {
-        let kept = session.transcript
-            .dropFirst(transcriptCountBefore)
-            .compactMap { $0.toRTSMessage() }
+        let kept = mergingConsecutiveAssistantMessages(
+            session.transcript
+                .dropFirst(transcriptCountBefore)
+                .compactMap { $0.toRTSMessage() }
+        )
+        // The prompt is added unless the transcript kept it, so a partial rollback that kept
+        // only tool entries still shows what was sent, first.
         let recorded: [RTSMessage]
-        if kept.isEmpty {
-            recorded = [
-                RTSMessage(
-                    id: UUID(),
-                    role: .user,
-                    content: .text(prompt),
-                    timestamp: startedAt,
-                    metadata: nil,
-                    runID: nil
-                )
-            ]
+        if kept.contains(where: { $0.role == .user }) {
+            recorded = kept
         } else {
-            recorded = mergingConsecutiveAssistantMessages(kept)
+            let sentPrompt = RTSMessage(
+                id: UUID(),
+                role: .user,
+                content: .text(prompt),
+                timestamp: startedAt,
+                metadata: nil,
+                runID: nil
+            )
+            recorded = [sentPrompt] + kept
         }
         log.debug("🍎 respond failed: recorded \(recorded.count) message(s), \(kept.count) kept by the transcript")
         if let before = usageBefore, let after = Self.sessionTokenTotals(of: session) {
