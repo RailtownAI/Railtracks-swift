@@ -100,6 +100,89 @@ public enum RTSEventFailure {
     public static func fields(from error: Error) -> (name: String, message: String) {
         (name: String(describing: type(of: error)), message: "\(error)")
     }
+
+    /// Where an `RTSError` was thrown, as `thrown at <file>:<line> in <function>`, or `nil` for
+    /// any other error, which carries no call site.
+    ///
+    /// Swift has no stack trace to offer, so this stands in for one: it is the `traceback` of
+    /// the node events and of the trace's failed-edge `output`. The file is `#fileID`, so
+    /// module-relative.
+    public static func callSite(of error: Error) -> String? {
+        guard let railtracksError = error as? RTSError else {
+            return nil
+        }
+        let context = railtracksError.context
+        return "thrown at \(context.file):\(context.line) in \(context.function)"
+    }
+}
+
+// MARK: - RTSEventFrame
+
+/// One frame of a failure's traceback.
+///
+/// Mirrors the Python engine's `Frame` (`events/node.py`). Swift records only an `RTSError`'s
+/// call site, so a failure has at most one frame, and `source` is always empty.
+public struct RTSEventFrame: Sendable, Equatable {
+    public let file: String
+    public let line: Int?
+    public let function: String
+    public let source: String
+
+    public init(file: String, line: Int?, function: String, source: String) {
+        self.file = file
+        self.line = line
+        self.function = function
+        self.source = source
+    }
+
+    /// The `{file, line, function, source}` object.
+    public func encoded() -> RTSValue {
+        .object([
+            "file": .string(file),
+            "line": line.map { .number(Double($0)) } ?? .null,
+            "function": .string(function),
+            "source": .string(source),
+        ])
+    }
+}
+
+// MARK: - RTSEventFailureDetails
+
+/// The failure fields `node.failure` and `node.destruction` carry for an error.
+///
+/// Mirrors the Python engine's `failure_details(exc)` (`events/node.py`). Both events take
+/// their values from one of these, so a node's two events agree by construction.
+public struct RTSEventFailureDetails: Sendable, Equatable {
+    public let exceptionName: String
+    public let exceptionMessage: String
+    /// ``RTSEventFailure/callSite(of:)``, or `""` for an error with none: Python's default.
+    public let traceback: String
+    /// One frame for an `RTSError`'s call site, outermost first as in Python; otherwise empty.
+    public let frames: [RTSEventFrame]
+    /// Python's `is_fatal(exc)`: the error's own fatal flag, not the run's `endOnError`. Always
+    /// `false`, since Swift has no fatal-error marker yet.
+    public let fatal: Bool
+
+    public init(_ error: Error) {
+        let fields = RTSEventFailure.fields(from: error)
+        self.exceptionName = fields.name
+        self.exceptionMessage = fields.message
+        self.traceback = RTSEventFailure.callSite(of: error) ?? ""
+        if let railtracksError = error as? RTSError {
+            let context = railtracksError.context
+            self.frames = [
+                RTSEventFrame(
+                    file: context.file,
+                    line: Int(context.line),
+                    function: context.function,
+                    source: ""
+                )
+            ]
+        } else {
+            self.frames = []
+        }
+        self.fatal = false
+    }
 }
 
 // MARK: - RTSValue nullable helpers

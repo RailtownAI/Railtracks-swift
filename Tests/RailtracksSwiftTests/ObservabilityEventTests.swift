@@ -293,9 +293,39 @@ extension RailtracksSwiftTestSuite {
             #expect(payload["exception_name"] == .string("RTSError"))
             // Matches how `RTSNodeInvoker` stringifies errors — no call-site context.
             #expect(payload["exception_message"] == .string("\(error)"))
+            // Python's `failure_details` fields. Swift has no stack trace, so an `RTSError`'s
+            // call site stands in: the trace's failed-edge text, and one frame.
+            let context = error.context
+            #expect(
+                payload["traceback"]
+                    == .string("thrown at \(context.file):\(context.line) in \(context.function)")
+            )
+            #expect(payload["frames"] == .array([
+                .object([
+                    "file": .string(context.file),
+                    "line": .number(Double(context.line)),
+                    "function": .string(context.function),
+                    "source": .string(""),
+                ]),
+            ]))
+            #expect(payload["fatal"] == .bool(false))
         }
 
-        @Test("node.destruction carries the response and duration")
+        @Test("node.failure from another error has an empty traceback and no frames")
+        func nodeFailureFromAnotherError() {
+            let event = RTSNodeFailureEvent.from(
+                error: URLError(.badServerResponse),
+                parent: .node(nodeID: "n1"),
+                spatialParent: .noParent
+            )
+            let payload = event.encodePayload()
+            // No call site to report: Python's defaults.
+            #expect(payload["traceback"] == .string(""))
+            #expect(payload["frames"] == .array([]))
+            #expect(payload["fatal"] == .bool(false))
+        }
+
+        @Test("node.destruction carries the response, duration and a success status")
         func nodeDestructionPayload() {
             let event = RTSNodeDestructionEvent(
                 parent: .node(nodeID: "n1"),
@@ -309,10 +339,42 @@ extension RailtracksSwiftTestSuite {
                 Set(payload.keys) == [
                     "timestamp", "spatial_parent_type", "spatial_parent_node_id",
                     "parent_type", "parent_node_id", "response", "duration_seconds",
+                    "status", "exception_name", "exception_message", "traceback", "frames",
+                    "fatal",
                 ]
             )
             #expect(payload["duration_seconds"] == .number(1.5))
             #expect(payload["response"] == .object(["sum": .number(3)]))
+            // Python always writes the failure keys: `null` on success, and `fatal` false.
+            #expect(payload["status"] == .string("success"))
+            for key in ["exception_name", "exception_message", "traceback", "frames"] {
+                #expect(payload[key] == .null, "\(key) should be null on success")
+            }
+            #expect(payload["fatal"] == .bool(false))
+        }
+
+        @Test("node.destruction on failure carries the same details as node.failure")
+        func nodeDestructionOnFailure() {
+            let error = RTSError.invalidInvocation("Division by zero")
+            let failure = RTSNodeFailureEvent.from(
+                error: error,
+                parent: .node(nodeID: "n1"),
+                spatialParent: .noParent
+            )
+            let destruction = RTSNodeDestructionEvent(
+                parent: .node(nodeID: "n1"),
+                spatialParent: .noParent,
+                response: nil,
+                durationSeconds: 0.1,
+                failure: RTSEventFailureDetails(error)
+            )
+            let failurePayload = failure.encodePayload()
+            let destructionPayload = destruction.encodePayload()
+            #expect(destructionPayload["status"] == .string("failure"))
+            #expect(destructionPayload["response"] == .null)
+            for key in ["exception_name", "exception_message", "traceback", "frames", "fatal"] {
+                #expect(destructionPayload[key] == failurePayload[key], "\(key) should match")
+            }
         }
 
         // MARK: - Session events
@@ -468,7 +530,13 @@ extension RailtracksSwiftTestSuite {
                 "parent_type": "node",
                 "parent_node_id": "node-1",
                 "response": {"answer": "42"},
-                "duration_seconds": 0.5
+                "duration_seconds": 0.5,
+                "status": "success",
+                "exception_name": null,
+                "exception_message": null,
+                "traceback": null,
+                "frames": null,
+                "fatal": false
               }
             }
             """
