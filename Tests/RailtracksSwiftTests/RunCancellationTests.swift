@@ -6,6 +6,7 @@
 import Combine
 import Foundation
 import FoundationModels
+import Synchronization
 import Testing
 @testable import RailtracksSwift
 
@@ -768,6 +769,36 @@ private final class CheckedFlag: @unchecked Sendable {
     }
 }
 
+/// Collects the node finish events an invoker publishes, for tests that drive `RTSNodeInvoker`
+/// directly. The invoker sends them synchronously, so they're all here when the call returns.
+///
+/// Not `Sendable`: it stays in the test's task. The events are behind a `Mutex` because the invoker
+/// publishes them from whichever task finishes the node.
+private final class FinishEventRecorder {
+    private let events = Mutex<[RTSNodeEvent]>([])
+    private var subscription: AnyCancellable?
+
+    init(_ invoker: RTSNodeInvoker) {
+        subscription = invoker.nodeInvokeEventPublisher.sink { [weak self] event in
+            self?.events.withLock { $0.append(event) }
+        }
+    }
+
+    /// The finish event of the node named `nodeName`.
+    func finishEvent(of nodeName: String) -> RTSNodeEvent? {
+        events.withLock { events in
+            events.first { $0.name == nodeName }
+        }
+    }
+}
+
+/// A guardrail check that runs until its task is cancelled and then throws `CancellationError`,
+/// the way a model-based guardrail does when FoundationModels sees the cancel.
+private func checkUntilCancelled(started: StartSignal) async throws {
+    started.fire()
+    try await Task.sleep(for: .seconds(30))
+}
+
 extension RailtracksSwiftTestSuite {
     @Suite("Guardrails and run stops", .serialized)
     struct GuardrailRunStopTests {
@@ -849,6 +880,225 @@ extension RailtracksSwiftTestSuite {
             #expect(nodeName == "Guarded")
             guard case .guardrailBlocked? = underlying as? RTSError else {
                 Issue.record("expected the guardrail block as the underlying error, got \(underlying)")
+                return
+            }
+        }
+
+        /// Calls `agent` in a task, cancels it once `started` fires, and returns what it threw.
+        /// `beforeCancel` runs just before the cancel, for a test that records a stop reason first,
+        /// as a timeout does.
+        private func cancelWhileGuardrailRuns(
+            _ agent: RTSAgent,
+            invoker: RTSNodeInvoker,
+            session: RTSLLMSession,
+            started: StartSignal,
+            beforeCancel: () -> Void = {}
+        ) async -> Error? {
+            let call = Task {
+                try await invoker.invokeAgent(
+                    agent,
+                    input: ["prompt": .string("hi")],
+                    session: session
+                )
+            }
+            await started.wait()
+            beforeCancel()
+            call.cancel()
+            do {
+                _ = try await call.value
+                return nil
+            } catch {
+                return error
+            }
+        }
+
+        /// A cancel while an input guardrail runs makes the guardrail throw the provider's error.
+        /// The node reports the stop, not that raw error, and the guardrail's own trace keeps it.
+        @Test("a cancel during an input guardrail reports the stop")
+        func cancelDuringInputGuardrail() async throws {
+            let started = StartSignal()
+            let slowCheck = RTSClosureInputGuardrail(name: "slowCheck") { _ in
+                try await checkUntilCancelled(started: started)
+                return .allow()
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                inputGuardrails: [slowCheck]
+            )
+            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let recorder = FinishEventRecorder(invoker)
+
+            let thrown = await cancelWhileGuardrailRuns(
+                agent,
+                invoker: invoker,
+                session: stubSession(after: .zero),
+                started: started
+            )
+
+            #expect(
+                isCancelledRun(thrown),
+                "expected runTerminated(cancelled), got \(String(describing: thrown))"
+            )
+            let finish = try #require(recorder.finishEvent(of: "Guarded"))
+            #expect(
+                isCancelledState(RTSFlow.finishedState(of: finish)),
+                "the node should finish .cancelled"
+            )
+            let trace = try #require(finish.guardTraces.first)
+            #expect(trace.action == "error")
+            #expect(trace.metadata?["exception_type"] == .string("CancellationError"))
+        }
+
+        /// Under endOnError, a user cancel during a guardrail is still a cancel: the guardrail's
+        /// error must not record an end-on-error stop, which would win over the cancel.
+        @Test("a cancel during a guardrail doesn't trigger endOnError")
+        func cancelDuringGuardrailUnderEndOnError() async throws {
+            let started = StartSignal()
+            let slowCheck = RTSClosureInputGuardrail(name: "slowCheck") { _ in
+                try await checkUntilCancelled(started: started)
+                return .allow()
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                inputGuardrails: [slowCheck]
+            )
+            let stop = RTSRunStop(endsOnError: true)
+            let invoker = RTSNodeInvoker(
+                stampFactory: RTSStampFactory(),
+                sessionID: UUID(),
+                runStop: stop
+            )
+
+            let thrown = await cancelWhileGuardrailRuns(
+                agent,
+                invoker: invoker,
+                session: stubSession(after: .zero),
+                started: started
+            )
+
+            #expect(
+                isCancelledRun(thrown),
+                "expected runTerminated(cancelled), got \(String(describing: thrown))"
+            )
+            #expect(
+                stop.reason == nil,
+                "no end-on-error stop should be recorded, got \(String(describing: stop.reason))"
+            )
+        }
+
+        /// The same for an output guardrail: the body returned before the cancel, so the check
+        /// before output guardrails passes, and the cancel arrives while one runs.
+        @Test("a cancel during an output guardrail reports the stop")
+        func cancelDuringOutputGuardrail() async throws {
+            let started = StartSignal()
+            let slowCheck = RTSClosureOutputGuardrail(name: "slowCheck") { _ in
+                try await checkUntilCancelled(started: started)
+                return .allow()
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                outputGuardrails: [slowCheck]
+            )
+            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let recorder = FinishEventRecorder(invoker)
+
+            let thrown = await cancelWhileGuardrailRuns(
+                agent,
+                invoker: invoker,
+                session: stubSession(after: .zero),
+                started: started
+            )
+
+            #expect(
+                isCancelledRun(thrown),
+                "expected runTerminated(cancelled), got \(String(describing: thrown))"
+            )
+            let finish = try #require(recorder.finishEvent(of: "Guarded"))
+            #expect(
+                isCancelledState(RTSFlow.finishedState(of: finish)),
+                "the node should finish .cancelled"
+            )
+        }
+
+        /// A timeout records its reason and then cancels. A guardrail running at that moment
+        /// reports the timeout, and the node finishes `.cancelled`.
+        @Test("a timeout during a guardrail reports the timeout")
+        func timeoutDuringGuardrail() async throws {
+            let started = StartSignal()
+            let slowCheck = RTSClosureInputGuardrail(name: "slowCheck") { _ in
+                try await checkUntilCancelled(started: started)
+                return .allow()
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                inputGuardrails: [slowCheck]
+            )
+            let stop = RTSRunStop()
+            let invoker = RTSNodeInvoker(
+                stampFactory: RTSStampFactory(),
+                sessionID: UUID(),
+                runStop: stop
+            )
+            let recorder = FinishEventRecorder(invoker)
+
+            let thrown = await cancelWhileGuardrailRuns(
+                agent,
+                invoker: invoker,
+                session: stubSession(after: .zero),
+                started: started,
+                beforeCancel: {
+                    _ = stop.request(.timeout(after: 1))
+                }
+            )
+
+            guard case .timeout? = RTSRunCancellation.terminationReason(of: thrown) else {
+                Issue.record("expected runTerminated(timeout), got \(String(describing: thrown))")
+                return
+            }
+            let finish = try #require(recorder.finishEvent(of: "Guarded"))
+            #expect(
+                isCancelledState(RTSFlow.finishedState(of: finish)),
+                "the node should finish .cancelled"
+            )
+        }
+
+        /// With no stop, a guardrail's own error passes through unchanged and the node is `.failed`.
+        @Test("a guardrail error with no stop passes through")
+        func guardrailErrorWithoutAStopPassesThrough() async throws {
+            let failingCheck = RTSClosureInputGuardrail(name: "failingCheck") { _ in
+                throw BoomError()
+            }
+            let agent = RTSAgent(
+                llmProvider: .openAI(modelIDString: "gpt-4o"),
+                name: "Guarded",
+                inputGuardrails: [failingCheck]
+            )
+            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let recorder = FinishEventRecorder(invoker)
+
+            var thrown: Error?
+            do {
+                _ = try await invoker.invokeAgent(
+                    agent,
+                    input: ["prompt": .string("hi")],
+                    session: stubSession(after: .zero)
+                )
+            } catch {
+                thrown = error
+            }
+
+            #expect(
+                thrown is BoomError,
+                "expected the guardrail's own error, got \(String(describing: thrown))"
+            )
+            let finish = try #require(recorder.finishEvent(of: "Guarded"))
+            let state = RTSFlow.finishedState(of: finish)
+            guard case .failed = state else {
+                Issue.record("the node should finish .failed, got \(state)")
                 return
             }
         }

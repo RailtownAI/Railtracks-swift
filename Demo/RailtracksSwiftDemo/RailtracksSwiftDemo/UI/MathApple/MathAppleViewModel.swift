@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 import FoundationModels
 import RailtracksSwift
 import Logging
@@ -16,12 +17,24 @@ import Logging
 class MathAppleViewModel {
     let prompt: String = MathToolsPrompt.prompt
     var promptResult: String = ""
+    var nodeStatusLines: [String] = []
     var isRunning = false
+    /// The task awaiting `flow.run`. Cancelling it is how a run is stopped.
+    private var runTask: Task<Void, Never>?
+    /// When Stop was pressed, to report how long the on-device model took to stop.
+    private var stopPressedAt: ContinuousClock.Instant?
+
+    func stopPrompt() {
+        stopPressedAt = ContinuousClock.now
+        runTask?.cancel()
+    }
 
     func startPrompt() {
         let prompt = self.prompt
+        nodeStatusLines = []
+        stopPressedAt = nil
         isRunning = true
-        Task { [weak self] in
+        runTask = Task { [weak self] in
             defer { self?.isRunning = false }
             switch SystemLanguageModel.default.availability {
             case .available:
@@ -61,9 +74,42 @@ class MathAppleViewModel {
                 systemMessage: MathToolsPrompt.systemMessage
             )
 
+            var cancellables = Set<AnyCancellable>()
+            flow.nodeStatusPublisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] status in
+                    let label: String
+                    switch status.state {
+                    case .queued:
+                        return
+                    case .executing:
+                        label = "⏳ \(status.nodeName)"
+                    case .completed:
+                        label = "✅ \(status.nodeName)"
+                    case .failed(let error):
+                        label = "❌ \(status.nodeName): \(error)"
+                    case .cancelled:
+                        label = "🛑 \(status.nodeName): cancelled"
+                    }
+                    self?.nodeStatusLines.append(label)
+                }
+                .store(in: &cancellables)
+
             Log.debug("starting prompt, waiting for response...")
-            self?.promptResult = (try? await flow.run(agent: agent, prompt: prompt, gateway: gateway)) ?? "n/a"
-            Log.debug("obtained prompt result")
+            do {
+                self?.promptResult = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+                Log.debug("obtained prompt result")
+            } catch {
+                // A Stop arrives here as `runTerminated(reason: cancelled)`, after the trace and
+                // events are written.
+                var result = "Stopped: \(error)"
+                if let stopPressedAt = self?.stopPressedAt {
+                    let stopTime = ContinuousClock.now - stopPressedAt
+                    result += "\nStopped \(stopTime.formatted(.units(allowed: [.milliseconds]))) after Stop"
+                }
+                self?.promptResult = result
+                Log.debug("math AppleAI run ended with \(error)")
+            }
         }
     }
 }

@@ -328,6 +328,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
                     try await execute(runID, workingInput)
                 }
             } catch {
+                // Normalized here, not only where the outcome becomes final below, because
+                // `emitLLMEvents` reads it first: `llm.failure` must report the same error as
+                // `node.failure`.
                 invokeError = RTSRunCancellation.normalized(error, stopReason: runStop.reason)
                 output = [:]
                 log.error("☠️ [\(node.name())] invocation failed: \(error)")
@@ -362,6 +365,14 @@ public class RTSNodeInvoker: @unchecked Sendable {
         // The outcome is final here, whichever of guardrails or body produced the error. Under
         // `endOnError`, a failure stops the run before this node's finish events go out, so its
         // siblings see the stop as early as possible.
+        //
+        // Normalized first: a guardrail that was running when the run stopped throws whatever its
+        // provider throws on cancel, and only a `runTerminated` is recognized as a stop. Otherwise
+        // the node reads as failed, and under `endOnError` its error would record an end-on-error
+        // stop that wins over the cancel. The guardrail's own trace and events keep the raw error.
+        invokeError = invokeError.map { error in
+            RTSRunCancellation.normalized(error, stopReason: runStop.reason)
+        }
         if let invokeError {
             runStop.nodeFailed(name: node.name(), error: invokeError)
         }
