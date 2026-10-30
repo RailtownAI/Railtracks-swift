@@ -224,6 +224,12 @@ creates one flow per judge call (`metrics × datapoints × agents`), and it alre
 The writer closes its file on each `session.completed` and re-arms, so repeated runs on one flow
 append to a single file. `finish()` is terminal and is meant for app-owned writers only.
 
+`llm.*` events are rebuilt from the messages a call left behind (`RTSLLMEventEmission`), one
+creation / invocation / response per round trip. A failed call adds its own creation / invocation /
+failure, so the failure always names its model, even with no completed round trip. A failed
+FoundationModels `respond` rolls its transcript back, losing every round trip of that call, so
+`AppleAISession` records the prompt it sent instead (`recordFailedSend`).
+
 Design rationale, the Python mapping, and the verification runs live in `docs/observability-events.md`.
 
 ### RAG / retrieval (`RailtracksSwiftRAG`)

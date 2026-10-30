@@ -1152,6 +1152,58 @@ extension RailtracksSwiftTestSuite {
             #expect(stopTime < .seconds(5), "the run should stop promptly after cancel, took \(stopTime)")
         }
 
+        /// A cancelled on-device `respond` rolls its transcript back, so the failure's events come
+        /// from what `AppleAISession` recorded: an `llm.creation` naming the model, and an
+        /// `llm.invocation` whose `message_input` holds the prompt that was sent. Skips when the
+        /// on-device model is unavailable.
+        @Test("a cancelled live AppleAI run names its model and keeps its prompt")
+        func cancelledLiveAppleAIRunKeepsItsPrompt() async throws {
+            guard #available(macOS 26, iOS 26, *) else {
+                print("⏭️  live AppleAI failure events skipped — requires macOS 26 / iOS 26.")
+                return
+            }
+            let availability = SystemLanguageModel.default.availability
+            guard case .available = availability else {
+                print("⏭️  live AppleAI failure events skipped — model unavailable: \(availability).")
+                return
+            }
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+
+            let prompt = "Write a detailed 1500-word essay on the history of railways."
+            let agent = RTSAgent(llmProvider: .appleAI, name: "Essayist")
+            let flow = RTSFlow(title: "CancelLiveAppleAIEvents", savesTrace: false)
+            let recorder = EventRecorder(flow.eventPublisher)
+            let run = Task {
+                try await flow.run(
+                    agent: agent,
+                    prompt: prompt,
+                    gateway: RTSLLMGateway(apiKeys: [:])
+                )
+            }
+            try await Task.sleep(for: .seconds(1))
+            run.cancel()
+            _ = try? await run.value
+
+            let failure = try #require(recorder.first(ofType: "llm.failure"))
+            let creation = try #require(
+                recorder.first(ofType: "llm.creation"),
+                "the failure should name its model through an llm.creation"
+            )
+            #expect(creation.payload["llm_id"] == failure.payload["parent_llm_type_id"])
+            #expect(creation.payload["model_name"] != nil)
+            let invocation = try #require(recorder.first(ofType: "llm.invocation"))
+            let messageInput = invocation.payload["message_input"]
+            guard case .array(let messages)? = messageInput else {
+                Issue.record("expected message_input, got \(String(describing: messageInput))")
+                return
+            }
+            let sentPrompt = RTSValue.object(["role": .string("user"), "content": .string(prompt)])
+            #expect(
+                messages.contains(sentPrompt),
+                "message_input should hold the prompt: \(messages)"
+            )
+        }
+
         /// A real on-device generation that outlasts the flow's timeout is stopped at the deadline
         /// and reports the timeout. Skips when the on-device model is unavailable.
         @Test("a live AppleAI run past its timeout stops promptly")

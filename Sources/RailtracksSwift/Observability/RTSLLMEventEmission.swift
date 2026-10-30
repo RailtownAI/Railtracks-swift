@@ -23,12 +23,13 @@ import Foundation
 ///   events from that same send. Timestamps interleave correctly; arrival order does not.
 ///   A consumer must sort by `stamp`.
 /// - A round trip that failed and was retried inside Conduit leaves no message and no error,
-///   so it is invisible. A terminal failure is reported, but as one event for the whole
-///   `send()` rather than attributed to a particular trip.
+///   so it is invisible. A terminal failure is reported, but as one creation / invocation /
+///   failure for the whole `send()` rather than attributed to a particular trip.
 enum RTSLLMEventEmission {
 
     /// Emits `llm.creation` / `llm.invocation` / `llm.response` per reconstructed round trip,
-    /// plus a single `llm.failure` when the invocation ended in an error.
+    /// plus `llm.creation` / `llm.invocation` / `llm.failure` when the invocation ended in an
+    /// error.
     ///
     /// - Parameters:
     ///   - messages: the session's messages for this invocation, already filtered by `runID`.
@@ -102,18 +103,43 @@ enum RTSLLMEventEmission {
         // its `LLMFailureEvent` comes only from inside the model call.
         //
         // Safe as a proxy because Conduit appends the user message *before* contacting the
-        // provider, and `RTSLLMSession` publishes what accumulated when a send throws — so a
-        // real model failure always leaves at least one message behind.
-        guard let error, !messages.isEmpty else {
+        // provider, `AppleAISession` records the prompt itself when a `respond` throws, and
+        // `RTSLLMSession` publishes what accumulated when a send throws — so a real model
+        // failure always leaves at least one message behind.
+        guard let error, let lastMessage = messages.last else {
             return
         }
         // One failure for the whole send. The round trip that actually threw left no
         // assistant message, so it cannot be told apart from the ones that succeeded before
         // it; `message_input` is therefore everything accumulated when the error surfaced.
+        //
+        // It gets its own creation and invocation, as Python's failure follows the two it
+        // emits before every call. Without the creation, a failure with no completed round
+        // trip (a first request that failed, or any failed FoundationModels `respond`, whose
+        // transcript is rolled back) would point to an `llm_id` nothing defines, and nothing
+        // would say which model failed. Both are stamped when the failing request went out:
+        // the last recorded message's time.
+        let parent = RTSEventParent.llm(llmTypeID: llmID, llmInvokeID: UUID().uuidString)
+        emitter.emit(
+            RTSLLMCreationEvent(
+                llmID: llmID,
+                modelProvider: modelProvider,
+                modelName: modelName,
+                timestamp: lastMessage.timestamp
+            )
+        )
+        emitter.emit(
+            RTSLLMInvocationEvent(
+                parent: parent,
+                spatialParent: spatialParent,
+                messageInput: messages,
+                timestamp: lastMessage.timestamp
+            )
+        )
         emitter.emit(
             RTSLLMFailureEvent.from(
                 error: error,
-                parent: .llm(llmTypeID: llmID, llmInvokeID: UUID().uuidString),
+                parent: parent,
                 spatialParent: spatialParent,
                 messageInput: messages
             )
