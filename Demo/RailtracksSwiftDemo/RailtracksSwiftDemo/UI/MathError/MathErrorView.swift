@@ -25,6 +25,10 @@ struct MathErrorView: View {
                 }
                 .disabled(viewModel.isRunning)
                 .buttonStyle(.bordered)
+
+                Toggle("End on error", isOn: $viewModel.endOnError)
+                    .fixedSize()
+                    .disabled(viewModel.isRunning)
             }
 
             VStack {

@@ -71,30 +71,41 @@ final class AppleAISession: @unchecked Sendable {
         let startedAt = Date()
         let responseText: String
         let metrics: AppleAIResponse
-        if let schema = outputSchema {
-            let response = try await currentSession.respond(to: prompt, schema: schema)
-            responseText = response.content.jsonString
-            metrics = responseMetrics(
-                from: response,
-                text: responseText,
-                startedAt: startedAt,
-                sessionUsage: (
-                    before: usageBefore,
-                    after: Self.sessionTokenTotals(of: currentSession)
+        do {
+            if let schema = outputSchema {
+                let response = try await currentSession.respond(to: prompt, schema: schema)
+                responseText = response.content.jsonString
+                metrics = responseMetrics(
+                    from: response,
+                    text: responseText,
+                    startedAt: startedAt,
+                    sessionUsage: (
+                        before: usageBefore,
+                        after: Self.sessionTokenTotals(of: currentSession)
+                    )
                 )
-            )
-        } else {
-            let response = try await currentSession.respond(to: prompt)
-            responseText = response.content
-            metrics = responseMetrics(
-                from: response,
-                text: responseText,
-                startedAt: startedAt,
-                sessionUsage: (
-                    before: usageBefore,
-                    after: Self.sessionTokenTotals(of: currentSession)
+            } else {
+                let response = try await currentSession.respond(to: prompt)
+                responseText = response.content
+                metrics = responseMetrics(
+                    from: response,
+                    text: responseText,
+                    startedAt: startedAt,
+                    sessionUsage: (
+                        before: usageBefore,
+                        after: Self.sessionTokenTotals(of: currentSession)
+                    )
                 )
+            }
+        } catch {
+            recordFailedSend(
+                prompt: prompt,
+                startedAt: startedAt,
+                session: currentSession,
+                transcriptCountBefore: beforeCount,
+                usageBefore: usageBefore
             )
+            throw error
         }
         let converted = currentSession.transcript
             .dropFirst(beforeCount)
@@ -108,6 +119,56 @@ final class AppleAISession: @unchecked Sendable {
             _messages.append(contentsOf: newMessages)
         }
         return metrics
+    }
+
+    /// Records what a failed `respond` leaves behind, so the failure's `llm.*` events show what
+    /// was sent.
+    ///
+    /// A failed `respond` rolls its transcript back: measured on the system model, a cancel during
+    /// the second of two tool calls left only the instructions entry, losing the prompt, the first
+    /// call and its output. So the prompt is recorded from what was sent, stamped `startedAt`,
+    /// when it was sent. The rollback is measured, not documented, so anything the transcript
+    /// did keep is used too, with the prompt added only when no user entry was kept, so it is
+    /// never recorded twice. Success is unaffected: its messages come from the transcript.
+    ///
+    /// The session's usage does keep the failed call's tokens. Python's `llm.failure` has no
+    /// token fields, so they are only logged.
+    private func recordFailedSend(
+        prompt: String,
+        startedAt: Date,
+        session: LanguageModelSession,
+        transcriptCountBefore: Int,
+        usageBefore: TokenTotals?
+    ) {
+        let kept = mergingConsecutiveAssistantMessages(
+            session.transcript
+                .dropFirst(transcriptCountBefore)
+                .compactMap { $0.toRTSMessage() }
+        )
+        // The prompt is added unless the transcript kept it, so a partial rollback that kept
+        // only tool entries still shows what was sent, first.
+        let recorded: [RTSMessage]
+        if kept.contains(where: { $0.role == .user }) {
+            recorded = kept
+        } else {
+            let sentPrompt = RTSMessage(
+                id: UUID(),
+                role: .user,
+                content: .text(prompt),
+                timestamp: startedAt,
+                metadata: nil,
+                runID: nil
+            )
+            recorded = [sentPrompt] + kept
+        }
+        log.debug("🍎 respond failed: recorded \(recorded.count) message(s), \(kept.count) kept by the transcript")
+        if let before = usageBefore, let after = Self.sessionTokenTotals(of: session) {
+            let used = TokenTotals(input: after.input - before.input, output: after.output - before.output)
+            log.debug("🍎 the failed respond used \(used); not reported, llm.failure has no token fields")
+        }
+        lock.withLock {
+            _messages.append(contentsOf: recorded)
+        }
     }
 
     /// Input and output token totals, in a type this OS 26 class can hold —

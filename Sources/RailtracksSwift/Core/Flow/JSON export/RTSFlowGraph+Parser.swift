@@ -136,15 +136,18 @@ extension RTSFlowGraph {
 
     private static func makeEdgeDetails(from event: RTSEdgeEvent, status: RTSFlowStatus) -> RTSFlowGraphEdgeDetails {
         let inputKwargs: [String: RTSGeneratedContent] = (event.input ?? [:]).mapValues { $0.toGeneratedContent() }
-        let output: RTSEdgeOutput = switch event.nodeType {
-        case .tool, .function:
-            if let error = event.error {
-                .structured(RTSGeneratedContent(kind: .string("ERROR: \(error)")))
-            } else {
+        // A failed edge, of any node type, writes Python's `Failure.encode` object, so the v1
+        // visualizer shows its error panel. A creation snapshot has no failure and keeps the
+        // success shape.
+        let output: RTSEdgeOutput = if let failure = event.failure {
+            .structured(failure.traceContent)
+        } else {
+            switch event.nodeType {
+            case .tool, .function:
                 .structured(event.output.map { RTSGeneratedContent(kind: .structure($0.mapValues { $0.toGeneratedContent() })) })
+            case .agent:
+                .agentStatus("Success")
             }
-        case .agent:
-            .agentStatus(event.error.map { "ERROR: \($0)" } ?? "Success")
         }
         return RTSFlowGraphEdgeDetails(
             inputArgs: [],

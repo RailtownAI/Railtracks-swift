@@ -146,12 +146,16 @@ flow.nodeStatusPublisher
     .receive(on: DispatchQueue.main)
     .sink { status in
         switch status.state {
-        case .executing: 
+        case .queued:
+            print("🕒 \(status.nodeName)")
+        case .executing:
             print("⏳ \(status.nodeName)")
-        case .completed: 
+        case .completed:
             print("✅ \(status.nodeName)")
-        case .failed(let error): 
+        case .failed(let error):
             print("❌ \(status.nodeName): \(error)")
+        case .cancelled:
+            print("🛑 \(status.nodeName)")
         }
     }
     .store(in: &cancellables)
@@ -160,6 +164,8 @@ let result = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
 ```
 
 `nodeStatusPublisher` emits for every node — agents, tools, and sub-agents — using the same `runID`-stamped event infrastructure as the JSON trace. Subscribe before calling `run` to capture all events.
+
+A node is `.cancelled` when the run was stopped while it was running or before it started: by cancelling the task that awaits `run`, by the flow's timeout, or by another node failing under `endOnError` (see [Stopping a run](#stopping-a-run)). A node that fails with its own error is `.failed`.
 
 ### RTSAgent
 
@@ -458,8 +464,108 @@ public enum RTSError: Error {
         reason: String,
         context: RTSErrorContext
     )
+    case runTerminated(reason: RTSRunTerminationReason, context: RTSErrorContext)
+}
+
+public enum RTSRunTerminationReason: Sendable {
+    case cancelled                                          // the task running the flow was cancelled
+    case timeout(after: TimeInterval)                       // the flow's timeout elapsed
+    case endOnError(nodeName: String, underlying: any Error) // a node failed under endOnError
 }
 ```
+
+### Stopping a run
+
+Cancel the Swift `Task` that awaits `flow.run`, for example from a Stop button:
+
+```swift
+let run = Task {
+    try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+}
+
+// Later, when the user taps Stop:
+run.cancel()
+
+do {
+    let answer = try await run.value
+} catch let RTSError.runTerminated(reason, _) {
+    // reason == .cancelled
+}
+```
+
+- **One error, whatever the provider.** Anything thrown because of the cancellation
+  (`CancellationError`, `URLError.cancelled`, a provider's own error) is reported as
+  `RTSError.runTerminated(reason: .cancelled)`. A `CancellationError` your own code throws while the
+  run was not cancelled comes through as itself.
+- **The run stops at the next node at the latest.** Provider calls stop straight away when they
+  honour cancellation (Conduit's network calls and on-device generation do). Tool code that never
+  checks for cancellation finishes its current call, but no further node runs.
+- **The trace is still written.** A cancelled run writes its trace (status `Failed`, with the
+  reason in the error text) and `session.completed` before `run` returns. `session.completed`
+  carries `termination_reason: "cancelled"` and `fatal: false`.
+- **Nodes report `.cancelled`.** On `nodeStatusPublisher`, the nodes the stop cut short report
+  `.cancelled` rather than `.failed`.
+- **Not reported as an error.** A cancelled run isn't sent to RailtownLogger error reporting.
+
+#### Timeout
+
+Give the flow a limit, in seconds, and any run that outlasts it is stopped:
+
+```swift
+let flow = RTSFlow(title: "Support", timeout: 30)
+
+do {
+    let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+} catch let RTSError.runTerminated(reason, _) {
+    // reason == .timeout(after: 30)
+}
+```
+
+- **Stopped the same way as a cancel.** At the deadline the run is cancelled, and `run` waits for
+  it to unwind before throwing `.timeout(after:)`. Everything above applies: no node starts after
+  the deadline, the trace and `session.completed` are written, and the nodes cut short report
+  `.cancelled`.
+- **Tools should honour cancellation.** A node body that ignores it finishes its current call
+  before the run can return, so `run` can come back later than the deadline.
+- **The clock** runs from invoking the root node until it finishes, for each run on the flow. The
+  default, `nil`, is no limit, and so is a value that can't be timed: `.infinity`, NaN, or more
+  than about 31 years.
+- **Adjustable between runs.** Set `flow.timeout` at any time. Each run reads it when it starts, so
+  the change applies to runs started afterwards; a run already going keeps its deadline.
+- **Reported as a stop.** `session.started` carries the `timeout`. `session.completed` carries
+  `termination_reason: "timeout"` and `fatal: false`: as in Python, a timeout on its own isn't
+  fatal. A timed-out run is sent to RailtownLogger error reporting.
+- **Cancelling first wins.** Cancelling the task before the deadline reports `.cancelled`; a
+  cancel that arrives while a timed-out run is unwinding doesn't change it from `.timeout`.
+
+#### End on error
+
+Set `endOnError` and the first node to fail stops the whole run:
+
+```swift
+let flow = RTSFlow(title: "Support", endOnError: true)
+
+do {
+    let answer = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
+} catch let RTSError.runTerminated(.endOnError(nodeName, underlying), _) {
+    // nodeName is the node that failed, underlying its error
+}
+```
+
+- **Every failure counts**, wherever it happens: a tool or agent throwing, or a guardrail
+  blocking or throwing. A node cut short by the stop doesn't count again.
+- **Parallel work stops too.** Nodes still running alongside the failed one, such as `async let`
+  children or parallel tool calls, are cancelled, and no node starts afterwards. Without
+  `endOnError` they would run to the end.
+- **A caught failure still fails the run.** A parent that catches the error and carries on, or
+  even returns, doesn't save it: `run` throws `.endOnError` once any node failed. This includes the
+  root failing on its own.
+- **Reported as a stop.** The failed node is `.failed` with its own error; every node the stop cut
+  short is `.cancelled`. `session.started` carries `end_on_error: true`. `session.completed`
+  carries `termination_reason: "end_on_error"` and `fatal: true`, as in Python, where any failure
+  under `end_on_error` is fatal; a user cancel stays non-fatal.
+- **Adjustable between runs**, like `timeout`: set `flow.endOnError`, and each run reads it when it
+  starts. The default is `false`.
 
 ### Call-site context
 

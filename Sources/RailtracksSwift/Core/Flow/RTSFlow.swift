@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import Synchronization
 import RailtownLogger
 
 /// Representation of Agent node in Railtracks pipeline
@@ -14,6 +15,39 @@ public class RTSFlow: @unchecked Sendable {
     let id: UUID = UUID()
     let title: String
     let savesTrace: Bool
+    /// The most seconds a run may take, or `nil` for no limit. A run past it is cancelled and throws
+    /// `RTSError.runTerminated(reason: .timeout(after:))` once it has unwound.
+    ///
+    /// Adjustable between runs. Each run reads it once, when it starts, so a change affects runs
+    /// started afterwards; a run already going keeps the deadline it started with. A value that
+    /// can't be timed (NaN, infinity, or more than about 31 years) means no limit.
+    public var timeout: TimeInterval? {
+        get {
+            storedTimeout.withLock { $0 }
+        }
+        set {
+            storedTimeout.withLock { $0 = newValue }
+        }
+    }
+    /// Backs `timeout`. Locked because runs can overlap: one may read the value as it starts while
+    /// the app sets it from another thread.
+    private let storedTimeout: Mutex<TimeInterval?>
+    /// Whether the first node failure stops the whole run, running siblings included, even when a
+    /// parent would have caught the error. Such a run throws
+    /// `RTSError.runTerminated(reason: .endOnError(nodeName:underlying:))`, naming the node that
+    /// failed and carrying its error. Python's `end_on_error`.
+    ///
+    /// Adjustable between runs, like `timeout`: each run reads it once, when it starts.
+    public var endOnError: Bool {
+        get {
+            storedEndOnError.withLock { $0 }
+        }
+        set {
+            storedEndOnError.withLock { $0 = newValue }
+        }
+    }
+    /// Backs `endOnError`, locked for the same reason as `storedTimeout`.
+    private let storedEndOnError: Mutex<Bool>
     let signpostEmitter: any RTSSignpostEmitting
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never> = .init(nil)
     /// Publishes the outcome of the JSON trace write after each completed run.
@@ -37,7 +71,8 @@ public class RTSFlow: @unchecked Sendable {
     )
     /// Publishes a status event each time any node (agent or tool, including sub-agents) transitions
     /// state: `.queued` when it is created, `.executing` once its input guardrails have run and its
-    /// body starts, and `.completed` or `.failed` when it finishes.
+    /// body starts, and `.completed`, `.failed` or `.cancelled` when it finishes. `.cancelled` means
+    /// the run was stopped, by cancelling its task or by a timeout.
     ///
     /// Each status carries `parentNodeID` — the invocation that triggered it, `nil` at the flow root —
     /// so consumers can reconstruct the call tree. Ids are per-invocation, so a node invoked N times
@@ -134,15 +169,28 @@ public class RTSFlow: @unchecked Sendable {
     ///     `RAILTRACKS_DISABLE_EVENTS` is set. Set false to skip it entirely — payloads are
     ///     never built, so a flow with no event consumer pays no encoding cost.
     ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
+    ///   - timeout: The most seconds each run may take, from invoking its root node to that node
+    ///     finishing. At the deadline the run is cancelled, and `run` throws
+    ///     `RTSError.runTerminated(reason: .timeout(after:))` once it has unwound. No node starts
+    ///     after the deadline, but a node body that ignores cancellation finishes its current call
+    ///     first, so `run` can return later than the deadline. Defaults to `nil`, no limit, as in
+    ///     Python's `Flow(timeout=None)`.
+    ///   - endOnError: When true, the first node failure stops the whole run, running siblings
+    ///     included, and `run` throws `RTSError.runTerminated(reason: .endOnError(…))` naming that
+    ///     node. Guardrail blocks count. Defaults to `false`, as in Python.
     public init(
         title: String,
         savesTrace: Bool = true,
         savesEvents: Bool? = nil,
         emitsEvents: Bool = true,
-        signpostEmitter: (any RTSSignpostEmitting)? = nil
+        signpostEmitter: (any RTSSignpostEmitting)? = nil,
+        timeout: TimeInterval? = nil,
+        endOnError: Bool = false
     ) {
         self.title = title
         self.savesTrace = savesTrace
+        self.storedTimeout = Mutex(timeout)
+        self.storedEndOnError = Mutex(endOnError)
         self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
         // Held as a local as well: `self` cannot be used to reach the emitter until every
         // stored property is assigned, and the writer has to subscribe before `init` returns.
@@ -199,8 +247,9 @@ public class RTSFlow: @unchecked Sendable {
         systemMessage: String? = nil,
         images: [RTSImage] = []
     ) async throws -> String {
-        let startedAt = emitSessionStarted(entryPointName: agent.agentName)
-        let (nodeInvoker, collector, subscriptions) = await startCollecting()
+        let settings = currentRunSettings()
+        let startedAt = emitSessionStarted(entryPointName: agent.agentName, settings: settings)
+        let (nodeInvoker, collector, subscriptions) = await startCollecting(settings: settings)
         let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
             Task { await collector.subscribeMessage(session) }
         }
@@ -224,7 +273,7 @@ public class RTSFlow: @unchecked Sendable {
             )
             // This path exits before `awaitCompletion()`, so it needs its own completion
             // event — otherwise a failed session build would leave the run unbracketed.
-            emitSessionCompleted(startedAt: startedAt, error: error)
+            emitSessionCompleted(startedAt: startedAt, error: error, settings: settings)
             await flushEvents()
             throw error
         }
@@ -241,25 +290,24 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<String, Error>
         do {
-            let output = try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+            let output = try await withRunStops(settings, stop: nodeInvoker.runStop) { [input] in
+                try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+            }
             guard case let .string(result) = output[agent.outputKeyResult] else {
                 throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
             }
             outcome = .success(result)
         } catch {
-            outcome = .failure(error)
-            // Fire-and-forget upload to Conductr; no-op unless the app configured
-            // RailtownLogger with auto-capture enabled. The error rethrows unchanged below.
-            RailtownLogger.captureRailtracks(
+            let reported = RTSRunCancellation.normalized(
                 error,
-                flowTitle: title,
-                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
-                callSite: (error as? RTSError)?.railtownCallSite
+                stopReason: nodeInvoker.runStop.reason
             )
+            outcome = .failure(reported)
+            reportFailure(reported)
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
-        emitSessionCompleted(startedAt: startedAt, error: outcome.eventError)
+        emitSessionCompleted(startedAt: startedAt, error: outcome.eventError, settings: settings)
         // Emission is isolated from execution, so the backlog is joined here rather than
         // interleaved with the run: subscribers cannot slow a node down, and the stream is
         // still complete by the time `run` returns.
@@ -277,8 +325,9 @@ public class RTSFlow: @unchecked Sendable {
         input: RTSInput,
         gateway: RTSLLMGateway
     ) async throws -> RTSOutput {
-        let startedAt = emitSessionStarted(entryPointName: node.name())
-        let (nodeInvoker, collector, subscriptions) = await startCollecting()
+        let settings = currentRunSettings()
+        let startedAt = emitSessionStarted(entryPointName: node.name(), settings: settings)
+        let (nodeInvoker, collector, subscriptions) = await startCollecting(settings: settings)
         let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
             Task { await collector.subscribeMessage(session) }
         }
@@ -298,26 +347,142 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<RTSOutput, Error>
         do {
-            outcome = .success(try await nodeInvoker.invokeFunction(node, input: input, context: context))
+            let output = try await withRunStops(settings, stop: nodeInvoker.runStop) {
+                try await nodeInvoker.invokeFunction(node, input: input, context: context)
+            }
+            outcome = .success(output)
         } catch {
-            outcome = .failure(error)
-            // Fire-and-forget upload to Conductr; no-op unless the app configured
-            // RailtownLogger with auto-capture enabled. The error rethrows unchanged below.
-            RailtownLogger.captureRailtracks(
+            let reported = RTSRunCancellation.normalized(
                 error,
-                flowTitle: title,
-                properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
-                callSite: (error as? RTSError)?.railtownCallSite
+                stopReason: nodeInvoker.runStop.reason
             )
+            outcome = .failure(reported)
+            reportFailure(reported)
         }
         await collector.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
-        emitSessionCompleted(startedAt: startedAt, error: outcome.eventError)
+        emitSessionCompleted(startedAt: startedAt, error: outcome.eventError, settings: settings)
         // Emission is isolated from execution, so the backlog is joined here rather than
         // interleaved with the run: subscribers cannot slow a node down, and the stream is
         // still complete by the time `run` returns.
         await flushEvents()
         return try outcome.get()
+    }
+
+    // MARK: - Run settings and stops
+
+    /// The flow's adjustable settings, read once at the start of a run. The run keeps these even if
+    /// the app changes `timeout` or `endOnError` while it's going.
+    private func currentRunSettings() -> RunSettings {
+        RunSettings(timeout: RTSFlow.effectiveTimeout(timeout), endOnError: endOnError)
+    }
+
+    /// The longest timeout a run will time, in seconds: about 31 years. Anything longer is no limit
+    /// in practice, and far beyond it `Duration.seconds` traps.
+    static let maximumTimeout: TimeInterval = 1_000_000_000
+
+    /// `timeout` as a run can use it. A value that can't be timed, NaN, infinity or anything past
+    /// `maximumTimeout`, means no limit: `Duration.seconds` traps on it, and `session.started`
+    /// couldn't encode it as JSON. Zero or less is kept, and times out at once.
+    static func effectiveTimeout(_ timeout: TimeInterval?) -> TimeInterval? {
+        guard let timeout else {
+            return nil
+        }
+        guard timeout.isFinite, timeout <= maximumTimeout else {
+            log.warning("⏱️ timeout \(timeout) can't be timed; running with no limit")
+            return nil
+        }
+        return timeout
+    }
+
+    /// Runs `work`, the run's root invocation, so that a stop from inside the run can end it: the
+    /// run's timeout, or a node failing under `endOnError`.
+    ///
+    /// With neither set, `work` runs directly. Otherwise it runs in a task group next to a listener,
+    /// which waits on `stop` and cancels the work once a stop is requested, plus a timer when there
+    /// is a timeout. The timer and failing nodes both record their reason on `stop` **before** the
+    /// listener cancels anything, so every node that then sees cancellation reports that reason
+    /// rather than `.cancelled`. The group then waits for the work to unwind, so the trace is
+    /// complete when this returns.
+    ///
+    /// A user cancel reaches every child: the timer and listener end without recording anything, and
+    /// the work reports `.cancelled`. Work that finishes successfully despite a timeout returns its
+    /// value, since nothing was actually stopped; after an end-on-error stop it throws anyway,
+    /// because `endOnError` promises that a node failure fails the run.
+    private func withRunStops<Output: Sendable>(
+        _ settings: RunSettings,
+        stop: RTSRunStop,
+        _ work: @escaping @Sendable () async throws -> Output
+    ) async throws -> Output {
+        guard settings.timeout != nil || stop.endsOnError else {
+            return try await work()
+        }
+        let title = self.title
+        return try await withThrowingTaskGroup(of: RunStep<Output>.self) { group in
+            group.addTask {
+                .finished(try await work())
+            }
+            group.addTask {
+                await stop.stopRequested()
+                return .stopRequested
+            }
+            if let timeout = settings.timeout {
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(timeout))
+                    if !Task.isCancelled, stop.request(.timeout(after: timeout)) {
+                        log.info("⏱️ [\(title)] run passed its \(timeout)s timeout; cancelling it")
+                    }
+                    return .timerEnded
+                }
+            }
+            do {
+                for try await step in group {
+                    switch step {
+                    case .finished(let output):
+                        group.cancelAll()
+                        if let reason = stop.reason, case .endOnError = reason {
+                            throw RTSError.runTerminated(reason: reason)
+                        }
+                        return output
+                    case .stopRequested:
+                        // Also reached when the listener's own task was cancelled; cancelling an
+                        // already-cancelled group is harmless.
+                        group.cancelAll()
+                    case .timerEnded:
+                        continue
+                    }
+                }
+            } catch {
+                // Once the run stopped itself, whatever the work throws is that stop. Nodes already
+                // report it; this catches the failing node's own error when it is the root, and any
+                // error raised outside every node.
+                guard let reason = stop.reason,
+                      RTSRunCancellation.terminationReason(of: error) == nil else {
+                    throw error
+                }
+                throw RTSError.runTerminated(reason: reason)
+            }
+            // The work child always returns or throws, so the loop exits through one of those first.
+            throw RTSError.runTerminated(reason: stop.reason ?? .cancelled)
+        }
+    }
+
+    // MARK: - Error reporting
+
+    /// Fire-and-forget upload of a failed run to Conductr; a no-op unless the app configured
+    /// RailtownLogger with auto-capture enabled. The caller still rethrows `error` unchanged.
+    ///
+    /// A run the app cancelled itself is not a bug, so it is not reported.
+    private func reportFailure(_ error: Error) {
+        guard !RTSRunCancellation.isCancellation(error) else {
+            return
+        }
+        RailtownLogger.captureRailtracks(
+            error,
+            flowTitle: title,
+            properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
+            callSite: (error as? RTSError)?.railtownCallSite
+        )
     }
 
     // MARK: - Session events
@@ -335,7 +500,10 @@ public class RTSFlow: @unchecked Sendable {
     /// itself stays constant for the life of the session object. So two runs on one
     /// `RTSFlow` legitimately share a `scope_id` and are told apart by `entry_point_name`
     /// and their timestamps.
-    private func emitSessionStarted(entryPointName: String) -> Date {
+    private func emitSessionStarted(
+        entryPointName: String,
+        settings: RunSettings
+    ) -> Date {
         let startedAt = RTSEventTimestamp.now()
         eventEmitter.emit(
             RTSSessionStartedEvent(
@@ -344,10 +512,8 @@ public class RTSFlow: @unchecked Sendable {
                 flowID: RailtracksSwift.equalityHash(title),
                 sessionName: nil,
                 entryPointName: entryPointName,
-                // Swift has no flow-level timeout or end-on-error setting; Python's
-                // equivalents come from its executor config.
-                timeout: nil,
-                endOnError: false,
+                timeout: settings.timeout,
+                endOnError: settings.endOnError,
                 saveState: savesTrace,
                 timestamp: startedAt
             )
@@ -355,15 +521,20 @@ public class RTSFlow: @unchecked Sendable {
         return startedAt
     }
 
-    /// Emits `session.completed`, deriving status from whether the run produced an error.
+    /// Emits `session.completed`, deriving status from whether the run produced an error, and
+    /// `termination_reason` from whether that error says the run was stopped, and `fatal` by
+    /// Python's rule (``isFatal(_:endOnError:)``).
     ///
     /// One instant serves as both the event's `timestamp` and the end of the measured
-    /// window, for the same reason ``emitSessionStarted(entryPointName:)`` returns its own.
+    /// window, for the same reason ``emitSessionStarted(entryPointName:settings:)`` returns its own.
     private func emitSessionCompleted(
         startedAt: Date,
-        error: Error?
+        error: Error?,
+        settings: RunSettings
     ) {
         let completedAt = RTSEventTimestamp.now()
+        let terminationReason = RTSRunCancellation.terminationReason(of: error)
+            .map(RTSSessionTerminationReason.init)
         eventEmitter.emit(
             RTSSessionCompletedEvent(
                 sessionID: id.uuidString,
@@ -371,6 +542,8 @@ public class RTSFlow: @unchecked Sendable {
                 // ANSI-stripped, mirroring Python's `format_error`.
                 error: error.map(RTSSessionCompletedEvent.formatError),
                 durationSeconds: completedAt.timeIntervalSince(startedAt),
+                fatal: RTSFlow.isFatal(error, endOnError: settings.endOnError),
+                terminationReason: terminationReason,
                 timestamp: completedAt
             )
         )
@@ -379,7 +552,9 @@ public class RTSFlow: @unchecked Sendable {
     /// Builds the per-run node invoker + graph collector and wires the
     /// `nodeStatusPublisher` subscriptions. The returned cancellables must be held
     /// for the duration of the run (they are kept alive by `run` awaiting completion).
-    private func startCollecting() async -> (RTSNodeInvoker, RTSFlowGraphCollector, Set<AnyCancellable>) {
+    private func startCollecting(
+        settings: RunSettings
+    ) async -> (RTSNodeInvoker, RTSFlowGraphCollector, Set<AnyCancellable>) {
         // Warm the pricing map now (fire-and-forget) so the first per-node signpost cost
         // calculation doesn't pay the remote/disk fetch. It runs concurrently with the
         // flow and finishes long before the first node completes an LLM round-trip;
@@ -391,7 +566,8 @@ public class RTSFlow: @unchecked Sendable {
             stampFactory: stampFactory,
             sessionID: id,
             signpostEmitter: signpostEmitter,
-            eventEmitter: eventEmitter
+            eventEmitter: eventEmitter,
+            runStop: RTSRunStop(endsOnError: settings.endOnError)
         )
 
         var subscriptions = Set<AnyCancellable>()
@@ -426,10 +602,7 @@ public class RTSFlow: @unchecked Sendable {
             .store(in: &subscriptions)
         nodeInvoker.nodeInvokeEventPublisher
             .map { event -> RTSNodeStatus in
-                let state: RTSNodeStatus.State = event.error == nil
-                    ? .completed
-                    : .failed(event.error ?? "unknown")
-                return statusOf(event, state)
+                statusOf(event, RTSFlow.finishedState(of: event))
             }
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
             .store(in: &subscriptions)
@@ -447,6 +620,53 @@ public class RTSFlow: @unchecked Sendable {
         return (nodeInvoker, collector, subscriptions)
     }
 
+    /// `session.completed`'s `fatal`, by Python's rule: the run failed, and either the flow ends on
+    /// error or the error is itself fatal (`error is not None and (end_on_error or
+    /// is_fatal(error))`). Swift has no fatal-error marker, so only the first half applies. A
+    /// timeout or a cancel alone is not fatal; `termination_reason` reports those.
+    ///
+    /// One exception to Python's rule: a user cancel is never fatal, even under `endOnError`.
+    /// Python has no user cancel, and an app stopping its own run isn't a failure.
+    static func isFatal(_ error: Error?, endOnError: Bool) -> Bool {
+        guard let error, endOnError else {
+            return false
+        }
+        return !RTSRunCancellation.isCancellation(error)
+    }
+
+    /// The state a finish event reports. A node a stop cut short, whether by a cancel, a timeout or
+    /// another node failing under `endOnError`, is `.cancelled`; a node that failed with its own
+    /// error, including the one that triggered an end-on-error stop, is `.failed`.
+    static func finishedState(of event: RTSNodeEvent) -> RTSNodeStatus.State {
+        if event.terminationReason != nil {
+            return .cancelled
+        }
+        guard let error = event.error else {
+            return .completed
+        }
+        return .failed(error)
+    }
+
+}
+
+// MARK: - RunSettings
+
+/// `RTSFlow`'s adjustable settings as one run read them when it started.
+private struct RunSettings {
+    let timeout: TimeInterval?
+    let endOnError: Bool
+}
+
+// MARK: - RunStep
+
+/// What finished in `RTSFlow.withRunStops`'s task group.
+private enum RunStep<Output: Sendable>: Sendable {
+    /// The run's work returned.
+    case finished(Output)
+    /// The listener woke: a stop was requested, or its own task was cancelled.
+    case stopRequested
+    /// The timer ended, after requesting the timeout or because it was cancelled.
+    case timerEnded
 }
 
 // MARK: - Result

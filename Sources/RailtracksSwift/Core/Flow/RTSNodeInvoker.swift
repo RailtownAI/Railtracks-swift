@@ -59,16 +59,22 @@ public class RTSNodeInvoker: @unchecked Sendable {
     /// invoker without one; `nil` means node and guardrail events are simply not emitted.
     let eventEmitter: RTSEventEmitter?
 
+    /// Why this run was stopped, when it stopped itself. An invoker is built per run, so this is
+    /// the run's handle; normalization reads it to report a timeout rather than a plain cancel.
+    let runStop: RTSRunStop
+
     init(
         stampFactory: RTSStampFactory,
         sessionID: UUID,
         signpostEmitter: (any RTSSignpostEmitting)? = nil,
-        eventEmitter: RTSEventEmitter? = nil
+        eventEmitter: RTSEventEmitter? = nil,
+        runStop: RTSRunStop = RTSRunStop()
     ) {
         self.stampFactory = stampFactory
         self.sessionID = sessionID
         self.signpostEmitter = signpostEmitter
         self.eventEmitter = eventEmitter
+        self.runStop = runStop
     }
     
     func invokeAgent(
@@ -252,7 +258,13 @@ public class RTSNodeInvoker: @unchecked Sendable {
         var guardTraces: [RTSGuardrailTrace] = []
         var workingInput = input
         var guardError: Error?
-        if let runInputGuardrails {
+        // A cancelled run stops at the next node, even if a provider ignores cancellation. The node
+        // is still created and finished below, so the trace stays balanced and the root always
+        // completes the collector, but neither its guardrails nor its body runs.
+        if Task.isCancelled {
+            guardError = RTSError.runTerminated(reason: runStop.reason ?? .cancelled)
+        }
+        if guardError == nil, let runInputGuardrails {
             let result = await runInputGuardrails(input, invocationID)
             workingInput = result.value
             guardTraces.append(contentsOf: result.traces)
@@ -316,7 +328,10 @@ public class RTSNodeInvoker: @unchecked Sendable {
                     try await execute(runID, workingInput)
                 }
             } catch {
-                invokeError = error
+                // Normalized here, not only where the outcome becomes final below, because
+                // `emitLLMEvents` reads it first: `llm.failure` must report the same error as
+                // `node.failure`.
+                invokeError = RTSRunCancellation.normalized(error, stopReason: runStop.reason)
                 output = [:]
                 log.error("☠️ [\(node.name())] invocation failed: \(error)")
             }
@@ -331,11 +346,35 @@ public class RTSNodeInvoker: @unchecked Sendable {
             // Output guardrails only run when the agent itself produced a result. They run after the
             // measured window (not counted as node runtime), matching Python measuring only invoke().
             if invokeError == nil, let runOutputGuardrails {
-                let result = await runOutputGuardrails(output, invocationID)
-                output = result.value
-                guardTraces.append(contentsOf: result.traces)
-                invokeError = result.error
+                if Task.isCancelled {
+                    // The body ignored a stop and returned anyway. Its output is not checked, since
+                    // the run is ending (a model-based guardrail would be one more model call), and
+                    // unchecked output must not pass as a success: it could be text a redacting
+                    // guardrail never saw. So the node fails with the stop.
+                    invokeError = RTSError.runTerminated(reason: runStop.reason ?? .cancelled)
+                    output = [:]
+                } else {
+                    let result = await runOutputGuardrails(output, invocationID)
+                    output = result.value
+                    guardTraces.append(contentsOf: result.traces)
+                    invokeError = result.error
+                }
             }
+        }
+
+        // The outcome is final here, whichever of guardrails or body produced the error. Under
+        // `endOnError`, a failure stops the run before this node's finish events go out, so its
+        // siblings see the stop as early as possible.
+        //
+        // Normalized first: a guardrail that was running when the run stopped throws whatever its
+        // provider throws on cancel, and only a `runTerminated` is recognized as a stop. Otherwise
+        // the node reads as failed, and under `endOnError` its error would record an end-on-error
+        // stop that wins over the cancel. The guardrail's own trace and events keep the raw error.
+        invokeError = invokeError.map { error in
+            RTSRunCancellation.normalized(error, stopReason: runStop.reason)
+        }
+        if let invokeError {
+            runStop.nodeFailed(name: node.name(), error: invokeError)
         }
 
         // The node's single terminal event. Both arms live here, outside the block above,
@@ -520,6 +559,7 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 input: input,
                 output: error == nil ? output : nil,
                 error: error.map { "\($0)" },
+                terminationReason: RTSRunCancellation.terminationReason(of: error),
                 runID: runID,
                 runtime: runtime,
                 guardTraces: guardTraces,
@@ -581,7 +621,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 targetName: target.name(),
                 input: input,
                 output: error == nil ? output : nil,
-                error: error.map { "\($0)" }
+                error: error.map { "\($0)" },
+                failure: error.map(RTSEdgeFailure.init)
             )
         )
     }

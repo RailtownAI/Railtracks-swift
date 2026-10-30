@@ -258,6 +258,8 @@ extension RTSNodeStatus.State {
             return .green
         case .failed:
             return .red
+        case .cancelled:
+            return .orange
         }
     }
 
@@ -271,6 +273,8 @@ extension RTSNodeStatus.State {
             return "completed"
         case .failed(let message):
             return "failed: \(message)"
+        case .cancelled:
+            return "cancelled"
         }
     }
 }

@@ -17,6 +17,33 @@ public enum RTSSessionStatus: String, Sendable, Codable {
     case failure
 }
 
+// MARK: - RTSSessionTerminationReason
+
+/// Why a session was stopped before it finished on its own.
+///
+/// Swift-only: Python's `SessionCompleted` records only `fatal`. The raw values are the wire
+/// form of `session.completed`'s `termination_reason`.
+public enum RTSSessionTerminationReason: String, Sendable, Codable {
+    /// The task running the flow was cancelled.
+    case cancelled
+    /// The flow's timeout elapsed.
+    case timeout
+    /// A node failed while the flow had `endOnError` set.
+    case endOnError = "end_on_error"
+
+    /// The session-level reason for a run stopped with `reason`.
+    init(_ reason: RTSRunTerminationReason) {
+        switch reason {
+        case .cancelled:
+            self = .cancelled
+        case .timeout:
+            self = .timeout
+        case .endOnError:
+            self = .endOnError
+        }
+    }
+}
+
 // MARK: - RTSSessionStartedEvent
 
 /// A top-level run has begun.
@@ -94,6 +121,7 @@ public struct RTSSessionStartedEvent: RTSObservabilityEvent {
 ///
 /// Mirrors the Python engine's `SessionCompleted` (`events/session.py`). `error` is a
 /// stringified exception and is set only when `status` is ``RTSSessionStatus/failure``.
+/// `terminationReason` is set only when the run was stopped, and is Swift-only.
 public struct RTSSessionCompletedEvent: RTSObservabilityEvent {
     /// The wire name — see ``RTSSessionStartedEvent/eventTypeName``. This one is the event
     /// stream's end-of-run marker, so more than one consumer keys off it.
@@ -109,18 +137,27 @@ public struct RTSSessionCompletedEvent: RTSObservabilityEvent {
     public let status: RTSSessionStatus
     public let error: String?
     public let durationSeconds: TimeInterval
+    /// Python's `fatal`: the run failed and either the flow ends on error or the error is itself
+    /// fatal. Not the same as being stopped: a timeout or a cancel alone isn't fatal, and
+    /// ``terminationReason`` says how a run was stopped.
+    public let fatal: Bool
+    public let terminationReason: RTSSessionTerminationReason?
 
     public init(
         sessionID: String,
         status: RTSSessionStatus,
         error: String?,
         durationSeconds: TimeInterval,
+        fatal: Bool = false,
+        terminationReason: RTSSessionTerminationReason? = nil,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
         self.sessionID = sessionID
         self.status = status
         self.error = error
         self.durationSeconds = durationSeconds
+        self.fatal = fatal
+        self.terminationReason = terminationReason
         self.spatialParent = .noParent
         self.timestamp = timestamp
     }
@@ -149,6 +186,8 @@ public struct RTSSessionCompletedEvent: RTSObservabilityEvent {
         payload["status"] = .string(status.rawValue)
         payload["error"] = .nullable(error)
         payload["duration_seconds"] = .number(durationSeconds)
+        payload["fatal"] = .bool(fatal)
+        payload["termination_reason"] = .nullable(terminationReason?.rawValue)
         return payload
     }
 }

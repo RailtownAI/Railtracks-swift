@@ -290,7 +290,7 @@ extension RailtracksSwiftTestSuite {
 
         // MARK: - Failure
 
-        @Test("A failed invocation adds one llm.failure after the recovered round trips")
+        @Test("A failure adds its own creation and invocation after the recovered trips")
         func failureAfterPartialExchange() async throws {
             let recorder = LLMEventRecorder()
             // A partial exchange: one round trip completed, then the send threw.
@@ -302,7 +302,8 @@ extension RailtracksSwiftTestSuite {
 
             #expect(
                 await recorder.eventTypes == [
-                    "llm.creation", "llm.invocation", "llm.response", "llm.failure",
+                    "llm.creation", "llm.invocation", "llm.response",
+                    "llm.creation", "llm.invocation", "llm.failure",
                 ]
             )
             let failure = try #require(await recorder.first(ofType: "llm.failure"))
@@ -333,7 +334,58 @@ extension RailtracksSwiftTestSuite {
             // it from the case above.
             await emit([message(.user, "hi")], error: StubLLMError(), into: recorder)
 
-            #expect(await recorder.eventTypes == ["llm.failure"])
+            #expect(await recorder.eventTypes == ["llm.creation", "llm.invocation", "llm.failure"])
+        }
+
+        /// A failure with no completed round trip still names its model: its
+        /// `parent_llm_type_id` joins to an `llm.creation` carrying the agent's model, as in
+        /// Python, which emits creation before every call.
+        @Test("A failure names its model through an llm.creation")
+        func failureNamesItsModel() async throws {
+            let recorder = LLMEventRecorder()
+            await emit([message(.user, "hi")], error: StubLLMError(), into: recorder)
+
+            let creation = try #require(await recorder.first(ofType: "llm.creation"))
+            let failure = try #require(await recorder.first(ofType: "llm.failure"))
+            #expect(creation.payload["llm_id"] == failure.payload["parent_llm_type_id"])
+            #expect(creation.payload["model_name"] == .string("gpt-4o"))
+            #expect(creation.payload["model_provider"] != nil)
+        }
+
+        /// The failed attempt reads as one round trip: its invocation and failure share an
+        /// `llm_invoke_id`, the invocation carries the same `message_input`, and both new events
+        /// are stamped when the failing request went out, the last recorded message's time.
+        @Test("A failure pairs with an invocation stamped at the last message")
+        func failurePairsWithAnInvocation() async throws {
+            let recorder = LLMEventRecorder()
+            await emit(
+                [
+                    message(.user, "hi"),
+                    message(.assistant, "calling a tool"),
+                    message(.tool, "result", at: 5),
+                ],
+                error: StubLLMError(),
+                into: recorder
+            )
+
+            let invocations = await recorder.events(ofType: "llm.invocation")
+            let invocation = try #require(invocations.last)
+            let failure = try #require(await recorder.first(ofType: "llm.failure"))
+            #expect(
+                invocation.payload["parent_llm_invoke_id"]
+                    == failure.payload["parent_llm_invoke_id"]
+            )
+            #expect(invocation.payload["message_input"] == failure.payload["message_input"])
+
+            let creations = await recorder.events(ofType: "llm.creation")
+            let creation = try #require(creations.last)
+            let lastMessageTime = Self.stamp.addingTimeInterval(5)
+            for event in [creation, invocation] {
+                let stamped = try #require(
+                    RTSEventTimestamp.date(from: str(event.payload["timestamp"]) ?? "")
+                )
+                #expect(abs(stamped.timeIntervalSince(lastMessageTime)) < 0.000_001)
+            }
         }
 
         // MARK: - Cost when disabled

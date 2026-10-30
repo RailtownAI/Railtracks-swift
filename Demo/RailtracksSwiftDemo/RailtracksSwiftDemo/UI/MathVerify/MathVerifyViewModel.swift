@@ -20,9 +20,18 @@ class MathVerifyViewModel {
     var nodeStatusLines: [String] = []
     var isRunning = false
     var isShowingKeyPrompt = false
+    /// The flow's timeout in seconds, or `nil` for none. A full run takes about 15 s, so a short
+    /// timeout stops it partway.
+    var timeout: TimeInterval?
     /// Backs the call-tree view. Owned here rather than by the view because a fresh `RTSFlow` is built
     /// per run — the model outlives them and accumulates each run as its own root.
     @MainActor let nodeTree = RTSNodeTreeViewModel()
+    /// The task awaiting `flow.run`. Cancelling it is how a run is stopped.
+    private var runTask: Task<Void, Never>?
+
+    func stopPrompt() {
+        runTask?.cancel()
+    }
 
     func startPrompt() {
         guard let apiKey = KeychainHelper.readOpenAIKey() else {
@@ -30,9 +39,11 @@ class MathVerifyViewModel {
             return
         }
         let prompt = self.prompt
+        let timeout = self.timeout
         nodeStatusLines = []
+        promptResult = nil
         isRunning = true
-        Task { [weak self] in
+        runTask = Task { [weak self] in
             defer { self?.isRunning = false }
             let gateway = RTSLLMGateway(apiKeys: [.openAI: apiKey])
 
@@ -82,7 +93,7 @@ class MathVerifyViewModel {
                 "After computing your final answer, use the MathVerifier tool to confirm it is correct before responding."
             )
 
-            let flow = RTSFlow(title: "Math Verify flow")
+            let flow = RTSFlow(title: "Math Verify flow", timeout: timeout)
             self?.nodeTree.attach(to: flow)
             var cancellables = Set<AnyCancellable>()
             flow.nodeStatusPublisher
@@ -100,13 +111,26 @@ class MathVerifyViewModel {
                         label = "✅ \(status.nodeName)"
                     case .failed(let error):
                         label = "❌ \(status.nodeName): \(error)"
+                    case .cancelled:
+                        label = "🛑 \(status.nodeName): cancelled"
                     }
                     self?.nodeStatusLines.append(label)
                 }
                 .store(in: &cancellables)
 
-            self?.promptResult = try? await flow.run(agent: solverAgent, prompt: prompt, gateway: gateway)
-            Log.debug("obtained math verify result")
+            do {
+                self?.promptResult = try await flow.run(
+                    agent: solverAgent,
+                    prompt: prompt,
+                    gateway: gateway
+                )
+                Log.debug("obtained math verify result")
+            } catch {
+                // A Stop arrives here as `runTerminated(reason: cancelled)` and a timeout as
+                // `runTerminated(reason: timeout(after:))`, both after the trace is written.
+                self?.promptResult = "Stopped: \(error)"
+                Log.debug("math verify run ended with \(error)")
+            }
         }
     }
 }

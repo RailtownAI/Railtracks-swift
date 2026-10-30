@@ -127,7 +127,8 @@ class MathViewModel {
             status = .inProgress
         case .completed:
             status = .complete
-        case .failed:
+        case .failed, .cancelled:
+            // The step list has no stopped state of its own; a stopped step didn't complete.
             status = .failed
         }
         if let index = sequentialSteps.firstIndex(where: { $0.title == name }) {
