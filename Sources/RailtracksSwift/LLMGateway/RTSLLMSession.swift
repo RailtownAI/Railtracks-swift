@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import Conduit
+import Synchronization
 
 protocol MessagePublisher {
     var messagePublisher: AnyPublisher<[RTSMessage], Never> { get }
@@ -121,6 +122,10 @@ extension RTSLLMSession {
             modelName = providerName
         }
         let runIDMap = RunIDMap()
+        // The stamped copies `publishNewMessages` sends the trace, so `message:` hands out the same
+        // ones: the `llm.*` events are built from `messages()`, and the raw transcript messages
+        // carry no model, tokens or latency.
+        let stampedMessages = StampedMessageStore()
         let relay = BufferedPassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
             run: { prompt, images, runID in
@@ -141,6 +146,7 @@ extension RTSLLMSession {
                         model: modelName,
                         providerName: providerName
                     )
+                    stampedMessages.store(stamped)
                     relay.send(stamped)
                 }
                 do {
@@ -165,7 +171,10 @@ extension RTSLLMSession {
                 }
             },
             message: {
-                appleAI.messages().map { $0.stamped(runID: runIDMap[$0.id]) }
+                // Messages never stamped, such as the instructions, get just their runID.
+                appleAI.messages().map { message in
+                    stampedMessages[message.id] ?? message.stamped(runID: runIDMap[message.id])
+                }
             },
             messageSubject: relay,
             agentName: agentName
@@ -352,5 +361,22 @@ private final class RunIDMap: @unchecked Sendable {
 
     subscript(_ messageID: UUID) -> RTSRunID? {
         lock.withLock { storage[messageID] }
+    }
+}
+
+/// The FoundationModels messages as stamped for the trace, by message id.
+private final class StampedMessageStore: Sendable {
+    private let storage = Mutex<[UUID: RTSMessage]>([:])
+
+    func store(_ messages: [RTSMessage]) {
+        storage.withLock { storage in
+            for message in messages {
+                storage[message.id] = message
+            }
+        }
+    }
+
+    subscript(_ messageID: UUID) -> RTSMessage? {
+        storage.withLock { $0[messageID] }
     }
 }
