@@ -111,8 +111,13 @@ public enum RTSEventFailure {
         guard let railtracksError = error as? RTSError else {
             return nil
         }
-        let context = railtracksError.context
-        return "thrown at \(context.file):\(context.line) in \(context.function)"
+        return callSite(railtracksError.context)
+    }
+
+    /// `context` as `thrown at <file>:<line> in <function>`: the one place that text is
+    /// formatted, for ``callSite(of:)`` and ``RTSEventFailureDetails``.
+    static func callSite(_ context: RTSErrorContext) -> String {
+        "thrown at \(context.file):\(context.line) in \(context.function)"
     }
 }
 
@@ -167,9 +172,10 @@ public struct RTSEventFailureDetails: Sendable, Equatable {
         let fields = RTSEventFailure.fields(from: error)
         self.exceptionName = fields.name
         self.exceptionMessage = fields.message
-        self.traceback = RTSEventFailure.callSite(of: error) ?? ""
-        if let railtracksError = error as? RTSError {
-            let context = railtracksError.context
+        // The traceback and the frame both come from one read of the call site, so they can't
+        // drift apart.
+        if let context = (error as? RTSError)?.context {
+            self.traceback = RTSEventFailure.callSite(context)
             self.frames = [
                 RTSEventFrame(
                     file: context.file,
@@ -179,6 +185,7 @@ public struct RTSEventFailureDetails: Sendable, Equatable {
                 )
             ]
         } else {
+            self.traceback = ""
             self.frames = []
         }
         self.fatal = false
