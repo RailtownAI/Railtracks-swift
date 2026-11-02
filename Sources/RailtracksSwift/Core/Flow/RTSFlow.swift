@@ -247,6 +247,38 @@ public class RTSFlow: @unchecked Sendable {
         systemMessage: String? = nil,
         images: [RTSImage] = []
     ) async throws -> String {
+        try await run(
+            agent: agent,
+            prompt: prompt,
+            systemMessage: systemMessage,
+            images: images,
+            makeSession: RTSFlow.sessionFactory(for: gateway)
+        )
+    }
+
+    /// Builds an agent's session for a run: the gateway in production, a scripted session in tests.
+    typealias SessionFactory = @Sendable (
+        _ invoker: RTSNodeInvoker,
+        _ agent: any RTSAgentNode,
+        _ onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
+    ) throws -> RTSLLMSession
+
+    /// The production ``SessionFactory``: every session comes from `gateway`.
+    private static func sessionFactory(for gateway: RTSLLMGateway) -> SessionFactory {
+        { invoker, agent, onNewSession in
+            try gateway.session(invoker: invoker, agentNode: agent, onNewSession: onNewSession)
+        }
+    }
+
+    /// ``run(agent:prompt:gateway:systemMessage:images:)`` with the sessions built by `makeSession`,
+    /// so a test can run an agent on a scripted session.
+    func run(
+        agent: some RTSAgentNode,
+        prompt: String,
+        systemMessage: String? = nil,
+        images: [RTSImage] = [],
+        makeSession: SessionFactory
+    ) async throws -> String {
         let settings = currentRunSettings()
         let startedAt = emitSessionStarted(entryPointName: agent.agentName, settings: settings)
         let (nodeInvoker, collector, subscriptions) = await startCollecting(settings: settings)
@@ -256,11 +288,7 @@ public class RTSFlow: @unchecked Sendable {
 
         let session: RTSLLMSession
         do {
-            session = try gateway.session(
-                invoker: nodeInvoker,
-                agentNode: agent,
-                onNewSession: onNewSession
-            )
+            session = try makeSession(nodeInvoker, agent, onNewSession)
         } catch {
             // Session build failures (e.g. missingAPIKey) never reach the invocation
             // catch below, so report them here; control flow is unchanged — the error
@@ -325,6 +353,16 @@ public class RTSFlow: @unchecked Sendable {
         input: RTSInput,
         gateway: RTSLLMGateway
     ) async throws -> RTSOutput {
+        try await run(node, input: input, makeSession: RTSFlow.sessionFactory(for: gateway))
+    }
+
+    /// ``run(_:input:gateway:)`` with the sessions built by `makeSession`, so a test can run agents
+    /// on scripted sessions.
+    func run(
+        _ node: some RTSOrchestratorNode,
+        input: RTSInput,
+        makeSession: @escaping SessionFactory
+    ) async throws -> RTSOutput {
         let settings = currentRunSettings()
         let startedAt = emitSessionStarted(entryPointName: node.name(), settings: settings)
         let (nodeInvoker, collector, subscriptions) = await startCollecting(settings: settings)
@@ -335,11 +373,7 @@ public class RTSFlow: @unchecked Sendable {
         let context = RTSRunContext(
             invoker: nodeInvoker,
             makeSession: { agent in
-                try gateway.session(
-                    invoker: nodeInvoker,
-                    agentNode: agent,
-                    onNewSession: onNewSession
-                )
+                try makeSession(nodeInvoker, agent, onNewSession)
             },
             onNewSession: onNewSession,
             createdBy: node
