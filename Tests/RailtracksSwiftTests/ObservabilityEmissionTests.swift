@@ -270,13 +270,75 @@ extension RailtracksSwiftTestSuite {
             )
             let failure = try #require(recorder.first(ofType: "node.failure"))
             #expect(failure.payload["exception_name"] == .string("StubError"))
+            // Not an `RTSError`, so there is no call site: Python's defaults.
+            #expect(failure.payload["traceback"] == .string(""))
+            #expect(failure.payload["frames"] == .array([]))
 
             let destruction = try #require(recorder.first(ofType: "node.destruction"))
             #expect(destruction.payload["response"] == .null)
+            #expect(destruction.payload["status"] == .string("failure"))
+            expectSameFailureDetails(failure, destruction)
 
             let completed = try #require(recorder.first(ofType: "session.completed"))
             #expect(completed.payload["status"] == .string("failure"))
             #expect(completed.payload["error"] != .null)
+        }
+
+        /// An `RTSError` carries its call site: both events report the same `thrown at …`
+        /// traceback and one frame.
+        @Test("A node throwing an RTSError reports its call site on failure and destruction")
+        func failureWithCallSite() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+
+            let root = StubOrchestrator(nodeName: "Divide") { _, _ in
+                throw RTSError.invalidInvocation("Division by zero")
+            }
+            let flow = RTSFlow(title: "EmitFailureCallSite", savesTrace: false)
+            let recorder = EventRecorder(flow.eventPublisher)
+
+            _ = try? await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            let failure = try #require(recorder.first(ofType: "node.failure"))
+            let traceback = try #require(str(failure.payload["traceback"]))
+            #expect(traceback.hasPrefix("thrown at "), "unexpected traceback \(traceback)")
+            guard case .array(let frames)? = failure.payload["frames"] else {
+                Issue.record("expected frames, got \(String(describing: failure.payload["frames"]))")
+                return
+            }
+            #expect(frames.count == 1)
+            #expect(failure.payload["fatal"] == .bool(false))
+
+            let destruction = try #require(recorder.first(ofType: "node.destruction"))
+            #expect(destruction.payload["status"] == .string("failure"))
+            expectSameFailureDetails(failure, destruction)
+        }
+
+        @Test("A successful node's destruction reports success with null failure fields")
+        func successfulDestruction() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+
+            let root = StubOrchestrator(nodeName: "Root") { _, _ in
+                ["result": .string("done")]
+            }
+            let flow = RTSFlow(title: "EmitSuccessStatus", savesTrace: false)
+            let recorder = EventRecorder(flow.eventPublisher)
+
+            _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            let destruction = try #require(recorder.first(ofType: "node.destruction"))
+            #expect(destruction.payload["status"] == .string("success"))
+            #expect(destruction.payload["exception_name"] == .null)
+            #expect(destruction.payload["traceback"] == .null)
+            #expect(destruction.payload["frames"] == .null)
+            #expect(destruction.payload["fatal"] == .bool(false))
+        }
+
+        /// A node's `node.failure` and `node.destruction` agree on every failure field, as
+        /// Python's both come from one `failure_details(exc)`.
+        private func expectSameFailureDetails(_ failure: RTSEvent, _ destruction: RTSEvent) {
+            for key in ["exception_name", "exception_message", "traceback", "frames", "fatal"] {
+                #expect(destruction.payload[key] == failure.payload[key], "\(key) should match")
+            }
         }
 
         @Test("A session-build failure is still bracketed by a session.completed")

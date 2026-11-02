@@ -40,10 +40,7 @@ struct RTSEdgeFailure {
         let fields = RTSEventFailure.fields(from: error)
         self.type = fields.name
         self.message = fields.message
-        self.traceback = (error as? RTSError).map { railtracksError in
-            let context = railtracksError.context
-            return "thrown at \(context.file):\(context.line) in \(context.function)"
-        }
+        self.traceback = RTSEventFailure.callSite(of: error)
     }
 
     /// The `output` value of a failed edge in the trace.

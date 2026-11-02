@@ -393,10 +393,14 @@ public class RTSNodeInvoker: @unchecked Sendable {
         //
         // Note `.transformed` and `.allowed` never reach the failure arm: the guardrail runner
         // returns a nil error for both.
-        if let invokeError {
+        //
+        // The failure details are derived once and carried by both `node.failure` and
+        // `node.destruction`, so the two agree, as Python's both come from `failure_details`.
+        let failureDetails = invokeError.map { RTSEventFailureDetails($0) }
+        if let failureDetails {
             eventEmitter?.emit(
                 RTSNodeFailureEvent.from(
-                    error: invokeError,
+                    details: failureDetails,
                     parent: eventParent,
                     spatialParent: eventSpatialParent
                 )
@@ -451,14 +455,15 @@ public class RTSNodeInvoker: @unchecked Sendable {
             hasOutputGuardrail: runOutputGuardrails != nil
         )
 
-        // The final response, and the event Python's `node_internals` fold reads for latency.
+        // The final outcome, and the event Python's `node_internals` fold reads for latency.
         // `runtime` is the monotonic measurement taken above, never a stamp delta.
         eventEmitter?.emit(
             RTSNodeDestructionEvent(
                 parent: eventParent,
                 spatialParent: eventSpatialParent,
                 response: invokeError == nil ? .object(output) : nil,
-                durationSeconds: runtime
+                durationSeconds: runtime,
+                failure: failureDetails
             )
         )
 

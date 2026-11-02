@@ -230,6 +230,14 @@ failure, so the failure always names its model, even with no completed round tri
 FoundationModels `respond` rolls its transcript back, losing every round trip of that call, so
 `AppleAISession` records the prompt it sent instead (`recordFailedSend`).
 
+`node.failure` and `node.destruction` carry Python's `failure_details` fields (railtracks#1643):
+`traceback`, `frames` and `fatal`, plus `status` and the exception fields on destruction (`null` on
+success). Swift has no stack trace, so an `RTSError`'s call site stands in: `thrown at
+<file>:<line> in <function>` and one frame, or `""` and `[]` for other errors. `fatal` is always
+`false`. `invokeCore` builds one `RTSEventFailureDetails` from the node's final error and passes it
+to both events, so they agree. The trace's failed-edge `traceback` comes from the same
+`RTSEventFailure.callSite(of:)`. See `docs/node-failure-fields.md`.
+
 Design rationale, the Python mapping, and the verification runs live in `docs/observability-events.md`.
 
 ### RAG / retrieval (`RailtracksSwiftRAG`)
