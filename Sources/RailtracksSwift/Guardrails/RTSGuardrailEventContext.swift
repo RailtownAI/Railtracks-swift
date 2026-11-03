@@ -71,6 +71,7 @@ struct RTSGuardrailEventContext {
         emitter.emitMiddlewareCreationOnce(typeID: typeID, name: name)
         return RTSGuardrailRailEvents(
             emitter: emitter,
+            railName: name,
             parent: .middleware(
                 middlewareTypeID: typeID,
                 middlewareInvokeID: UUID().uuidString
@@ -98,6 +99,8 @@ struct RTSGuardrailEventContext {
 struct RTSGuardrailRailEvents {
 
     fileprivate let emitter: RTSEventEmitter
+    /// Set on the guard response and failure events, for the trace's `rail_name`.
+    fileprivate let railName: String
     fileprivate let parent: RTSEventParent
     fileprivate let spatialParent: RTSEventSpatialParent
 
@@ -182,7 +185,8 @@ struct RTSGuardrailRailEvents {
                 parent: parent,
                 spatialParent: spatialParent,
                 messageHistory: decision.transformedDictionary ?? unchanged,
-                decision: decision
+                decision: decision,
+                railName: railName
             )
         )
     }
@@ -192,7 +196,8 @@ struct RTSGuardrailRailEvents {
             RTSGuardInputFailureEvent.from(
                 error: error,
                 parent: parent,
-                spatialParent: spatialParent
+                spatialParent: spatialParent,
+                railName: railName
             )
         )
     }
@@ -219,7 +224,8 @@ struct RTSGuardrailRailEvents {
                 parent: parent,
                 spatialParent: spatialParent,
                 response: decision.transformedDictionary ?? unchanged,
-                decision: decision
+                decision: decision,
+                railName: railName
             )
         )
     }
@@ -229,7 +235,8 @@ struct RTSGuardrailRailEvents {
             RTSGuardOutputFailureEvent.from(
                 error: error,
                 parent: parent,
-                spatialParent: spatialParent
+                spatialParent: spatialParent,
+                railName: railName
             )
         )
     }

@@ -25,6 +25,18 @@ public struct RTSNodeCreationEvent: RTSObservabilityEvent {
     public let name: String
     public let nodeType: RTSFlowNodeType
 
+    // Not part of the payload: what the trace collector's signposts need about the node, set by
+    // `RTSNodeInvoker.invokeCore`. Python's `NodeCreation` has no such fields.
+
+    /// Whether the node is an agent with input guardrails.
+    let hasInputGuardrail: Bool
+    /// Whether the node is an agent with output guardrails.
+    let hasOutputGuardrail: Bool
+    /// The agent's provider name, such as `OpenAI`; empty for other nodes.
+    let provider: String
+    /// The agent's model ID; empty for other nodes.
+    let model: String
+
     public init(
         nodeID: String,
         name: String,
@@ -32,9 +44,38 @@ public struct RTSNodeCreationEvent: RTSObservabilityEvent {
         spatialParent: RTSEventSpatialParent = .noParent,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
+        self.init(
+            nodeID: nodeID,
+            name: name,
+            nodeType: nodeType,
+            hasInputGuardrail: false,
+            hasOutputGuardrail: false,
+            provider: "",
+            model: "",
+            spatialParent: spatialParent,
+            timestamp: timestamp
+        )
+    }
+
+    /// The public init plus the internal properties.
+    init(
+        nodeID: String,
+        name: String,
+        nodeType: RTSFlowNodeType,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool,
+        provider: String,
+        model: String,
+        spatialParent: RTSEventSpatialParent = .noParent,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) {
         self.nodeID = nodeID
         self.name = name
         self.nodeType = nodeType
+        self.hasInputGuardrail = hasInputGuardrail
+        self.hasOutputGuardrail = hasOutputGuardrail
+        self.provider = provider
+        self.model = model
         self.spatialParent = spatialParent
         self.timestamp = timestamp
     }
@@ -68,18 +109,24 @@ public struct RTSNodeInvocationEvent: RTSParentedEvent {
     /// reason the flow graph's `input_args` is always `[]`.
     public let args: [RTSValue]
     public let kwargs: RTSInput
+    /// The invocation's run ID, which stamps the messages it produced. The root's is the flow-graph
+    /// trace's `run_id`, and every node's is its `RTSNodeStatus.runID`. Swift-only: Python's
+    /// `NodeInvocation` has no such field.
+    public let runID: RTSRunID?
 
     public init(
         parent: RTSEventParent,
         spatialParent: RTSEventSpatialParent,
         args: [RTSValue] = [],
         kwargs: RTSInput,
+        runID: RTSRunID? = nil,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
         self.parent = parent
         self.spatialParent = spatialParent
         self.args = args
         self.kwargs = kwargs
+        self.runID = runID
         self.timestamp = timestamp
     }
 
@@ -87,6 +134,7 @@ public struct RTSNodeInvocationEvent: RTSParentedEvent {
         var payload = parentedBasePayload()
         payload["args"] = .array(args)
         payload["kwargs"] = .object(kwargs)
+        payload["run_id"] = .nullable(runID?.uuidString)
         return payload
     }
 }

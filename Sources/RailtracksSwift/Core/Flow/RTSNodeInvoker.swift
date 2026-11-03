@@ -232,13 +232,21 @@ public class RTSNodeInvoker: @unchecked Sendable {
         // parent — matching Python's `CreationEventBase`.
         let eventParent = RTSEventParent.node(nodeID: invocationID.uuidString)
         let eventSpatialParent = RTSEventSpatialParent.node(nodeID: parentInvocationID?.uuidString)
+        // The flags, provider and model are off the wire, for the trace collector's signposts.
         eventEmitter?.emit(
             RTSNodeCreationEvent(
                 nodeID: invocationID.uuidString,
                 name: node.name(),
-                nodeType: nodeType
+                nodeType: nodeType,
+                hasInputGuardrail: runInputGuardrails != nil,
+                hasOutputGuardrail: runOutputGuardrails != nil,
+                provider: provider,
+                model: model
             )
         )
+        // Minted before `node.invocation`, which carries it: the messages this invocation produces
+        // are stamped with it, and the root's is the trace's `run_id`.
+        let runID = UUID()
         // Emitted *before* the guardrails, so a blocked input guardrail still leaves the node
         // with a complete lifecycle rather than a creation and a destruction with nothing
         // between them. It also puts `kwargs` at the pre-transform value, which is what
@@ -249,7 +257,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
             RTSNodeInvocationEvent(
                 parent: eventParent,
                 spatialParent: eventSpatialParent,
-                kwargs: input
+                kwargs: input,
+                runID: runID
             )
         )
 
@@ -271,7 +280,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
             guardError = result.error
         }
 
-        let runID = UUID()
         let edgeID = createdBy == nil ? runID : UUID()
         await publishEdgeCreated(
             edgeID: edgeID,

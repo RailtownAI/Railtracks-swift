@@ -262,11 +262,24 @@ extension RailtracksSwiftTestSuite {
             #expect(
                 Set(payload.keys) == [
                     "timestamp", "spatial_parent_type", "spatial_parent_node_id",
-                    "parent_type", "parent_node_id", "args", "kwargs",
+                    "parent_type", "parent_node_id", "args", "kwargs", "run_id",
                 ]
             )
             #expect(payload["args"] == .array([]))
             #expect(payload["kwargs"] == .object(["prompt": .string("hi")]))
+            #expect(payload["run_id"] == .null)
+        }
+
+        @Test("node.invocation writes its Swift-only run_id")
+        func nodeInvocationRunID() {
+            let runID = UUID()
+            let event = RTSNodeInvocationEvent(
+                parent: .node(nodeID: "n1"),
+                spatialParent: .node(nodeID: nil),
+                kwargs: [:],
+                runID: runID
+            )
+            #expect(event.encodePayload()["run_id"] == .string(runID.uuidString))
         }
 
         @Test("node.response writes null for an absent response")

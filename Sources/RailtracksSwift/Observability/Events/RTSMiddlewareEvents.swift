@@ -129,6 +129,8 @@ public struct RTSGuardInputResponseEvent: RTSMiddlewareEvent {
     public let parent: RTSEventParent
     public let messageHistory: RTSInput
     public let decision: RTSGuardrailDecision
+    /// See ``RTSGuardInputFailureEvent/railName``.
+    let railName: String
 
     public init(
         parent: RTSEventParent,
@@ -137,10 +139,30 @@ public struct RTSGuardInputResponseEvent: RTSMiddlewareEvent {
         decision: RTSGuardrailDecision,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
+        self.init(
+            parent: parent,
+            spatialParent: spatialParent,
+            messageHistory: messageHistory,
+            decision: decision,
+            railName: "",
+            timestamp: timestamp
+        )
+    }
+
+    /// The public init plus the internal `railName`.
+    init(
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        messageHistory: RTSInput,
+        decision: RTSGuardrailDecision,
+        railName: String,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) {
         self.parent = parent
         self.spatialParent = spatialParent
         self.messageHistory = messageHistory
         self.decision = decision
+        self.railName = railName
         self.timestamp = timestamp
     }
 
@@ -165,6 +187,10 @@ public struct RTSGuardInputFailureEvent: RTSMiddlewareEvent, RTSFailureReporting
     public let parent: RTSEventParent
     public let exceptionName: String
     public let exceptionMessage: String
+    /// The guardrail's name, for the flow-graph trace's `rail_name`. Not part of the payload:
+    /// there it is `middleware.creation`'s `middleware_name`, announced once per flow, which a
+    /// per-run trace collector would miss from the second run on. Set by `RTSGuardrailRailEvents`.
+    let railName: String
 
     public init(
         parent: RTSEventParent,
@@ -173,10 +199,30 @@ public struct RTSGuardInputFailureEvent: RTSMiddlewareEvent, RTSFailureReporting
         exceptionMessage: String,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
+        self.init(
+            parent: parent,
+            spatialParent: spatialParent,
+            exceptionName: exceptionName,
+            exceptionMessage: exceptionMessage,
+            railName: "",
+            timestamp: timestamp
+        )
+    }
+
+    /// The public init plus the internal `railName`.
+    init(
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        exceptionName: String,
+        exceptionMessage: String,
+        railName: String,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) {
         self.parent = parent
         self.spatialParent = spatialParent
         self.exceptionName = exceptionName
         self.exceptionMessage = exceptionMessage
+        self.railName = railName
         self.timestamp = timestamp
     }
 
@@ -187,12 +233,30 @@ public struct RTSGuardInputFailureEvent: RTSMiddlewareEvent, RTSFailureReporting
         spatialParent: RTSEventSpatialParent,
         timestamp: Date = RTSEventTimestamp.now()
     ) -> RTSGuardInputFailureEvent {
+        from(
+            error: error,
+            parent: parent,
+            spatialParent: spatialParent,
+            railName: "",
+            timestamp: timestamp
+        )
+    }
+
+    /// ``from(error:parent:spatialParent:timestamp:)`` plus the internal `railName`.
+    static func from(
+        error: Error,
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        railName: String,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) -> RTSGuardInputFailureEvent {
         let failure = RTSEventFailure.fields(from: error)
         return RTSGuardInputFailureEvent(
             parent: parent,
             spatialParent: spatialParent,
             exceptionName: failure.name,
             exceptionMessage: failure.message,
+            railName: railName,
             timestamp: timestamp
         )
     }
@@ -252,6 +316,8 @@ public struct RTSGuardOutputResponseEvent: RTSMiddlewareEvent {
     public let parent: RTSEventParent
     public let response: RTSOutput
     public let decision: RTSGuardrailDecision
+    /// See ``RTSGuardInputFailureEvent/railName``.
+    let railName: String
 
     public init(
         parent: RTSEventParent,
@@ -260,10 +326,30 @@ public struct RTSGuardOutputResponseEvent: RTSMiddlewareEvent {
         decision: RTSGuardrailDecision,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
+        self.init(
+            parent: parent,
+            spatialParent: spatialParent,
+            response: response,
+            decision: decision,
+            railName: "",
+            timestamp: timestamp
+        )
+    }
+
+    /// The public init plus the internal `railName`.
+    init(
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        response: RTSOutput,
+        decision: RTSGuardrailDecision,
+        railName: String,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) {
         self.parent = parent
         self.spatialParent = spatialParent
         self.response = response
         self.decision = decision
+        self.railName = railName
         self.timestamp = timestamp
     }
 
@@ -288,6 +374,8 @@ public struct RTSGuardOutputFailureEvent: RTSMiddlewareEvent, RTSFailureReportin
     public let parent: RTSEventParent
     public let exceptionName: String
     public let exceptionMessage: String
+    /// See ``RTSGuardInputFailureEvent/railName``.
+    let railName: String
 
     public init(
         parent: RTSEventParent,
@@ -296,10 +384,30 @@ public struct RTSGuardOutputFailureEvent: RTSMiddlewareEvent, RTSFailureReportin
         exceptionMessage: String,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
+        self.init(
+            parent: parent,
+            spatialParent: spatialParent,
+            exceptionName: exceptionName,
+            exceptionMessage: exceptionMessage,
+            railName: "",
+            timestamp: timestamp
+        )
+    }
+
+    /// The public init plus the internal `railName`.
+    init(
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        exceptionName: String,
+        exceptionMessage: String,
+        railName: String,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) {
         self.parent = parent
         self.spatialParent = spatialParent
         self.exceptionName = exceptionName
         self.exceptionMessage = exceptionMessage
+        self.railName = railName
         self.timestamp = timestamp
     }
 
@@ -310,12 +418,30 @@ public struct RTSGuardOutputFailureEvent: RTSMiddlewareEvent, RTSFailureReportin
         spatialParent: RTSEventSpatialParent,
         timestamp: Date = RTSEventTimestamp.now()
     ) -> RTSGuardOutputFailureEvent {
+        from(
+            error: error,
+            parent: parent,
+            spatialParent: spatialParent,
+            railName: "",
+            timestamp: timestamp
+        )
+    }
+
+    /// ``from(error:parent:spatialParent:timestamp:)`` plus the internal `railName`.
+    static func from(
+        error: Error,
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        railName: String,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) -> RTSGuardOutputFailureEvent {
         let failure = RTSEventFailure.fields(from: error)
         return RTSGuardOutputFailureEvent(
             parent: parent,
             spatialParent: spatialParent,
             exceptionName: failure.name,
             exceptionMessage: failure.message,
+            railName: railName,
             timestamp: timestamp
         )
     }
