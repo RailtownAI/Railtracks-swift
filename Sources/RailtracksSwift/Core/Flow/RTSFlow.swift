@@ -318,8 +318,11 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<String, Error>
         do {
-            let output = try await withRunStops(settings, stop: nodeInvoker.runStop) { [input] in
-                try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+            // Every event of this run is emitted inside this binding; see `currentRunScope`.
+            let output = try await RTSEventEmitter.$currentRunScope.withValue(UUID()) { [input] in
+                try await withRunStops(settings, stop: nodeInvoker.runStop) {
+                    try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+                }
             }
             guard case let .string(result) = output[agent.outputKeyResult] else {
                 throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
@@ -381,8 +384,11 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<RTSOutput, Error>
         do {
-            let output = try await withRunStops(settings, stop: nodeInvoker.runStop) {
-                try await nodeInvoker.invokeFunction(node, input: input, context: context)
+            // Every event of this run is emitted inside this binding; see `currentRunScope`.
+            let output = try await RTSEventEmitter.$currentRunScope.withValue(UUID()) {
+                try await withRunStops(settings, stop: nodeInvoker.runStop) {
+                    try await nodeInvoker.invokeFunction(node, input: input, context: context)
+                }
             }
             outcome = .success(output)
         } catch {

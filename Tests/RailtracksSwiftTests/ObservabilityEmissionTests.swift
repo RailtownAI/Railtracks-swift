@@ -240,6 +240,42 @@ extension RailtracksSwiftTestSuite {
             #expect(childInvocation.payload["spatial_parent_node_id"] == .string(rootNodeID))
         }
 
+        @Test("node.invocation carries the invocation's run ID: the root's is the trace's run_id")
+        func invocationRunID() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+
+            let child = StubOrchestrator(nodeName: "Child") { _, _ in
+                ["result": .string("child")]
+            }
+            let root = StubOrchestrator(nodeName: "Root") { input, context in
+                try await context.call(child, input: input)
+            }
+            let flow = RTSFlow(title: "EmitRunID")
+            let recorder = EventRecorder(flow.eventPublisher)
+
+            _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            let invocations = recorder.events(ofType: "node.invocation")
+            let runIDs = invocations.map { str($0.payload["run_id"]) }
+            #expect(runIDs.count == 2)
+            #expect(runIDs.allSatisfy { $0.flatMap(UUID.init(uuidString:)) != nil })
+            #expect(Set(runIDs).count == 2)
+
+            let rootInvocation = try #require(
+                invocations.first { $0.payload["spatial_parent_node_id"] == .null }
+            )
+            // The URL subject replays its latest value, which `run` set before returning.
+            var written: URL?
+            for await result in flow.outputFileURLPublisher.values {
+                written = try result.get()
+                break
+            }
+            let url = try #require(written)
+            let graph = try JSONDecoder().decode(RTSFlowGraph.self, from: Data(contentsOf: url))
+            let run = try #require(graph.runs.first)
+            #expect(rootInvocation.payload["run_id"] == .string(run.runID))
+        }
+
         // MARK: - Failure
 
         @Test("A throwing node emits failure and destruction, and fails the session")
