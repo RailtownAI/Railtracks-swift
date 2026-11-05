@@ -17,20 +17,17 @@ struct RTSConduitOrchestratorToolBridge: Tool {
 
     private let orchestratorTool: RTSOrchestratorTool
     private let makeSession: @Sendable (any RTSAgentNode) throws -> RTSLLMSession
-    private let onNewSession: @Sendable (RTSLLMSession) -> Void
     private let nodeInvoker: RTSNodeInvoker
     private let createdBy: any RTSAgentNode
 
     init(
         orchestratorTool: RTSOrchestratorTool,
         makeSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
-        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
         nodeInvoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode
     ) {
         self.orchestratorTool = orchestratorTool
         self.makeSession = makeSession
-        self.onNewSession = onNewSession
         self.nodeInvoker = nodeInvoker
         self.createdBy = createdBy
     }
@@ -55,7 +52,6 @@ struct RTSConduitOrchestratorToolBridge: Tool {
         let context = RTSRunContext(
             invoker: nodeInvoker,
             makeSession: makeSession,
-            onNewSession: onNewSession,
             createdBy: createdBy
         )
         var output = try await nodeInvoker.invokeFunction(

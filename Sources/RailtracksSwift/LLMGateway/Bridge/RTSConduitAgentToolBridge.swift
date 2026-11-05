@@ -14,20 +14,17 @@ struct RTSConduitAgentToolBridge: Tool {
 
     private let agentTool: RTSAgentTool
     private let makeSession: @Sendable () throws -> RTSLLMSession
-    private let onNewSession: @Sendable (RTSLLMSession) -> Void
     private let nodeInvoker: RTSNodeInvoker
     private let createdBy: any RTSAgentNode
 
     init(
         agentTool: RTSAgentTool,
         makeSession: @escaping @Sendable () throws -> RTSLLMSession,
-        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
         nodeInvoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode
     ) {
         self.agentTool = agentTool
         self.makeSession = makeSession
-        self.onNewSession = onNewSession
         self.nodeInvoker = nodeInvoker
         self.createdBy = createdBy
     }
@@ -64,7 +61,6 @@ struct RTSConduitAgentToolBridge: Tool {
             input[systemKey] = systemMessage
         }
         let session = try makeSession()
-        onNewSession(session)
         var output = try await nodeInvoker.invokeAgent(
             agentTool.wrappedAgent,
             input: input,

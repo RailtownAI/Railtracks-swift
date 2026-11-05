@@ -139,7 +139,7 @@ private struct StubAgentNode: RTSAgentNode {
 private func buildSessionIgnoringProviderErrors(for agent: any RTSAgentNode) {
     let gateway = RTSLLMGateway(apiKeys: [:])
     let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
-    _ = try? gateway.session(invoker: invoker, agentNode: agent, onNewSession: { _ in })
+    _ = try? gateway.session(invoker: invoker, agentNode: agent)
 }
 
 /// The rule every supported provider's function name must satisfy: first character a letter or an
@@ -571,7 +571,6 @@ extension RailtracksSwiftTestSuite {
             let bridge = RTSConduitAgentToolBridge(
                 agentTool: agentTool,
                 makeSession: { throw RTSError.encodingFailed() },
-                onNewSession: { _ in },
                 nodeInvoker: invoker,
                 createdBy: parent
             )

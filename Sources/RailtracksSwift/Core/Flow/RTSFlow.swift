@@ -259,14 +259,13 @@ public class RTSFlow: @unchecked Sendable {
     /// Builds an agent's session for a run: the gateway in production, a scripted session in tests.
     typealias SessionFactory = @Sendable (
         _ invoker: RTSNodeInvoker,
-        _ agent: any RTSAgentNode,
-        _ onNewSession: @escaping @Sendable (RTSLLMSession) -> Void
+        _ agent: any RTSAgentNode
     ) throws -> RTSLLMSession
 
     /// The production ``SessionFactory``: every session comes from `gateway`.
     private static func sessionFactory(for gateway: RTSLLMGateway) -> SessionFactory {
-        { invoker, agent, onNewSession in
-            try gateway.session(invoker: invoker, agentNode: agent, onNewSession: onNewSession)
+        { invoker, agent in
+            try gateway.session(invoker: invoker, agentNode: agent)
         }
     }
 
@@ -286,13 +285,10 @@ public class RTSFlow: @unchecked Sendable {
             settings: settings,
             runScope: runScope
         )
-        // The collector reads messages from the `llm.*` events now, so nothing subscribes to a
-        // session's messages. The parameter is removed from the session plumbing separately.
-        let onNewSession: @Sendable (RTSLLMSession) -> Void = { _ in }
 
         let session: RTSLLMSession
         do {
-            session = try makeSession(nodeInvoker, agent, onNewSession)
+            session = try makeSession(nodeInvoker, agent)
         } catch {
             // Session build failures (e.g. missingAPIKey) never reach the invocation
             // catch below, so report them here; control flow is unchanged — the error
@@ -309,7 +305,6 @@ public class RTSFlow: @unchecked Sendable {
             await flushEvents()
             throw error
         }
-        onNewSession(session)   // subscribe the root agent's own session
 
         var input = agent.inputs
         input[agent.inputKeyPrompt] = .string(prompt)
@@ -377,15 +372,12 @@ public class RTSFlow: @unchecked Sendable {
             settings: settings,
             runScope: runScope
         )
-        // See the agent overload: nothing subscribes to a session's messages any more.
-        let onNewSession: @Sendable (RTSLLMSession) -> Void = { _ in }
 
         let context = RTSRunContext(
             invoker: nodeInvoker,
             makeSession: { agent in
-                try makeSession(nodeInvoker, agent, onNewSession)
+                try makeSession(nodeInvoker, agent)
             },
-            onNewSession: onNewSession,
             createdBy: node
         )
 

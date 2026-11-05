@@ -311,7 +311,6 @@ final class AppleAISession: @unchecked Sendable {
         invoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode,
         makeSubSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
-        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
         sessionFactory: MakeSession? = nil
     ) throws -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
@@ -324,7 +323,6 @@ final class AppleAISession: @unchecked Sendable {
                         agentTool: agentTool,
                         parameters: schema,
                         makeSession: { try makeSubSession(agentTool.wrappedAgent) },
-                        onNewSession: onNewSession,
                         nodeInvoker: invoker,
                         createdBy: createdBy
                     )
@@ -343,7 +341,6 @@ final class AppleAISession: @unchecked Sendable {
                         orchestratorTool: orchestratorTool,
                         parameters: schema,
                         makeSession: makeSubSession,
-                        onNewSession: onNewSession,
                         nodeInvoker: invoker,
                         createdBy: createdBy
                     )

@@ -186,7 +186,7 @@ private extension RTSValue {
 
 /// Builds every agent's session from `scripts`, keyed by agent name.
 private func scriptedSessions(_ scripts: [String: ScriptedReply]) -> RTSFlow.SessionFactory {
-    { invoker, agent, _ in
+    { invoker, agent in
         ScriptedSession.make(
             script: scripts[agent.agentName] ?? ScriptedReply(),
             invoker: invoker,

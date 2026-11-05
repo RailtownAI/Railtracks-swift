@@ -295,7 +295,7 @@ struct FoundationModelProviderTests {
         )
         let gateway = RTSLLMGateway(apiKeys: [:])
         let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
-        let session = try gateway.session(invoker: invoker, agentNode: agent, onNewSession: { _ in })
+        let session = try gateway.session(invoker: invoker, agentNode: agent)
 
         let published = PublishedMessages()
         let subscription = session.messagePublisher.sink { messages in
@@ -346,7 +346,7 @@ struct FoundationModelProviderTests {
         )
         let gateway = RTSLLMGateway(apiKeys: [:])
         let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
-        let session = try gateway.session(invoker: invoker, agentNode: agent, onNewSession: { _ in })
+        let session = try gateway.session(invoker: invoker, agentNode: agent)
 
         let published = PublishedMessages()
         let subscription = session.messagePublisher.sink { messages in
