@@ -1780,3 +1780,25 @@ extension RailtracksSwiftTestSuite.TraceGoldenTests {
 }
 """#
 }
+
+extension RailtracksSwiftTestSuite.TraceGoldenTests {
+    /// Captured from the collector before #68 and confirmed identical after it.
+    static let signpostsGolden = #"""
+graph Lookup node=<node:Lookup> parent=Researcher parentID=<node:Researcher> type=Tool parentType=Agent error=false parentError=false cost=0.0 model= session=<session> run=<run> start=<time>
+graph Planner node=<node:Planner> parent= parentID= type=Function parentType=nil error=false parentError=false cost=0.0 model= session=<session> run=<run> start=<time>
+graph Researcher node=<node:Researcher> parent=Planner parentID=<node:Planner> type=Agent parentType=Function error=false parentError=false cost=0.0 model= session=<session> run=<run> start=<time>
+io Lookup 001 kwarg:query node=<node:Lookup> message=<id>-kwarg-query source=edge direction=Input role=kwarg:query model= provider= cost=0.0 latency=0.0 tokens=0/0 content=trains guards=false/false session=<session> run=<run> start=<time>
+io Lookup 002 result node=<node:Lookup> message=<id>-out2 source=edge direction=Output role=result model= provider= cost=0.0 latency=0.0 tokens=0/0 content=Lookup: trains guards=false/false session=<session> run=<run> start=<time>
+io Planner 009 kwarg:topic node=<node:Planner> message=<run>-kwarg-topic source=edge direction=Input role=kwarg:topic model= provider= cost=0.0 latency=0.0 tokens=0/0 content=trains guards=false/false session=<session> run=<run> start=<time>
+io Planner 010 summary node=<node:Planner> message=<run>-out10 source=edge direction=Output role=summary model= provider= cost=0.0 latency=0.0 tokens=0/0 content=trains run on rails guards=false/false session=<session> run=<run> start=<time>
+io Researcher 003 kwarg:prompt node=<node:Researcher> message=<id>-kwarg-prompt source=edge direction=Input role=kwarg:prompt model=on-device provider=AppleAI cost=0.0 latency=0.0 tokens=0/0 content=Research trains guards=true/false session=<session> run=<run> start=<time>
+io Researcher 004 result node=<node:Researcher> message=<id>-out4 source=edge direction=Output role=result model=on-device provider=AppleAI cost=0.0 latency=0.0 tokens=0/0 content=Success guards=true/false session=<session> run=<run> start=<time>
+io Researcher 005 user node=<node:Researcher> message=<id> source=llm direction=Input role=user model=apple-on-device provider=AppleAI cost=0.0 latency=0.0 tokens=0/0 content=Research trains guards=true/false session=<session> run=<run> start=<time>
+io Researcher 006 assistant node=<node:Researcher> message=<id> source=llm direction=Output role=assistant model=apple-on-device provider=AppleAI cost=0.0 latency=0.5 tokens=11/7 content= guards=true/false session=<session> run=<run> start=<time>
+io Researcher 007 tool node=<node:Researcher> message=<id> source=llm direction=Output role=tool model=apple-on-device provider=AppleAI cost=0.0 latency=0.0 tokens=0/0 content=Lookup: trains guards=true/false session=<session> run=<run> start=<time>
+io Researcher 008 assistant node=<node:Researcher> message=<id> source=llm direction=Output role=assistant model=apple-on-device provider=AppleAI cost=0.0 latency=0.5 tokens=11/7 content=trains run on rails guards=true/false session=<session> run=<run> start=<time>
+tree Lookup node=<node:Lookup> type=Tool model= provider= cost=0.0 latency=<duration> tokens=0/0 error=false ancestors=Planner>Researcher guards=false/false session=<session> run=<run> start=<time>
+tree Planner node=<node:Planner> type=Function model= provider= cost=0.0 latency=<duration> tokens=0/0 error=false ancestors= guards=false/false session=<session> run=<run> start=<time>
+tree Researcher node=<node:Researcher> type=Agent model=apple-on-device provider=AppleAI cost=0.0 latency=<duration> tokens=22/14 error=false ancestors=Planner guards=true/false session=<session> run=<run> start=<time>
+"""#
+}

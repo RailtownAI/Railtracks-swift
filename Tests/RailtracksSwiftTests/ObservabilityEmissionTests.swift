@@ -449,32 +449,7 @@ extension RailtracksSwiftTestSuite {
             #expect(recorder.events.isEmpty)
         }
 
-        @Test("The JSON trace is unaffected by whether events are emitted")
-        func traceUnaffectedByEmission() async throws {
-            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
-
-            func runAndLoadTrace(emitsEvents: Bool) async throws -> RTSFlowGraph {
-                let root = StubOrchestrator(nodeName: "Root") { _, _ in
-                    ["result": .string("done")]
-                }
-                let flow = RTSFlow(title: "EmitTraceParity", emitsEvents: emitsEvents)
-                _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
-                for await result in flow.outputFileURLPublisher.values {
-                    let url = try result.get()
-                    return try JSONDecoder().decode(RTSFlowGraph.self, from: Data(contentsOf: url))
-                }
-                throw StubError()
-            }
-
-            let withEvents = try await runAndLoadTrace(emitsEvents: true)
-            let withoutEvents = try await runAndLoadTrace(emitsEvents: false)
-
-            // Ids and timings differ per run; the structure must not.
-            #expect(withEvents.runs.count == withoutEvents.runs.count)
-            #expect(withEvents.runs[0].nodes.count == withoutEvents.runs[0].nodes.count)
-            #expect(withEvents.runs[0].edges.count == withoutEvents.runs[0].edges.count)
-            #expect(withEvents.runs[0].steps.count == withoutEvents.runs[0].steps.count)
-            #expect(withEvents.runs[0].status == withoutEvents.runs[0].status)
-        }
+        // The trace is now built from these events, so `emitsEvents: false` writes no trace:
+        // `TraceGoldenTests.noTraceWithoutEvents`. See docs/trace-from-events.md.
     }
 }

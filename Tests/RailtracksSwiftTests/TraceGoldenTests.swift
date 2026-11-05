@@ -367,6 +367,197 @@ private func expectTrace(
 
 private let toolCallingProvider = RTSLLMProvider.appleAI
 
+// MARK: - Signposts
+
+/// Records the collector's point signposts (graph node, tree node, IO) as one line each.
+///
+/// Times become `<time>` / `<duration>` as they are recorded. Ids are left for ``lines`` to
+/// replace, since a node's name is only known from its graph signpost. Tree and IO signposts are
+/// emitted from detached tasks, so their order varies and the lines are sorted.
+private final class RecordingPointSignposts: RTSSignpostEmitting, Sendable {
+    private struct GraphNode {
+        let nodeID: String
+        let name: String
+        let parentID: String
+        let runID: String
+    }
+
+    private let records = Mutex<[String]>([])
+    private let graphNodes = Mutex<[GraphNode]>([])
+    private let treeNodeCount = Mutex(0)
+
+    func emitNodeStart(
+        nodeID: UUID,
+        parentNodeID: UUID?,
+        nodeName: String,
+        nodeType: RTSFlowNodeType,
+        sessionID: UUID,
+        parentName: String,
+        runID: RTSRunID,
+        input: RTSInput,
+        instructions: String?,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
+    ) {
+    }
+
+    func emitNodeEnd(
+        nodeID: UUID,
+        nodeName: String,
+        nodeType: RTSFlowNodeType,
+        sessionID: UUID,
+        parentName: String,
+        runID: RTSRunID,
+        output: RTSOutput?,
+        error: Error?
+    ) {
+    }
+
+    func emitGraphNode(
+        nodeID: String,
+        parentID: String,
+        sessionID: String,
+        runID: String,
+        nodeType: RTSFlowNodeType,
+        parentType: RTSFlowNodeType?,
+        error: Bool,
+        parentError: Bool,
+        cost: Double,
+        model: String,
+        parentName: String,
+        name: String,
+        startTime: TimeInterval
+    ) {
+        graphNodes.withLock { nodes in
+            nodes.append(GraphNode(nodeID: nodeID, name: name, parentID: parentID, runID: runID))
+        }
+        record(
+            "graph \(name) node=\(nodeID) parent=\(parentName) parentID=\(parentID)"
+                + " type=\(nodeType.rawValue) parentType=\(parentType?.rawValue ?? "nil")"
+                + " error=\(error) parentError=\(parentError) cost=\(cost) model=\(model)"
+                + " session=\(sessionID) run=\(runID) start=\(Self.time(startTime))"
+        )
+    }
+
+    func emitTreeNode(
+        nodeID: String,
+        sessionID: String,
+        runID: String,
+        nodeType: RTSFlowNodeType,
+        model: String,
+        provider: String,
+        cost: Double,
+        latency: Double,
+        inputTokens: Int,
+        outputTokens: Int,
+        error: Bool,
+        ancestors: [String],
+        name: String,
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
+    ) {
+        treeNodeCount.withLock { $0 += 1 }
+        let duration = latency >= 0 ? "<duration>" : "negative"
+        record(
+            "tree \(name) node=\(nodeID) type=\(nodeType.rawValue) model=\(model)"
+                + " provider=\(provider) cost=\(cost) latency=\(duration)"
+                + " tokens=\(inputTokens)/\(outputTokens) error=\(error)"
+                + " ancestors=\(ancestors.joined(separator: ">"))"
+                + " guards=\(hasInputGuardrail)/\(hasOutputGuardrail)"
+                + " session=\(sessionID) run=\(runID) start=\(Self.time(startTime))"
+        )
+    }
+
+    func emitIO(
+        nodeID: String,
+        sessionID: String,
+        runID: String,
+        messageID: String,
+        source: String,
+        direction: String,
+        role: String,
+        model: String,
+        provider: String,
+        cost: Double,
+        latency: Double,
+        inputTokens: Int,
+        outputTokens: Int,
+        displayRole: String,
+        toolName: String,
+        content: String,
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
+    ) {
+        record(
+            "io \(toolName) \(displayRole) node=\(nodeID) message=\(messageID) source=\(source)"
+                + " direction=\(direction) role=\(role) model=\(model) provider=\(provider)"
+                + " cost=\(cost) latency=\(latency) tokens=\(inputTokens)/\(outputTokens)"
+                + " content=\(content) guards=\(hasInputGuardrail)/\(hasOutputGuardrail)"
+                + " session=\(sessionID) run=\(runID) start=\(Self.time(startTime))"
+        )
+    }
+
+    /// Waits for the detached tree and IO signposts: until every graph node has its tree node,
+    /// and then until nothing more arrives for a moment.
+    func settled() async throws {
+        for _ in 0..<100 {
+            let graphCount = graphNodes.withLock { $0.count }
+            if graphCount > 0, treeNodeCount.withLock({ $0 }) == graphCount {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        var count = records.withLock { $0.count }
+        while true {
+            try await Task.sleep(for: .milliseconds(100))
+            let latest = records.withLock { $0.count }
+            if latest == count {
+                return
+            }
+            count = latest
+        }
+    }
+
+    /// The sorted lines, with node ids replaced by `<node:Name>`, the session id by `<session>`,
+    /// the root's run id by `<run>`, and other ids (messages, edges) by `<id>`.
+    func lines(sessionID: UUID) -> [String] {
+        let nodes = graphNodes.withLock { $0 }
+        let names = Dictionary(
+            nodes.map { ($0.nodeID, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let rootRunID = nodes.first { $0.parentID.isEmpty }?.runID
+        let uuidPattern = /[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/
+        return records.withLock { $0 }
+            .map { line in
+                line.replacing(uuidPattern) { match in
+                    let identifier = String(match.output)
+                    if identifier == sessionID.uuidString {
+                        return "<session>"
+                    }
+                    if identifier == rootRunID {
+                        return "<run>"
+                    }
+                    if let name = names[identifier] {
+                        return "<node:\(name)>"
+                    }
+                    return "<id>"
+                }
+            }
+            .sorted()
+    }
+
+    private func record(_ line: String) {
+        records.withLock { $0.append(line) }
+    }
+
+    private static func time(_ startTime: TimeInterval) -> String {
+        startTime > 0 ? "<time>" : "zero"
+    }
+}
+
 extension RailtracksSwiftTestSuite {
     // Serialized: runs full flows, which share the process-global output directory.
     @Suite("Trace golden", .serialized)
@@ -566,6 +757,93 @@ extension RailtracksSwiftTestSuite {
                 .appendingPathComponent("Golden Quiet_\(flow.id.uuidString)")
                 .appendingPathExtension("json")
             #expect(!FileManager.default.fileExists(atPath: url.path))
+        }
+
+        /// The collector's Instruments point signposts: a graph node per invocation, a tree node per
+        /// finished node, and an IO row per message and per edge input and output.
+        @Test("the collector's signposts")
+        func collectorSignposts() async throws {
+            let lookup = echoTool("Lookup")
+            let check = RTSClosureInputGuardrail(name: "Check") { _ in
+                .allow("fine")
+            }
+            let researcher = RTSAgent(
+                llmProvider: toolCallingProvider,
+                name: "Researcher",
+                tools: [lookup],
+                inputGuardrails: [check]
+            )
+            let planner = ScriptedOrchestrator(nodeName: "Planner") { _, context in
+                let draft = try await context.call(researcher, prompt: "Research trains")
+                return ["summary": .string(draft)]
+            }
+            let script = ScriptedReply(
+                toolCalls: [ScriptedToolCall(tool: lookup, input: ["query": .string("trains")])],
+                reply: "trains run on rails"
+            )
+            let signposts = RecordingPointSignposts()
+            let flow = RTSFlow(title: "Golden Signposts", signpostEmitter: signposts)
+
+            _ = try await flow.run(
+                planner,
+                input: ["topic": .string("trains")],
+                makeSession: scriptedSessions(["Researcher": script])
+            )
+            try await signposts.settled()
+
+            let lines = signposts.lines(sessionID: flow.id).joined(separator: "\n")
+            guard lines != Self.signpostsGolden else {
+                return
+            }
+            let saved = FileManager.default.temporaryDirectory
+                .appendingPathComponent("trace-golden-signposts.txt")
+            try lines.write(to: saved, atomically: true, encoding: .utf8)
+            Issue.record("signposts differ from their golden; actual saved to \(saved.path)")
+        }
+
+        /// The trace is built from the observability events, so a flow that emits none writes none,
+        /// whatever `savesTrace` says.
+        @Test("emitsEvents: false writes no trace")
+        func noTraceWithoutEvents() async throws {
+            let agent = RTSAgent(llmProvider: toolCallingProvider, name: "Silent")
+            let flow = RTSFlow(title: "Golden Silent", savesTrace: true, emitsEvents: false)
+            let sessions = scriptedSessions([:])
+
+            _ = try await flow.run(agent: agent, prompt: "hello", makeSession: sessions)
+
+            let url = RailtracksSwift.flowGraphOutputDirectory
+                .appendingPathComponent("Golden Silent_\(flow.id.uuidString)")
+                .appendingPathExtension("json")
+            #expect(!FileManager.default.fileExists(atPath: url.path))
+        }
+
+        /// Two runs in flight on one flow share its emitter. Each run's trace holds only its own
+        /// nodes. They share a file name, so the file holds whichever finished last.
+        @Test("overlapping runs on one flow don't mix their traces")
+        func overlappingRuns() async throws {
+            let flow = RTSFlow(title: "Golden Overlap")
+            let sessions = scriptedSessions([:])
+            func pipeline(_ label: String) -> ScriptedOrchestrator {
+                let worker = ScriptedOrchestrator(nodeName: "Worker \(label)") { _, _ in
+                    try await Task.sleep(for: .milliseconds(100))
+                    return ["result": .string(label)]
+                }
+                return ScriptedOrchestrator(nodeName: "Root \(label)") { input, context in
+                    try await context.call(worker, input: input)
+                }
+            }
+
+            async let first = flow.run(pipeline("A"), input: [:], makeSession: sessions)
+            async let second = flow.run(pipeline("B"), input: [:], makeSession: sessions)
+            _ = try await (first, second)
+
+            let trace = try await writtenTrace(of: flow)
+            let graph = try JSONDecoder().decode(RTSFlowGraph.self, from: trace)
+            let run = try #require(graph.runs.first)
+            let names = Set(run.nodes.map { $0.name })
+            #expect(names == ["Root A", "Worker A"] || names == ["Root B", "Worker B"])
+            #expect(run.edges.count == 2)
+            #expect(run.steps.count == 4)
         }
     }
 }

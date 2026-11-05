@@ -43,6 +43,14 @@ struct RTSEdgeFailure {
         self.traceback = RTSEventFailure.callSite(of: error)
     }
 
+    /// The same values from a node event's failure details: the trace collector has those, not the
+    /// error. The details' `""` for an error with no call site is the trace's `null`.
+    init(_ details: RTSEventFailureDetails) {
+        self.type = details.exceptionName
+        self.message = details.exceptionMessage
+        self.traceback = details.traceback.isEmpty ? nil : details.traceback
+    }
+
     /// The `output` value of a failed edge in the trace.
     var traceContent: RTSGeneratedContent {
         RTSGeneratedContent(kind: .structure([

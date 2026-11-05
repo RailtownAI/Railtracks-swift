@@ -281,10 +281,14 @@ public class RTSFlow: @unchecked Sendable {
     ) async throws -> String {
         let settings = currentRunSettings()
         let startedAt = emitSessionStarted(entryPointName: agent.agentName, settings: settings)
-        let (nodeInvoker, collector, subscriptions) = await startCollecting(settings: settings)
-        let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
-            Task { await collector.subscribeMessage(session) }
-        }
+        let runScope = UUID()
+        let (nodeInvoker, collector, subscriptions) = await startCollecting(
+            settings: settings,
+            runScope: runScope
+        )
+        // The collector reads messages from the `llm.*` events now, so nothing subscribes to a
+        // session's messages. The parameter is removed from the session plumbing separately.
+        let onNewSession: @Sendable (RTSLLMSession) -> Void = { _ in }
 
         let session: RTSLLMSession
         do {
@@ -319,7 +323,7 @@ public class RTSFlow: @unchecked Sendable {
         let outcome: Result<String, Error>
         do {
             // Every event of this run is emitted inside this binding; see `currentRunScope`.
-            let output = try await RTSEventEmitter.$currentRunScope.withValue(UUID()) { [input] in
+            let output = try await RTSEventEmitter.$currentRunScope.withValue(runScope) { [input] in
                 try await withRunStops(settings, stop: nodeInvoker.runStop) {
                     try await nodeInvoker.invokeAgent(agent, input: input, session: session)
                 }
@@ -336,7 +340,7 @@ public class RTSFlow: @unchecked Sendable {
             outcome = .failure(reported)
             reportFailure(reported)
         }
-        await collector.awaitCompletion()
+        await collector?.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
         emitSessionCompleted(startedAt: startedAt, error: outcome.eventError, settings: settings)
         // Emission is isolated from execution, so the backlog is joined here rather than
@@ -368,10 +372,13 @@ public class RTSFlow: @unchecked Sendable {
     ) async throws -> RTSOutput {
         let settings = currentRunSettings()
         let startedAt = emitSessionStarted(entryPointName: node.name(), settings: settings)
-        let (nodeInvoker, collector, subscriptions) = await startCollecting(settings: settings)
-        let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
-            Task { await collector.subscribeMessage(session) }
-        }
+        let runScope = UUID()
+        let (nodeInvoker, collector, subscriptions) = await startCollecting(
+            settings: settings,
+            runScope: runScope
+        )
+        // See the agent overload: nothing subscribes to a session's messages any more.
+        let onNewSession: @Sendable (RTSLLMSession) -> Void = { _ in }
 
         let context = RTSRunContext(
             invoker: nodeInvoker,
@@ -385,7 +392,7 @@ public class RTSFlow: @unchecked Sendable {
         let outcome: Result<RTSOutput, Error>
         do {
             // Every event of this run is emitted inside this binding; see `currentRunScope`.
-            let output = try await RTSEventEmitter.$currentRunScope.withValue(UUID()) {
+            let output = try await RTSEventEmitter.$currentRunScope.withValue(runScope) {
                 try await withRunStops(settings, stop: nodeInvoker.runStop) {
                     try await nodeInvoker.invokeFunction(node, input: input, context: context)
                 }
@@ -399,7 +406,7 @@ public class RTSFlow: @unchecked Sendable {
             outcome = .failure(reported)
             reportFailure(reported)
         }
-        await collector.awaitCompletion()
+        await collector?.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
         emitSessionCompleted(startedAt: startedAt, error: outcome.eventError, settings: settings)
         // Emission is isolated from execution, so the backlog is joined here rather than
@@ -592,9 +599,13 @@ public class RTSFlow: @unchecked Sendable {
     /// Builds the per-run node invoker + graph collector and wires the
     /// `nodeStatusPublisher` subscriptions. The returned cancellables must be held
     /// for the duration of the run (they are kept alive by `run` awaiting completion).
+    ///
+    /// The collector builds the trace from the run's observability events, so there is none
+    /// when the flow emits no events, or doesn't save its trace.
     private func startCollecting(
-        settings: RunSettings
-    ) async -> (RTSNodeInvoker, RTSFlowGraphCollector, Set<AnyCancellable>) {
+        settings: RunSettings,
+        runScope: UUID
+    ) async -> (RTSNodeInvoker, RTSFlowGraphCollector?, Set<AnyCancellable>) {
         // Warm the pricing map now (fire-and-forget) so the first per-node signpost cost
         // calculation doesn't pay the remote/disk fetch. It runs concurrently with the
         // flow and finishes long before the first node completes an LLM round-trip;
@@ -647,13 +658,15 @@ public class RTSFlow: @unchecked Sendable {
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
             .store(in: &subscriptions)
 
+        guard savesTrace, eventEmitter.isEnabled else {
+            return (nodeInvoker, nil, subscriptions)
+        }
         let collector = RTSFlowGraphCollector(
-            stampFactory: stampFactory,
             flowName: title,
             sessionID: id,
-            nodeEventPublisher: nodeInvoker,
+            eventPublisher: eventEmitter.observedEventPublisher,
+            runScope: runScope,
             outputFileURLSubject: outputFileURLSubject,
-            savesTrace: savesTrace,
             signpostEmitter: signpostEmitter
         )
         await collector.setup()
