@@ -22,24 +22,21 @@ public extension RTSOrchestratorNode {
 /// Handle passed to an `RTSOrchestratorNode.run`, letting it invoke agents and other
 /// orchestrators so they are drawn as its children in the trace.
 ///
-/// Each call draws an edge `thisNode → target`. Agents/functions invoked through a
-/// context get their sessions built on demand and subscribed to the flow's collector.
+/// Each call draws an edge `thisNode → target`. Agents invoked through a context get their
+/// sessions built on demand.
 public struct RTSRunContext: Sendable {
     let invoker: RTSNodeInvoker
     let makeSession: @Sendable (any RTSAgentNode) throws -> RTSLLMSession
-    let onNewSession: @Sendable (RTSLLMSession) -> Void
     /// The node that owns this context — the parent for the edges its `call`s draw.
     let createdBy: any RTSNode
 
     init(
         invoker: RTSNodeInvoker,
         makeSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
-        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
         createdBy: any RTSNode
     ) {
         self.invoker = invoker
         self.makeSession = makeSession
-        self.onNewSession = onNewSession
         self.createdBy = createdBy
     }
 
@@ -71,7 +68,6 @@ public struct RTSRunContext: Sendable {
         input: RTSInput
     ) async throws -> RTSOutput {
         let session = try makeSession(agent)
-        onNewSession(session)
         return try await invoker.invokeAgent(
             agent,
             input: input,
@@ -88,8 +84,7 @@ public struct RTSRunContext: Sendable {
         let childContext = RTSRunContext(
             invoker: invoker,
             makeSession: makeSession,
-            onNewSession: onNewSession,
-            createdBy: node                 // the child's own calls parent to the child
+            createdBy: node                // the child's own calls parent to the child
         )
         return try await invoker.invokeFunction(
             node,

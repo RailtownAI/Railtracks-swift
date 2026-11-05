@@ -25,7 +25,6 @@ struct RTSAppleAIAgentToolBridge: Tool {
 
     private let agentTool: RTSAgentTool
     private let makeSession: @Sendable () throws -> RTSLLMSession
-    private let onNewSession: @Sendable (RTSLLMSession) -> Void
     private let nodeInvoker: RTSNodeInvoker
     private let createdBy: any RTSAgentNode
 
@@ -33,7 +32,6 @@ struct RTSAppleAIAgentToolBridge: Tool {
         agentTool: RTSAgentTool,
         parameters: GenerationSchema,
         makeSession: @escaping @Sendable () throws -> RTSLLMSession,
-        onNewSession: @escaping @Sendable (RTSLLMSession) -> Void,
         nodeInvoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode
     ) {
@@ -42,7 +40,6 @@ struct RTSAppleAIAgentToolBridge: Tool {
         self.parameters = parameters
         self.agentTool = agentTool
         self.makeSession = makeSession
-        self.onNewSession = onNewSession
         self.nodeInvoker = nodeInvoker
         self.createdBy = createdBy
     }
@@ -102,7 +99,6 @@ struct RTSAppleAIAgentToolBridge: Tool {
             input[systemKey] = systemMessage
         }
         let session = try makeSession()
-        onNewSession(session)
         var output = try await nodeInvoker.invokeAgent(
             agentTool.wrappedAgent,
             input: input,
