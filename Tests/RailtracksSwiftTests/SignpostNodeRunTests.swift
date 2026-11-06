@@ -184,7 +184,6 @@ extension RailtracksSwiftTestSuite {
                 },
                 setSystemPrompt: { _, _ in },
                 message: { [] },
-                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
                 agentName: "Agent"
             )
 
@@ -285,9 +284,7 @@ extension RailtracksSwiftTestSuite {
             RTSLLMSession(
                 run: { _, _, _ in "done" },
                 setSystemPrompt: { prompt, _ in systemPrompts.record(prompt) },
-                message: { [] },
-                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
-                agentName: "Agent"
+                message: { [] },                agentName: "Agent"
             )
         }
 

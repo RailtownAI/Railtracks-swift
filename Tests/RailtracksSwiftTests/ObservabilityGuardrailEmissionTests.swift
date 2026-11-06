@@ -343,7 +343,6 @@ extension RailtracksSwiftTestSuite {
                 run: { _, _, _ in reply },
                 setSystemPrompt: { _, _ in },
                 message: { [] },
-                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
                 agentName: "Stub"
             )
         }

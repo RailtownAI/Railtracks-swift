@@ -446,7 +446,6 @@ extension RailtracksSwiftTestSuite {
                         )
                     }
                 },
-                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
                 agentName: "Stub"
             )
             let invoker = RTSNodeInvoker(
@@ -486,9 +485,7 @@ extension RailtracksSwiftTestSuite {
             let session = RTSLLMSession(
                 run: { _, _, _ in "hello" },
                 setSystemPrompt: { _, _ in },
-                message: { [stale] },
-                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
-                agentName: "Stub"
+                message: { [stale] },                agentName: "Stub"
             )
             let invoker = RTSNodeInvoker(
                 stampFactory: RTSStampFactory(),

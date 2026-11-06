@@ -40,7 +40,6 @@ private final class ScriptedSession: Sendable {
     private let invoker: RTSNodeInvoker
     private let agent: any RTSAgentNode
     private let log = Mutex<[RTSMessage]>([])
-    private let subject = BufferedPassthroughSubject<[RTSMessage]>()
 
     private init(
         script: ScriptedReply,
@@ -63,22 +62,21 @@ private final class ScriptedSession: Sendable {
                 try await scripted.run(prompt: prompt, runID: runID)
             },
             setSystemPrompt: { systemPrompt, runID in
-                scripted.publish([scripted.message(.system, systemPrompt, runID: runID)])
+                scripted.record([scripted.message(.system, systemPrompt, runID: runID)])
             },
             message: {
                 scripted.log.withLock { $0 }
             },
-            messageSubject: scripted.subject,
             agentName: agent.agentName
         )
     }
 
     private func run(prompt: String, runID: UUID?) async throws -> String {
         var produced = [message(.user, prompt, runID: runID)]
-        // Published however the call ends, as `RTSLLMSession` publishes what accumulated when a
-        // send throws.
+        // Recorded however the call ends, as `RTSLLMSession` records what accumulated when a send
+        // throws.
         defer {
-            publish(produced)
+            record(produced)
         }
         for (index, call) in script.toolCalls.enumerated() {
             let callID = "call_\(index)"
@@ -105,9 +103,8 @@ private final class ScriptedSession: Sendable {
         return script.reply
     }
 
-    private func publish(_ messages: [RTSMessage]) {
+    private func record(_ messages: [RTSMessage]) {
         log.withLock { $0.append(contentsOf: messages) }
-        subject.send(messages)
     }
 
     private func message(
