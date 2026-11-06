@@ -297,16 +297,10 @@ struct FoundationModelProviderTests {
         let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
         let session = try gateway.session(invoker: invoker, agentNode: agent)
 
-        let published = PublishedMessages()
-        let subscription = session.messagePublisher.sink { messages in
-            published.append(messages)
-        }
-        defer {
-            subscription.cancel()
-        }
         _ = try await session.run("What is 2 + 3? Reply with just the number.", runID: UUID())
 
-        let assistantMessages = published.messages.filter { $0.role == .assistant }
+        // `messages()` is what the `llm.*` events, and through them the trace, are built from.
+        let assistantMessages = session.messages().filter { $0.role == .assistant }
         let finalMessage = try #require(assistantMessages.last)
         #expect((finalMessage.metadata?.inputTokenCount ?? 0) > 0)
         #expect((finalMessage.metadata?.tokenCount ?? 0) > 0)
@@ -319,51 +313,6 @@ struct FoundationModelProviderTests {
             #expect(earlier.metadata?.inputTokenCount == nil)
             #expect(earlier.metadata?.tokenCount == nil)
         }
-    }
-
-    /// `session.messages()`, which the `llm.*` events are built from, returns the same stamped
-    /// messages the publisher sends the trace. It used to return the raw transcript messages, so
-    /// every `llm.response` on this path had null tokens, latency and model while the trace had
-    /// them.
-    @Test("session.messages() carries the usage the trace gets")
-    func messagesCarryUsage() async throws {
-        guard #available(macOS 27, iOS 27, *) else {
-            return
-        }
-        guard case .available = SystemLanguageModel.default.availability else {
-            print("⏭️ on-device model unavailable; skipping live usage check")
-            return
-        }
-        let languageModel = RTSFoundationLanguageModel(
-            SystemLanguageModel.default,
-            kind: .appleAI,
-            modelID: "on-device"
-        )
-        let agent = RTSAgent(
-            llmProvider: .foundationModel(languageModel),
-            name: "Usage Probe",
-            systemMessage: "Answer briefly."
-        )
-        let gateway = RTSLLMGateway(apiKeys: [:])
-        let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
-        let session = try gateway.session(invoker: invoker, agentNode: agent)
-
-        let published = PublishedMessages()
-        let subscription = session.messagePublisher.sink { messages in
-            published.append(messages)
-        }
-        defer {
-            subscription.cancel()
-        }
-        _ = try await session.run("What is 2 + 3? Reply with just the number.", runID: UUID())
-
-        let finalMessage = try #require(session.messages().last { $0.role == .assistant })
-        #expect((finalMessage.metadata?.inputTokenCount ?? 0) > 0)
-        #expect((finalMessage.metadata?.tokenCount ?? 0) > 0)
-        #expect(finalMessage.metadata?.model == "on-device")
-        let publishedFinal = try #require(published.messages.last { $0.role == .assistant })
-        #expect(finalMessage.id == publishedFinal.id)
-        #expect(finalMessage.metadata?.inputTokenCount == publishedFinal.metadata?.inputTokenCount)
     }
 }
 #endif
@@ -544,23 +493,6 @@ struct FoundationModelsMessageStampingTests {
             #expect(metadata.model == "claude-sonnet-4-6")
             #expect(metadata.providerName == "Anthropic")
             #expect(metadata.inputTokenCount == nil)
-        }
-    }
-}
-
-private final class PublishedMessages: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: [RTSMessage] = []
-
-    func append(_ messages: [RTSMessage]) {
-        lock.withLock {
-            stored.append(contentsOf: messages)
-        }
-    }
-
-    var messages: [RTSMessage] {
-        lock.withLock {
-            stored
         }
     }
 }

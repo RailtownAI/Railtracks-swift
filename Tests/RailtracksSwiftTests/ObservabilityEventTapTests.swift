@@ -210,7 +210,6 @@ extension RailtracksSwiftTestSuite {
                 message: {
                     []
                 },
-                messageSubject: BufferedPassthroughSubject<[RTSMessage]>(),
                 agentName: "Agent"
             )
 
