@@ -8,13 +8,6 @@
 import Foundation
 import Combine
 
-protocol NodeEventPublishers {
-    var nodeCreateEventPublisher: AnyPublisher<RTSNodeEvent, Never> { get }
-    var nodeInvokeEventPublisher: AnyPublisher<RTSNodeEvent, Never> { get }
-    var edgeCreateEventPublisher: AnyPublisher<RTSEdgeEvent, Never> { get }
-    var edgeFinishEventPublisher: AnyPublisher<RTSEdgeEvent, Never> { get }
-}
-
 /// An operator that facilitate with node invoking, and publish node invoke event
 /// All node invoking should go through this, otherwise will have even record inconsistency
 public class RTSNodeInvoker: @unchecked Sendable {
@@ -33,10 +26,10 @@ public class RTSNodeInvoker: @unchecked Sendable {
     let sessionID: UUID
     let signpostEmitter: (any RTSSignpostEmitting)?
 
+    // A node's creation and finish, for `RTSFlow.nodeStatusPublisher`. The trace is built from the
+    // observability events instead (`RTSFlowGraphCollector`).
     let nodeCreateEventSubject = PassthroughSubject<RTSNodeEvent, Never>()
     let nodeInvokeEventSubject = PassthroughSubject<RTSNodeEvent, Never>()
-    let edgeCreateEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
-    let edgeFinishEventSubject = PassthroughSubject<RTSEdgeEvent, Never>()
 
     /// Fires when a node's body is about to run — after input guardrails, immediately before
     /// `execute`. Its only consumer today is `RTSFlow`, which turns it into the executing state of
@@ -262,14 +255,16 @@ public class RTSNodeInvoker: @unchecked Sendable {
             )
         )
 
-        // Input guardrails run before the edge is recorded so the edge's input
-        // reflects what the agent actually received (post-transform).
+        // Input guardrails run before the body, which receives their post-transform input. The
+        // trace's edge records that value too: the collector applies each guard transform to the
+        // `kwargs` above.
         var guardTraces: [RTSGuardrailTrace] = []
         var workingInput = input
         var guardError: Error?
         // A cancelled run stops at the next node, even if a provider ignores cancellation. The node
-        // is still created and finished below, so the trace stays balanced and the root always
-        // completes the collector, but neither its guardrails nor its body runs.
+        // is still created and finished below, so the trace stays balanced and the root's
+        // `node.destruction` always completes the collector, but neither its guardrails nor its
+        // body runs.
         if Task.isCancelled {
             guardError = RTSError.runTerminated(reason: runStop.reason ?? .cancelled)
         }
@@ -279,19 +274,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
             guardTraces.append(contentsOf: result.traces)
             guardError = result.error
         }
-
-        let edgeID = createdBy == nil ? runID : UUID()
-        await publishEdgeCreated(
-            edgeID: edgeID,
-            runID: runID,
-            nodeType: nodeType,
-            stamp: creationStamp,
-            sourceNodeID: parentInvocationID,
-            targetNodeID: invocationID,
-            from: createdBy,
-            to: node,
-            input: workingInput
-        )
 
         signpostEmitter?.emitNodeStart(
             nodeID: invocationID,
@@ -435,18 +417,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
         )
 
         let completionStamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
-        await publishEdgeFinished(
-            edgeID: edgeID,
-            nodeType: nodeType,
-            stamp: completionStamp,
-            sourceNodeID: parentInvocationID,
-            targetNodeID: invocationID,
-            from: createdBy,
-            to: node,
-            input: workingInput,
-            output: output,
-            error: invokeError
-        )
         await publishNodeFinished(
             node,
             nodeID: invocationID,
@@ -486,10 +456,10 @@ public class RTSNodeInvoker: @unchecked Sendable {
     /// - Important: subscribers' sinks run **inside this lock**, so a slow one does not merely
     ///   delay its own node — it blocks every other node in the flow from publishing. These
     ///   publishers are therefore `internal`, and every in-library subscriber must do only
-    ///   bounded work here: `RTSFlowGraphCollector` yields into an `AsyncStream`, and `RTSFlow`
-    ///   hands node statuses to a delivery queue (`nodeStatusPublisher` is `receive(on:)`-isolated
-    ///   precisely so app sinks never reach this lock). Keep that invariant when adding a
-    ///   subscriber; if these ever become public, they need the isolation `RTSEventEmitter` uses.
+    ///   bounded work here. The one subscriber is `RTSFlow`, which hands node statuses to a
+    ///   delivery queue (`nodeStatusPublisher` is `receive(on:)`-isolated precisely so app sinks
+    ///   never reach this lock). Keep that invariant when adding a subscriber; if these ever
+    ///   become public, they need the isolation `RTSEventEmitter` uses.
     private func lockedSend<Event>(_ subject: PassthroughSubject<Event, Never>, _ event: Event) {
         publishLock.lock()
         defer { publishLock.unlock() }
@@ -582,89 +552,18 @@ public class RTSNodeInvoker: @unchecked Sendable {
         )
     }
 
-    private func publishEdgeCreated(
-        edgeID: UUID,
-        runID: RTSRunID,
-        nodeType: RTSFlowNodeType,
-        stamp: RTSStamp,
-        sourceNodeID: UUID?,
-        targetNodeID: UUID,
-        from source: (any RTSNode)?,
-        to target: some RTSNode,
-        input: RTSInput
-    ) async {
-        lockedSend(
-            edgeCreateEventSubject,
-            RTSEdgeEvent(
-                id: edgeID,
-                runID: runID,
-                stamp: stamp,
-                nodeType: nodeType,
-                sourceNodeID: sourceNodeID,
-                targetNodeID: targetNodeID,
-                sourceName: source?.name(),
-                targetName: target.name(),
-                input: input
-            )
-        )
-    }
-
-    private func publishEdgeFinished(
-        edgeID: UUID,
-        nodeType: RTSFlowNodeType,
-        stamp: RTSStamp,
-        sourceNodeID: UUID?,
-        targetNodeID: UUID,
-        from source: (any RTSNode)?,
-        to target: some RTSNode,
-        input: RTSInput,
-        output: RTSOutput,
-        error: Error?
-    ) async {
-        lockedSend(
-            edgeFinishEventSubject,
-            RTSEdgeEvent(
-                id: edgeID,
-                runID: nil,
-                stamp: stamp,
-                nodeType: nodeType,
-                sourceNodeID: sourceNodeID,
-                targetNodeID: targetNodeID,
-                sourceName: source?.name(),
-                targetName: target.name(),
-                input: input,
-                output: error == nil ? output : nil,
-                error: error.map { "\($0)" },
-                failure: error.map(RTSEdgeFailure.init)
-            )
-        )
-    }
 }
 
-extension RTSNodeInvoker: NodeEventPublishers {
+// The node lifecycle `RTSFlow` turns into `RTSNodeStatus`: created (queued), executing, finished.
+extension RTSNodeInvoker {
     var nodeCreateEventPublisher: AnyPublisher<RTSNodeEvent, Never> {
         nodeCreateEventSubject.eraseToAnyPublisher()
     }
+
     var nodeInvokeEventPublisher: AnyPublisher<RTSNodeEvent, Never> {
         nodeInvokeEventSubject.eraseToAnyPublisher()
     }
-    var edgeCreateEventPublisher: AnyPublisher<RTSEdgeEvent, Never> {
-        edgeCreateEventSubject.eraseToAnyPublisher()
-    }
-    var edgeFinishEventPublisher: AnyPublisher<RTSEdgeEvent, Never> {
-        edgeFinishEventSubject.eraseToAnyPublisher()
-    }
-}
 
-extension RTSNodeInvoker {
-    /// Deliberately **not** part of `NodeEventPublishers` — yet.
-    ///
-    /// That protocol is the trace collector's view of the invoker (`RTSFlowGraphCollector` takes it
-    /// and nothing else). The collector has no use for this event today, and putting it on the
-    /// protocol would force every conformer to implement an unused member. Should the trace ever want
-    /// a recorded execution-start — splitting guardrail latency from execution latency — moving it
-    /// onto the protocol is additive and needs no rename. `RTSFlow` holds the concrete
-    /// `RTSNodeInvoker`, so it reads this directly in the meantime.
     var nodeExecutionEventPublisher: AnyPublisher<RTSNodeExecutionEvent, Never> {
         nodeExecutionEventSubject.eraseToAnyPublisher()
     }
