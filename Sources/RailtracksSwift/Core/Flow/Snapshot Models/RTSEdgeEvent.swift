@@ -20,8 +20,9 @@ struct RTSEdgeEvent {
     var input: RTSInput?
     var output: RTSOutput?
     var error: String?
-    /// The error's details for the trace, set on a failed finish event alongside `error`. Built
-    /// from the thrown error because its type and call site are gone once it's a string.
+    /// The error's details for the trace, set on a failed finish event alongside `error`. The
+    /// collector builds it from the node's `node.destruction` failure details, which keep the
+    /// error's type and call site that the `error` string has lost.
     var failure: RTSEdgeFailure?
 }
 

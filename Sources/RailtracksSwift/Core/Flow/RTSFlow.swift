@@ -55,6 +55,10 @@ public class RTSFlow: @unchecked Sendable {
     /// when encoding or writing fails, where the associated value is the attempted file path.
     /// Late subscribers receive the most recent result immediately.
     /// The initial `nil` state (no run completed yet) is filtered out.
+    ///
+    /// Never emits for a flow built with `savesTrace: false` or `emitsEvents: false`: no trace is
+    /// written, since the trace is built from the run's observability events. Don't await a value
+    /// from such a flow.
     public var outputFileURLPublisher: AnyPublisher<Result<URL, Error>, Never> {
         outputFileURLSubject
             .compactMap { $0 }
@@ -156,7 +160,10 @@ public class RTSFlow: @unchecked Sendable {
     ///   - savesTrace: When true (default), the run writes its JSON trace to
     ///     `flowGraphOutputDirectory`. Set false to run without persisting a trace (mirrors Python's
     ///     `rt.Flow(save_state=False)`) — used for internal sub-flows like the evaluation judge, whose
-    ///     runs should not spill trace files. The completion lifecycle is unaffected.
+    ///     runs should not spill trace files. The completion lifecycle is unaffected. With it off
+    ///     the run builds no trace collector, so it also emits none of the collector's Instruments
+    ///     signposts (graph, tree and IO), and `outputFileURLPublisher` never emits. Has no effect
+    ///     when `emitsEvents` is false.
     ///   - savesEvents: Whether the flow writes its observability event stream to a JSONL file in
     ///     `eventsOutputDirectory` through ``eventWriter``. Defaults to `nil`, meaning **follow
     ///     `savesTrace`** — the two artifacts usually want the same persistence policy, and it
@@ -167,7 +174,9 @@ public class RTSFlow: @unchecked Sendable {
     ///   - emitsEvents: When true (default), the run publishes observability events on
     ///     `eventPublisher`, matching the Python engine, which emits unless
     ///     `RAILTRACKS_DISABLE_EVENTS` is set. Set false to skip it entirely — payloads are
-    ///     never built, so a flow with no event consumer pays no encoding cost.
+    ///     never built, so a flow with no event consumer pays no encoding cost. This is the master
+    ///     switch: the JSON trace is built from these events, so with it off there is no trace
+    ///     either, whatever `savesTrace` says, and no event log.
     ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
     ///   - timeout: The most seconds each run may take, from invoking its root node to that node
     ///     finishing. At the deadline the run is cancelled, and `run` throws

@@ -139,6 +139,9 @@ flow.outputFileURLPublisher
     .store(in: &cancellables)
 ```
 
+The trace is built from the flow's observability events, so a flow built with `savesTrace: false`
+or `emitsEvents: false` writes none, and its `outputFileURLPublisher` never emits.
+
 Subscribe to `nodeStatusPublisher` to observe each node's execution state in real time, including nested sub-agents:
 
 ```swift
@@ -358,7 +361,7 @@ let output = try await flow.run(workflow, input: [:], gateway: gateway)
 - `call(agent, input:)` — invoke an agent with a full input dict; returns its full output.
 - `call(orchestrator, input:)` — invoke another orchestrator (function → function composition).
 
-Sessions for invoked agents are built on demand and subscribed to the flow's collector, so nested agents and sub-orchestrators show up as children in both the JSON trace and `nodeStatusPublisher`.
+Agents and sub-orchestrators invoked through a context show up as its children in both the JSON trace and `nodeStatusPublisher`. An invoked agent's session is built on demand.
 
 ### RTSOrchestratorTool
 
@@ -692,7 +695,8 @@ let cancellable = flow.eventPublisher.sink { event in
 ```
 
 Pass `RTSFlow(title:emitsEvents: false)` to turn the stream off; payloads are then never built,
-so a flow with no consumer pays no encoding cost.
+so a flow with no consumer pays no encoding cost. The flow then writes no JSON trace either, since
+the trace is built from these events.
 
 **Observation cannot slow a run down.** Events are delivered on a private serial queue, not on
 the thread running your agents, so a slow subscriber can never stall node execution — add
@@ -751,7 +755,7 @@ persists an event log:
 ```swift
 RTSFlow(title: "Support", savesEvents: false)               // trace, no event log
 RTSFlow(title: "Support", savesTrace: false, savesEvents: true)  // event log, no trace
-RTSFlow(title: "Support", emitsEvents: false)               // no stream at all
+RTSFlow(title: "Support", emitsEvents: false)               // no stream, so no trace either
 ```
 
 To handle events yourself — your own file format, an upload, a live view — subscribe to
