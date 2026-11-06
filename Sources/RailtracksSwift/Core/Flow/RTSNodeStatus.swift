@@ -7,8 +7,8 @@ import Foundation
 
 /// Emitted by `RTSFlow.nodeStatusPublisher` as each node transitions through its lifecycle.
 ///
-/// A UI-facing projection of the invoker's events, entirely separate from the trace:
-/// `RTSFlowGraphCollector` subscribes to `RTSNodeInvoker` directly, so nothing here reaches the JSON.
+/// A UI-facing projection of the invoker's node events, entirely separate from the trace:
+/// `RTSFlowGraphCollector` builds the JSON from the observability events, so nothing here reaches it.
 public struct RTSNodeStatus: Sendable {
     public enum State: Sendable {
         /// Created, but its body has not started — input guardrails and edge publication run in this

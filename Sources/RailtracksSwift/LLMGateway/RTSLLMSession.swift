@@ -31,8 +31,9 @@ public final class RTSLLMSession: Sendable {
     /// - Parameter message: Returns all messages in the session mapped to `RTSMessage`, with
     ///   `runID` associations injected at read time. Always reflects current session state.
     /// - Parameter messageSubject: Subject through which new messages are published after each
-    ///   `run` or `setSystemPrompt` call. Subscribers (e.g. `RTSFlowGraphCollector`) use this
-    ///   to receive messages stamped with their `runID` without polling `messages()`.
+    ///   `run` or `setSystemPrompt` call, stamped with their `runID`. Nothing in the library
+    ///   subscribes any more: the trace reads messages from the `llm.*` events, which come from
+    ///   `messages()`.
     init(
         run: @escaping @Sendable (String, [RTSImage], UUID?) async throws -> String,
         setSystemPrompt: @escaping @Sendable (String, UUID?) -> Void,

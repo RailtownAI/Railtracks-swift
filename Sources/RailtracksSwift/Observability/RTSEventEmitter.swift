@@ -8,6 +8,16 @@
 import Combine
 import Foundation
 
+// MARK: - RTSObservedEvent
+
+/// One event on ``RTSEventEmitter/observedEventPublisher``: the typed event, and the run that
+/// emitted it.
+struct RTSObservedEvent: Sendable {
+    let event: any RTSObservabilityEvent
+    /// ``RTSEventEmitter/currentRunScope`` where the event was emitted, or `nil` outside a run.
+    let runScope: UUID?
+}
+
 // MARK: - RTSEventEmitter
 
 /// Wraps typed observability events in a session-scoped ``RTSEvent`` and publishes them.
@@ -34,6 +44,12 @@ import Foundation
 /// now confined to the queue rather than guarded by one.
 final class RTSEventEmitter: @unchecked Sendable {
 
+    /// The run whose events are being emitted on this task: `RTSFlow.run` binds a fresh one around
+    /// its root invocation, and every event of the run is emitted inside that task tree. `nil`
+    /// outside a run, as for `session.*`. Read by ``emit(_:)`` and carried on the typed tap, so
+    /// one run's trace collector can ignore another run's events on the same flow.
+    @TaskLocal static var currentRunScope: UUID?
+
     /// The enclosing session's identifier, used as every envelope's `scope_id`.
     private let sessionID: String
     /// When false, ``emit(_:)`` returns before building anything. See the note on cost below.
@@ -43,6 +59,9 @@ final class RTSEventEmitter: @unchecked Sendable {
     /// more than the event, and that happens before `emit` is reached.
     let isEnabled: Bool
     private let subject = PassthroughSubject<RTSEvent, Never>()
+    /// The typed tap: the same events as ``subject``, before encoding. Sent in the same queue
+    /// block, so the two streams have the same order.
+    private let observedSubject = PassthroughSubject<RTSObservedEvent, Never>()
     /// Serial, so delivery order matches emission order. Every `subject.send` and every
     /// access to ``announcedMiddleware`` happens here and nowhere else.
     private let deliveryQueue = DispatchQueue(label: "ai.railtown.railtracks.events")
@@ -63,6 +82,16 @@ final class RTSEventEmitter: @unchecked Sendable {
         subject.eraseToAnyPublisher()
     }
 
+    /// The typed events, for the trace collector. Internal: unlike ``eventPublisher``, it keeps
+    /// what the wire encoding drops, full messages and Swift's provider names among them, and the
+    /// events' internal properties.
+    ///
+    /// Delivered on the emitter's queue, so a subscriber's sink must do only bounded work, as
+    /// the collector's does by yielding into its stream.
+    var observedEventPublisher: AnyPublisher<RTSObservedEvent, Never> {
+        observedSubject.eraseToAnyPublisher()
+    }
+
     /// Wraps `event` in a session-scoped envelope and publishes it.
     ///
     /// The disabled check comes **first**, before `encodePayload()`, because building a
@@ -79,8 +108,11 @@ final class RTSEventEmitter: @unchecked Sendable {
             return
         }
         let envelope = RTSEvent.session(event, sessionID: sessionID)
+        // The scope is read here, on the emitting task: the queue has no task-locals.
+        let observed = RTSObservedEvent(event: event, runScope: RTSEventEmitter.currentRunScope)
         deliveryQueue.async { [self] in
             subject.send(envelope)
+            observedSubject.send(observed)
         }
     }
 
@@ -97,13 +129,12 @@ final class RTSEventEmitter: @unchecked Sendable {
         guard isEnabled else {
             return
         }
-        let envelope = RTSEvent.session(
-            RTSMiddlewareCreationEvent(
-                middlewareTypeID: typeID,
-                middlewareName: name
-            ),
-            sessionID: sessionID
+        let event = RTSMiddlewareCreationEvent(
+            middlewareTypeID: typeID,
+            middlewareName: name
         )
+        let envelope = RTSEvent.session(event, sessionID: sessionID)
+        let observed = RTSObservedEvent(event: event, runScope: RTSEventEmitter.currentRunScope)
         deliveryQueue.async { [self] in
             // Reading and writing the set on the queue is what makes it safe without a lock,
             // and keeps the dedupe ordered against the sends it gates.
@@ -111,6 +142,7 @@ final class RTSEventEmitter: @unchecked Sendable {
                 return
             }
             subject.send(envelope)
+            observedSubject.send(observed)
         }
     }
 

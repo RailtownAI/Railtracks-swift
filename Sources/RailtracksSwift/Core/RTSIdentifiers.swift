@@ -13,7 +13,7 @@ import Foundation
 // |                     | Identifies                        | Reaches                          |
 // |---------------------|-----------------------------------|----------------------------------|
 // | ``RTSInvocationID`` | the node as a *graph* record      | node/edge events, parentage      |
-// | ``RTSRunID``        | the *message-tracing* key         | sessions, messages, the collector|
+// | ``RTSRunID``        | the *message-tracing* key         | sessions, messages, events       |
 //
 // Both are minted per call in `RTSNodeInvoker.invokeCore`, and deliberately kept separate:
 // `runID` already doubles as the root edge's id, so overloading it with graph identity was
@@ -38,6 +38,7 @@ internal typealias RTSInvocationID = UUID
 /// Keys the messages an invocation produced back to that invocation.
 ///
 /// Threaded into `RTSLLMSession.run(_:runID:)`, stamped onto every ``RTSMessage`` the call
-/// yields, and used by the collector to attach messages to the right node. Also serves as the
-/// root edge's id when a node has no caller.
+/// yields, and used to pick that invocation's messages out of its session for the `llm.*` events.
+/// Carried on `node.invocation` as `run_id`. The root's also serves as the trace's `run_id` and its
+/// root edge's id.
 public typealias RTSRunID = UUID

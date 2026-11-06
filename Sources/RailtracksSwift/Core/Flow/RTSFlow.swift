@@ -55,6 +55,10 @@ public class RTSFlow: @unchecked Sendable {
     /// when encoding or writing fails, where the associated value is the attempted file path.
     /// Late subscribers receive the most recent result immediately.
     /// The initial `nil` state (no run completed yet) is filtered out.
+    ///
+    /// Never emits for a flow built with `savesTrace: false` or `emitsEvents: false`: no trace is
+    /// written, since the trace is built from the run's observability events. Don't await a value
+    /// from such a flow.
     public var outputFileURLPublisher: AnyPublisher<Result<URL, Error>, Never> {
         outputFileURLSubject
             .compactMap { $0 }
@@ -156,7 +160,10 @@ public class RTSFlow: @unchecked Sendable {
     ///   - savesTrace: When true (default), the run writes its JSON trace to
     ///     `flowGraphOutputDirectory`. Set false to run without persisting a trace (mirrors Python's
     ///     `rt.Flow(save_state=False)`) — used for internal sub-flows like the evaluation judge, whose
-    ///     runs should not spill trace files. The completion lifecycle is unaffected.
+    ///     runs should not spill trace files. The completion lifecycle is unaffected. With it off
+    ///     the run builds no trace collector, so it also emits none of the collector's Instruments
+    ///     signposts (graph, tree and IO), and `outputFileURLPublisher` never emits. Has no effect
+    ///     when `emitsEvents` is false.
     ///   - savesEvents: Whether the flow writes its observability event stream to a JSONL file in
     ///     `eventsOutputDirectory` through ``eventWriter``. Defaults to `nil`, meaning **follow
     ///     `savesTrace`** — the two artifacts usually want the same persistence policy, and it
@@ -167,7 +174,9 @@ public class RTSFlow: @unchecked Sendable {
     ///   - emitsEvents: When true (default), the run publishes observability events on
     ///     `eventPublisher`, matching the Python engine, which emits unless
     ///     `RAILTRACKS_DISABLE_EVENTS` is set. Set false to skip it entirely — payloads are
-    ///     never built, so a flow with no event consumer pays no encoding cost.
+    ///     never built, so a flow with no event consumer pays no encoding cost. This is the master
+    ///     switch: the JSON trace is built from these events, so with it off there is no trace
+    ///     either, whatever `savesTrace` says, and no event log.
     ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
     ///   - timeout: The most seconds each run may take, from invoking its root node to that node
     ///     finishing. At the deadline the run is cancelled, and `run` throws
@@ -247,20 +256,48 @@ public class RTSFlow: @unchecked Sendable {
         systemMessage: String? = nil,
         images: [RTSImage] = []
     ) async throws -> String {
+        try await run(
+            agent: agent,
+            prompt: prompt,
+            systemMessage: systemMessage,
+            images: images,
+            makeSession: RTSFlow.sessionFactory(for: gateway)
+        )
+    }
+
+    /// Builds an agent's session for a run: the gateway in production, a scripted session in tests.
+    typealias SessionFactory = @Sendable (
+        _ invoker: RTSNodeInvoker,
+        _ agent: any RTSAgentNode
+    ) throws -> RTSLLMSession
+
+    /// The production ``SessionFactory``: every session comes from `gateway`.
+    private static func sessionFactory(for gateway: RTSLLMGateway) -> SessionFactory {
+        { invoker, agent in
+            try gateway.session(invoker: invoker, agentNode: agent)
+        }
+    }
+
+    /// ``run(agent:prompt:gateway:systemMessage:images:)`` with the sessions built by `makeSession`,
+    /// so a test can run an agent on a scripted session.
+    func run(
+        agent: some RTSAgentNode,
+        prompt: String,
+        systemMessage: String? = nil,
+        images: [RTSImage] = [],
+        makeSession: SessionFactory
+    ) async throws -> String {
         let settings = currentRunSettings()
         let startedAt = emitSessionStarted(entryPointName: agent.agentName, settings: settings)
-        let (nodeInvoker, collector, subscriptions) = await startCollecting(settings: settings)
-        let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
-            Task { await collector.subscribeMessage(session) }
-        }
+        let runScope = UUID()
+        let (nodeInvoker, collector, subscriptions) = await startCollecting(
+            settings: settings,
+            runScope: runScope
+        )
 
         let session: RTSLLMSession
         do {
-            session = try gateway.session(
-                invoker: nodeInvoker,
-                agentNode: agent,
-                onNewSession: onNewSession
-            )
+            session = try makeSession(nodeInvoker, agent)
         } catch {
             // Session build failures (e.g. missingAPIKey) never reach the invocation
             // catch below, so report them here; control flow is unchanged — the error
@@ -271,13 +308,15 @@ public class RTSFlow: @unchecked Sendable {
                 properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
                 callSite: (error as? RTSError)?.railtownCallSite
             )
-            // This path exits before `awaitCompletion()`, so it needs its own completion
-            // event — otherwise a failed session build would leave the run unbracketed.
+            // This path exits before the root exists, so no `node.destruction` will finish the
+            // collector: cancel it, or it stays subscribed to the flow's emitter.
+            await collector?.cancel()
+            // It also exits before `awaitCompletion()`, so it needs its own completion event —
+            // otherwise a failed session build would leave the run unbracketed.
             emitSessionCompleted(startedAt: startedAt, error: error, settings: settings)
             await flushEvents()
             throw error
         }
-        onNewSession(session)   // subscribe the root agent's own session
 
         var input = agent.inputs
         input[agent.inputKeyPrompt] = .string(prompt)
@@ -290,8 +329,11 @@ public class RTSFlow: @unchecked Sendable {
 
         let outcome: Result<String, Error>
         do {
-            let output = try await withRunStops(settings, stop: nodeInvoker.runStop) { [input] in
-                try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+            // Every event of this run is emitted inside this binding; see `currentRunScope`.
+            let output = try await RTSEventEmitter.$currentRunScope.withValue(runScope) { [input] in
+                try await withRunStops(settings, stop: nodeInvoker.runStop) {
+                    try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+                }
             }
             guard case let .string(result) = output[agent.outputKeyResult] else {
                 throw RTSError.missingOutput("Agent \(agent.agentName) missing result")
@@ -305,7 +347,7 @@ public class RTSFlow: @unchecked Sendable {
             outcome = .failure(reported)
             reportFailure(reported)
         }
-        await collector.awaitCompletion()
+        await collector?.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
         emitSessionCompleted(startedAt: startedAt, error: outcome.eventError, settings: settings)
         // Emission is isolated from execution, so the backlog is joined here rather than
@@ -325,30 +367,39 @@ public class RTSFlow: @unchecked Sendable {
         input: RTSInput,
         gateway: RTSLLMGateway
     ) async throws -> RTSOutput {
+        try await run(node, input: input, makeSession: RTSFlow.sessionFactory(for: gateway))
+    }
+
+    /// ``run(_:input:gateway:)`` with the sessions built by `makeSession`, so a test can run agents
+    /// on scripted sessions.
+    func run(
+        _ node: some RTSOrchestratorNode,
+        input: RTSInput,
+        makeSession: @escaping SessionFactory
+    ) async throws -> RTSOutput {
         let settings = currentRunSettings()
         let startedAt = emitSessionStarted(entryPointName: node.name(), settings: settings)
-        let (nodeInvoker, collector, subscriptions) = await startCollecting(settings: settings)
-        let onNewSession: @Sendable (RTSLLMSession) -> Void = { [collector] session in
-            Task { await collector.subscribeMessage(session) }
-        }
+        let runScope = UUID()
+        let (nodeInvoker, collector, subscriptions) = await startCollecting(
+            settings: settings,
+            runScope: runScope
+        )
 
         let context = RTSRunContext(
             invoker: nodeInvoker,
             makeSession: { agent in
-                try gateway.session(
-                    invoker: nodeInvoker,
-                    agentNode: agent,
-                    onNewSession: onNewSession
-                )
+                try makeSession(nodeInvoker, agent)
             },
-            onNewSession: onNewSession,
             createdBy: node
         )
 
         let outcome: Result<RTSOutput, Error>
         do {
-            let output = try await withRunStops(settings, stop: nodeInvoker.runStop) {
-                try await nodeInvoker.invokeFunction(node, input: input, context: context)
+            // Every event of this run is emitted inside this binding; see `currentRunScope`.
+            let output = try await RTSEventEmitter.$currentRunScope.withValue(runScope) {
+                try await withRunStops(settings, stop: nodeInvoker.runStop) {
+                    try await nodeInvoker.invokeFunction(node, input: input, context: context)
+                }
             }
             outcome = .success(output)
         } catch {
@@ -359,7 +410,7 @@ public class RTSFlow: @unchecked Sendable {
             outcome = .failure(reported)
             reportFailure(reported)
         }
-        await collector.awaitCompletion()
+        await collector?.awaitCompletion()
         _ = subscriptions       // keep alive until the run completes
         emitSessionCompleted(startedAt: startedAt, error: outcome.eventError, settings: settings)
         // Emission is isolated from execution, so the backlog is joined here rather than
@@ -552,9 +603,13 @@ public class RTSFlow: @unchecked Sendable {
     /// Builds the per-run node invoker + graph collector and wires the
     /// `nodeStatusPublisher` subscriptions. The returned cancellables must be held
     /// for the duration of the run (they are kept alive by `run` awaiting completion).
+    ///
+    /// The collector builds the trace from the run's observability events, so there is none
+    /// when the flow emits no events, or doesn't save its trace.
     private func startCollecting(
-        settings: RunSettings
-    ) async -> (RTSNodeInvoker, RTSFlowGraphCollector, Set<AnyCancellable>) {
+        settings: RunSettings,
+        runScope: UUID
+    ) async -> (RTSNodeInvoker, RTSFlowGraphCollector?, Set<AnyCancellable>) {
         // Warm the pricing map now (fire-and-forget) so the first per-node signpost cost
         // calculation doesn't pay the remote/disk fetch. It runs concurrently with the
         // flow and finishes long before the first node completes an LLM round-trip;
@@ -567,7 +622,8 @@ public class RTSFlow: @unchecked Sendable {
             sessionID: id,
             signpostEmitter: signpostEmitter,
             eventEmitter: eventEmitter,
-            runStop: RTSRunStop(endsOnError: settings.endOnError)
+            runStop: RTSRunStop(endsOnError: settings.endOnError),
+            runScope: runScope
         )
 
         var subscriptions = Set<AnyCancellable>()
@@ -607,13 +663,15 @@ public class RTSFlow: @unchecked Sendable {
             .sink { [weak self] in self?.nodeStatusSubject.send($0) }
             .store(in: &subscriptions)
 
+        guard savesTrace, eventEmitter.isEnabled else {
+            return (nodeInvoker, nil, subscriptions)
+        }
         let collector = RTSFlowGraphCollector(
-            stampFactory: stampFactory,
             flowName: title,
             sessionID: id,
-            nodeEventPublisher: nodeInvoker,
+            eventPublisher: eventEmitter.observedEventPublisher,
+            runScope: runScope,
             outputFileURLSubject: outputFileURLSubject,
-            savesTrace: savesTrace,
             signpostEmitter: signpostEmitter
         )
         await collector.setup()
