@@ -801,6 +801,33 @@ extension RailtracksSwiftTestSuite {
             Issue.record("signposts differ from their golden; actual saved to \(saved.path)")
         }
 
+        /// A failed session build exits before the root exists. The next run on the flow still
+        /// writes its own, complete trace.
+        @Test("a failed session build doesn't disturb the flow's next run")
+        func failedSessionBuild() async throws {
+            struct NoSession: Error {
+            }
+            let agent = RTSAgent(llmProvider: toolCallingProvider, name: "Retried")
+            let flow = RTSFlow(title: "Golden Failed Session")
+            let failing: RTSFlow.SessionFactory = { _, _ in
+                throw NoSession()
+            }
+
+            await #expect(throws: NoSession.self) {
+                _ = try await flow.run(agent: agent, prompt: "hello", makeSession: failing)
+            }
+            _ = try await flow.run(agent: agent, prompt: "hello", makeSession: scriptedSessions([:]))
+
+            let trace = try await writtenTrace(of: flow)
+            let graph = try JSONDecoder().decode(RTSFlowGraph.self, from: trace)
+            let run = try #require(graph.runs.first)
+            #expect(run.nodes.map { $0.name } == ["Retried"])
+            #expect(run.steps.map { $0.identifier } == [
+                "START CREATED Retried",
+                "Finished executing Retried",
+            ])
+        }
+
         /// The trace is built from the observability events, so a flow that emits none writes none,
         /// whatever `savesTrace` says.
         @Test("emitsEvents: false writes no trace")

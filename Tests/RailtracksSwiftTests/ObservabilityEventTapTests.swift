@@ -124,6 +124,59 @@ extension RailtracksSwiftTestSuite {
             #expect(scopes == [nil, scope])
         }
 
+        @Test("an invoker notices when it runs outside its run's scope")
+        func lostRunScope() {
+            let scope = UUID()
+            let scoped = RTSNodeInvoker(
+                stampFactory: RTSStampFactory(),
+                sessionID: UUID(),
+                runScope: scope
+            )
+            let unscoped = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+
+            // Outside any binding, as after a `Task.detached` inside the run.
+            #expect(scoped.hasLostRunScope)
+            RTSEventEmitter.$currentRunScope.withValue(scope) {
+                #expect(!scoped.hasLostRunScope)
+            }
+            RTSEventEmitter.$currentRunScope.withValue(UUID()) {
+                #expect(scoped.hasLostRunScope)
+            }
+            // An invoker built without a scope, as tests build them, is never checked.
+            #expect(!unscoped.hasLostRunScope)
+        }
+
+        /// A run that exits before its root exists, such as a failed session build, never sends the
+        /// root's `node.destruction`, so it must cancel its collector, or the collector stays
+        /// subscribed to the flow's emitter.
+        @Test("a cancelled collector unsubscribes, completes its waiters and is released")
+        func cancelledCollector() async throws {
+            let subject = PassthroughSubject<RTSObservedEvent, Never>()
+            weak var released: RTSFlowGraphCollector?
+            do {
+                let collector = RTSFlowGraphCollector(
+                    flowName: "Cancelled",
+                    sessionID: UUID(),
+                    eventPublisher: subject.eraseToAnyPublisher(),
+                    runScope: UUID(),
+                    outputFileURLSubject: CurrentValueSubject(nil)
+                )
+                await collector.setup()
+                released = collector
+                // Let the consumer task start: once it is draining the stream it holds the
+                // collector, as it does in a real run by the time a session build fails.
+                try await Task.sleep(for: .milliseconds(50))
+
+                await collector.cancel()
+                await collector.awaitCompletion()
+            }
+
+            for _ in 0..<100 where released != nil {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(released == nil)
+        }
+
         @Test("a disabled emitter taps nothing")
         func disabledEmitter() async throws {
             let recorder = TapRecorder(RTSEventEmitter(sessionID: "session-1", isEnabled: false))

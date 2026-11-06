@@ -31,6 +31,9 @@ actor RTSFlowGraphCollector {
         var parentNodeID: UUID?
         var runID: RTSRunID?
         var edgeID: UUID?
+        /// Where the edge's creation record sits in `edgeEvents`, so an input guard transform can
+        /// update its input directly.
+        var edgeCreationIndex: Int?
         var creationStamp: RTSStamp?
         /// `node.invocation`'s `kwargs`, then each input guard transform in turn: the input the
         /// node's body received, which is what the edge records.
@@ -229,6 +232,9 @@ actor RTSFlowGraphCollector {
         node.edgeID = edgeID
         node.creationStamp = creationStamp
         node.input = invocation.kwargs
+        // `processEdgeEvent` appends the creation record below without suspending first, so it
+        // lands here.
+        node.edgeCreationIndex = edgeEvents.count
         pendingNodes[nodeID] = node
 
         await processNodeEvent(
@@ -276,7 +282,7 @@ actor RTSFlowGraphCollector {
         guard case .nodeAndMiddleware(let nodeIDText, _) = response.spatialParent,
               let nodeID = UUID(uuidString: nodeIDText),
               let node = pendingNodes[nodeID],
-              let index = edgeEvents.lastIndex(where: { $0.id == node.edgeID }) else {
+              let index = node.edgeCreationIndex else {
             return
         }
         edgeEvents[index].input = node.input
@@ -510,6 +516,19 @@ actor RTSFlowGraphCollector {
             for await _ in stream {}
         }
         await drain.value
+    }
+
+    /// Stops collecting without writing a trace: unsubscribes from the emitter and finishes both
+    /// streams, which ends the consumer task and returns any `awaitCompletion()` caller.
+    ///
+    /// For a run that exits before its root node exists, such as a failed session build: no root
+    /// `node.destruction` will come, so the collector would otherwise stay subscribed to the
+    /// flow's emitter for the flow's lifetime.
+    func cancel() {
+        collectionState = .finished
+        cancellables.removeAll()
+        streamContinuation.finish()
+        eventContinuation.finish()
     }
 
     private func finishCollection() async {

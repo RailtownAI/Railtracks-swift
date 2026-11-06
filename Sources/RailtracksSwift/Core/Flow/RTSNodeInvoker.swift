@@ -56,18 +56,34 @@ public class RTSNodeInvoker: @unchecked Sendable {
     /// the run's handle; normalization reads it to report a timeout rather than a plain cancel.
     let runStop: RTSRunStop
 
+    /// The run's `RTSEventEmitter.currentRunScope`, which `RTSFlow` binds around the root. `nil` for
+    /// an invoker built outside a flow, as tests build them, which is never checked.
+    let runScope: UUID?
+
     init(
         stampFactory: RTSStampFactory,
         sessionID: UUID,
         signpostEmitter: (any RTSSignpostEmitting)? = nil,
         eventEmitter: RTSEventEmitter? = nil,
-        runStop: RTSRunStop = RTSRunStop()
+        runStop: RTSRunStop = RTSRunStop(),
+        runScope: UUID? = nil
     ) {
         self.stampFactory = stampFactory
         self.sessionID = sessionID
         self.signpostEmitter = signpostEmitter
         self.eventEmitter = eventEmitter
         self.runStop = runStop
+        self.runScope = runScope
+    }
+
+    /// Whether this task runs outside the scope of the run this invoker belongs to: the task-local
+    /// was lost, by a `Task.detached` on the invoke path for example. The trace collector keeps only
+    /// its run's events, so a node invoked here would be left out of the trace.
+    var hasLostRunScope: Bool {
+        guard let runScope else {
+            return false
+        }
+        return RTSEventEmitter.currentRunScope != runScope
     }
     
     func invokeAgent(
@@ -204,6 +220,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
         #if DEBUG
         if createdBy != nil, parentInvocationID == nil {
             log.error("🧵 invocation-id propagation lost for \(node.name()) — its edge will be orphaned; check for Task.detached on the invoke path")
+        }
+        if eventEmitter?.isEnabled == true, hasLostRunScope {
+            log.error("🧵 run scope lost for \(node.name()) — its events won't reach the trace; check for Task.detached on the invoke path")
         }
         #endif
 

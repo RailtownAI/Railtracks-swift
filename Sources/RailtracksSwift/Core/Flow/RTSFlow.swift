@@ -308,8 +308,11 @@ public class RTSFlow: @unchecked Sendable {
                 properties: [RTSErrorReportProperty.railtracksVersion: RailtracksSwift.version],
                 callSite: (error as? RTSError)?.railtownCallSite
             )
-            // This path exits before `awaitCompletion()`, so it needs its own completion
-            // event — otherwise a failed session build would leave the run unbracketed.
+            // This path exits before the root exists, so no `node.destruction` will finish the
+            // collector: cancel it, or it stays subscribed to the flow's emitter.
+            await collector?.cancel()
+            // It also exits before `awaitCompletion()`, so it needs its own completion event —
+            // otherwise a failed session build would leave the run unbracketed.
             emitSessionCompleted(startedAt: startedAt, error: error, settings: settings)
             await flushEvents()
             throw error
@@ -619,7 +622,8 @@ public class RTSFlow: @unchecked Sendable {
             sessionID: id,
             signpostEmitter: signpostEmitter,
             eventEmitter: eventEmitter,
-            runStop: RTSRunStop(endsOnError: settings.endOnError)
+            runStop: RTSRunStop(endsOnError: settings.endOnError),
+            runScope: runScope
         )
 
         var subscriptions = Set<AnyCancellable>()
