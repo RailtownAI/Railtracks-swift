@@ -320,6 +320,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
             nodeType: nodeType,
             runID: runID
         )
+        // The same point on the emitter's internal stream, which gets it even with events off.
+        eventEmitter?.emitNodeExecuting(RTSNodeExecutingSignal(nodeID: invocationID))
 
         var output: RTSOutput = [:]
         // A blocked/errored input guardrail short-circuits: the LLM never runs.
@@ -460,7 +462,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 spatialParent: eventSpatialParent,
                 response: invokeError == nil ? .object(output) : nil,
                 durationSeconds: runtime,
-                failure: failureDetails
+                failure: failureDetails,
+                terminationReason: RTSRunCancellation.terminationReason(of: invokeError)
             )
         )
 

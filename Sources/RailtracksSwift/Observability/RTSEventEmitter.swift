@@ -13,7 +13,7 @@ import Foundation
 /// One event on ``RTSEventEmitter/observedEventPublisher``: the typed event, and the run that
 /// emitted it.
 struct RTSObservedEvent: Sendable {
-    let event: any RTSObservabilityEvent
+    let event: RTSInternalEvent
     /// ``RTSEventEmitter/currentRunScope`` where the event was emitted, or `nil` outside a run.
     let runScope: UUID?
 }
@@ -52,15 +52,17 @@ final class RTSEventEmitter: @unchecked Sendable {
 
     /// The enclosing session's identifier, used as every envelope's `scope_id`.
     private let sessionID: String
-    /// When false, ``emit(_:)`` returns before building anything. See the note on cost below.
+    /// When false, nothing reaches the public stream: ``emit(_:)`` builds no envelope. The internal
+    /// stream still gets every event. See the note on cost below.
     ///
-    /// Readable so a caller can skip work it would only feed to a disabled emitter. `emit`
-    /// short-circuiting is not enough on its own: computing an event's *arguments* can cost
+    /// Readable so a caller can skip work it would only feed to the public stream. `emit`
+    /// skipping the envelope is not enough on its own: computing an event's *arguments* can cost
     /// more than the event, and that happens before `emit` is reached.
     let isEnabled: Bool
     private let subject = PassthroughSubject<RTSEvent, Never>()
-    /// The typed tap: the same events as ``subject``, before encoding. Sent in the same queue
-    /// block, so the two streams have the same order.
+    /// The internal stream: every event, typed, before encoding, plus the internal-only ones. A
+    /// public event is sent in the same queue block as its envelope, so the two streams have the
+    /// same order.
     private let observedSubject = PassthroughSubject<RTSObservedEvent, Never>()
     /// Serial, so delivery order matches emission order. Every `subject.send` and every
     /// access to ``announcedMiddleware`` happens here and nowhere else.
@@ -82,9 +84,11 @@ final class RTSEventEmitter: @unchecked Sendable {
         subject.eraseToAnyPublisher()
     }
 
-    /// The typed events, for the trace collector. Internal: unlike ``eventPublisher``, it keeps
-    /// what the wire encoding drops, full messages and Swift's provider names among them, and the
-    /// events' internal properties.
+    /// The internal stream, for the trace collector and the node statuses. Internal: unlike
+    /// ``eventPublisher``, it keeps what the wire encoding drops, full messages and Swift's
+    /// provider names among them, and the events' internal properties. It also carries the events
+    /// with no wire form (``RTSInternalEvent``), and it is fed whether or not the emitter is
+    /// enabled.
     ///
     /// Delivered on the emitter's queue, so a subscriber's sink must do only bounded work, as
     /// the collector's does by yielding into its stream.
@@ -92,11 +96,13 @@ final class RTSEventEmitter: @unchecked Sendable {
         observedSubject.eraseToAnyPublisher()
     }
 
-    /// Wraps `event` in a session-scoped envelope and publishes it.
+    /// Publishes `event` on the internal stream and, when enabled, wraps it in a session-scoped
+    /// envelope for the public one.
     ///
-    /// The disabled check comes **first**, before `encodePayload()`, because building a
-    /// payload is not free — it JSON-encodes message histories — and a flow with events
-    /// turned off should pay nothing.
+    /// The internal stream gets every event, enabled or not: node statuses are built from it, and
+    /// they work with events off. Passing a typed event along costs next to nothing. The envelope
+    /// is what costs, since `encodePayload()` JSON-encodes message histories, so the disabled
+    /// check comes **before** it, and a flow with events turned off never builds one.
     ///
     /// The envelope is built here, on the calling thread, so `stamp` records when the event
     /// *happened* rather than when it was delivered. Only the send is deferred.
@@ -104,14 +110,28 @@ final class RTSEventEmitter: @unchecked Sendable {
     /// - Note: delivery is asynchronous, so an event is not necessarily in a subscriber's
     ///   hands when this returns. Use ``flushDelivery()`` where that matters.
     func emit(_ event: some RTSObservabilityEvent) {
-        guard isEnabled else {
-            return
-        }
-        let envelope = RTSEvent.session(event, sessionID: sessionID)
+        let envelope = isEnabled ? RTSEvent.session(event, sessionID: sessionID) : nil
         // The scope is read here, on the emitting task: the queue has no task-locals.
-        let observed = RTSObservedEvent(event: event, runScope: RTSEventEmitter.currentRunScope)
+        let observed = RTSObservedEvent(
+            event: .observability(event),
+            runScope: RTSEventEmitter.currentRunScope
+        )
         deliveryQueue.async { [self] in
-            subject.send(envelope)
+            if let envelope {
+                subject.send(envelope)
+            }
+            observedSubject.send(observed)
+        }
+    }
+
+    /// Publishes a node's executing signal on the internal stream only. It has no wire form, so
+    /// it never reaches the public stream, enabled or not.
+    func emitNodeExecuting(_ signal: RTSNodeExecutingSignal) {
+        let observed = RTSObservedEvent(
+            event: .nodeExecuting(signal),
+            runScope: RTSEventEmitter.currentRunScope
+        )
+        deliveryQueue.async { [self] in
             observedSubject.send(observed)
         }
     }
@@ -126,22 +146,24 @@ final class RTSEventEmitter: @unchecked Sendable {
         typeID: String,
         name: String
     ) {
-        guard isEnabled else {
-            return
-        }
         let event = RTSMiddlewareCreationEvent(
             middlewareTypeID: typeID,
             middlewareName: name
         )
-        let envelope = RTSEvent.session(event, sessionID: sessionID)
-        let observed = RTSObservedEvent(event: event, runScope: RTSEventEmitter.currentRunScope)
+        let envelope = isEnabled ? RTSEvent.session(event, sessionID: sessionID) : nil
+        let observed = RTSObservedEvent(
+            event: .observability(event),
+            runScope: RTSEventEmitter.currentRunScope
+        )
         deliveryQueue.async { [self] in
             // Reading and writing the set on the queue is what makes it safe without a lock,
             // and keeps the dedupe ordered against the sends it gates.
             guard announcedMiddleware.insert(typeID).inserted else {
                 return
             }
-            subject.send(envelope)
+            if let envelope {
+                subject.send(envelope)
+            }
             observedSubject.send(observed)
         }
     }
