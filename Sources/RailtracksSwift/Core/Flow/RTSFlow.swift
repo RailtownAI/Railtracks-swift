@@ -178,9 +178,9 @@ public class RTSFlow: @unchecked Sendable {
     ///   - emitsEvents: When true (default), the run publishes observability events on
     ///     `eventPublisher`, matching the Python engine, which emits unless
     ///     `RAILTRACKS_DISABLE_EVENTS` is set. Set false to skip it entirely — payloads are
-    ///     never built, so a flow with no event consumer pays no encoding cost. This is the master
-    ///     switch: the JSON trace is built from these events, so with it off there is no trace
-    ///     either, whatever `savesTrace` says, and no event log.
+    ///     never built, so a flow with no event consumer pays no encoding cost. With it off there
+    ///     is no event log, and no trace either, whatever `savesTrace` says, since the trace is
+    ///     built from these events. `nodeStatusPublisher` is unaffected.
     ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
     ///   - timeout: The most seconds each run may take, from invoking its root node to that node
     ///     finishing. At the deadline the run is cancelled, and `run` throws

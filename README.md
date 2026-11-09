@@ -166,7 +166,7 @@ flow.nodeStatusPublisher
 let result = try await flow.run(agent: agent, prompt: prompt, gateway: gateway)
 ```
 
-`nodeStatusPublisher` emits for every node — agents, tools, and sub-agents — using the same `runID`-stamped event infrastructure as the JSON trace. Subscribe before calling `run` to capture all events.
+`nodeStatusPublisher` emits for every node — agents, tools, and sub-agents — and every status carries the invocation's `runID`. It is built from the same observability events as the JSON trace, but keeps working with `emitsEvents: false` or `savesTrace: false`. Subscribe before calling `run` to capture all events.
 
 A node is `.cancelled` when the run was stopped while it was running or before it started: by cancelling the task that awaits `run`, by the flow's timeout, or by another node failing under `endOnError` (see [Stopping a run](#stopping-a-run)). A node that fails with its own error is `.failed`.
 
@@ -696,7 +696,7 @@ let cancellable = flow.eventPublisher.sink { event in
 
 Pass `RTSFlow(title:emitsEvents: false)` to turn the stream off; payloads are then never built,
 so a flow with no consumer pays no encoding cost. The flow then writes no JSON trace either, since
-the trace is built from these events.
+the trace is built from these events. `nodeStatusPublisher` is unaffected.
 
 **Observation cannot slow a run down.** Events are delivered on a private serial queue, not on
 the thread running your agents, so a slow subscriber can never stall node execution — add
@@ -755,7 +755,7 @@ persists an event log:
 ```swift
 RTSFlow(title: "Support", savesEvents: false)               // trace, no event log
 RTSFlow(title: "Support", savesTrace: false, savesEvents: true)  // event log, no trace
-RTSFlow(title: "Support", emitsEvents: false)               // no stream, so no trace either
+RTSFlow(title: "Support", emitsEvents: false)               // no stream, so no trace either; statuses still work
 ```
 
 To handle events yourself — your own file format, an upload, a live view — subscribe to
