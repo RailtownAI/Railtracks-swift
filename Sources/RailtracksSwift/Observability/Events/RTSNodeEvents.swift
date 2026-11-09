@@ -133,7 +133,8 @@ public struct RTSNodeResponseEvent: RTSParentedEvent {
 /// The node body threw.
 ///
 /// Mirrors the Python engine's `NodeFailure` (`events/node.py`), which composes
-/// `FailureMixin` — ``RTSFailureReporting`` here.
+/// `FailureMixin` — ``RTSFailureReporting`` here — and adds `failure_details`' `traceback`,
+/// `frames` and `fatal`.
 public struct RTSNodeFailureEvent: RTSParentedEvent, RTSFailureReporting {
     public var eventType: String {
         "node.failure"
@@ -144,46 +145,80 @@ public struct RTSNodeFailureEvent: RTSParentedEvent, RTSFailureReporting {
     public let parent: RTSEventParent
     public let exceptionName: String
     public let exceptionMessage: String
+    /// See ``RTSEventFailureDetails/traceback``.
+    public let traceback: String
+    /// See ``RTSEventFailureDetails/frames``.
+    public let frames: [RTSEventFrame]
+    /// See ``RTSEventFailureDetails/fatal``.
+    public let fatal: Bool
 
     public init(
         parent: RTSEventParent,
         spatialParent: RTSEventSpatialParent,
         exceptionName: String,
         exceptionMessage: String,
+        traceback: String = "",
+        frames: [RTSEventFrame] = [],
+        fatal: Bool = false,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
         self.parent = parent
         self.spatialParent = spatialParent
         self.exceptionName = exceptionName
         self.exceptionMessage = exceptionMessage
+        self.traceback = traceback
+        self.frames = frames
+        self.fatal = fatal
         self.timestamp = timestamp
     }
 
-    /// Builds the event from a thrown error, mirroring Python's `FailureMixin.from_exception`.
+    /// Builds the event from a thrown error, mirroring Python's `NodeFailure.from_exception`.
     public static func from(
         error: Error,
         parent: RTSEventParent,
         spatialParent: RTSEventSpatialParent,
         timestamp: Date = RTSEventTimestamp.now()
     ) -> RTSNodeFailureEvent {
-        let failure = RTSEventFailure.fields(from: error)
-        return RTSNodeFailureEvent(
+        from(
+            details: RTSEventFailureDetails(error),
             parent: parent,
             spatialParent: spatialParent,
-            exceptionName: failure.name,
-            exceptionMessage: failure.message,
+            timestamp: timestamp
+        )
+    }
+
+    /// Builds the event from failure details already derived from the error, so the node's
+    /// `node.destruction` can carry the same ones.
+    public static func from(
+        details: RTSEventFailureDetails,
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) -> RTSNodeFailureEvent {
+        RTSNodeFailureEvent(
+            parent: parent,
+            spatialParent: spatialParent,
+            exceptionName: details.exceptionName,
+            exceptionMessage: details.exceptionMessage,
+            traceback: details.traceback,
+            frames: details.frames,
+            fatal: details.fatal,
             timestamp: timestamp
         )
     }
 
     public func encodePayload() -> [String: RTSValue] {
-        parentedBasePayload().merging(failurePayloadFields()) { _, new in new }
+        var payload = parentedBasePayload().merging(failurePayloadFields()) { _, new in new }
+        payload["traceback"] = .string(traceback)
+        payload["frames"] = .array(frames.map { $0.encoded() })
+        payload["fatal"] = .bool(fatal)
+        return payload
     }
 }
 
 // MARK: - RTSNodeDestructionEvent
 
-/// The node's final response, and how long it took.
+/// The node's final outcome: its response or failure, and how long it took.
 ///
 /// Mirrors the Python engine's `NodeDestruction` (`events/node.py`), which fires *outside*
 /// the node's middleware. This is the event carrying `duration_seconds`, and the one
@@ -200,25 +235,41 @@ public struct RTSNodeDestructionEvent: RTSParentedEvent {
     /// Measured with a monotonic clock at the invocation site — never reconstructed from
     /// stamp deltas, which mispair when a node is invoked more than once.
     public let durationSeconds: TimeInterval
+    /// Set when the node failed: the same details as its `node.failure`. `nil` on success.
+    public let failure: RTSEventFailureDetails?
+
+    /// `"failure"` when ``failure`` is set, `"success"` otherwise: Python's `status`.
+    public var status: String {
+        failure == nil ? "success" : "failure"
+    }
 
     public init(
         parent: RTSEventParent,
         spatialParent: RTSEventSpatialParent,
         response: RTSValue?,
         durationSeconds: TimeInterval,
+        failure: RTSEventFailureDetails? = nil,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
         self.parent = parent
         self.spatialParent = spatialParent
         self.response = response
         self.durationSeconds = durationSeconds
+        self.failure = failure
         self.timestamp = timestamp
     }
 
+    /// Python always writes the failure keys: `null` on success, with `fatal` false.
     public func encodePayload() -> [String: RTSValue] {
         var payload = parentedBasePayload()
         payload["response"] = .nullable(response)
         payload["duration_seconds"] = .number(durationSeconds)
+        payload["status"] = .string(status)
+        payload["exception_name"] = .nullable(failure?.exceptionName)
+        payload["exception_message"] = .nullable(failure?.exceptionMessage)
+        payload["traceback"] = .nullable(failure?.traceback)
+        payload["frames"] = failure.map { .array($0.frames.map { $0.encoded() }) } ?? .null
+        payload["fatal"] = .bool(failure?.fatal ?? false)
         return payload
     }
 }
