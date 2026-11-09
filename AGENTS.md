@@ -104,12 +104,12 @@ RailtracksSwift is a Swift 6 library for orchestrating LLM agent pipelines. It w
 │                                                             │
 │  ┌──────────────────┐   ┌────────────────────────────────┐ │
 │  │  RTSNodeInvoker  │   │    RTSFlowGraphCollector       │ │
-│  │  stamp & publish │   │    accumulate events           │ │
-│  │  node/edge events│   │    & messages                  │ │
+│  │  run nodes & emit│   │    builds trace & signposts    │ │
+│  │  events          │   │    from observability events   │ │
 │  └──────────────────┘   └──────────────┬───────────────┬─┘ │
 │  ┌──────────────────┐                  │               │   │
-│  │ RTSStampFactory  │           JSON file         Instruments
-│  │ monotonic index  │          (Documents/)       (signpost)
+│  │ RTSEventEmitter  │           JSON file         Instruments
+│  │ serial delivery  │          (Documents/)       (signpost)
 │  └──────────────────┘                                      │
 └──────────────────────────┬──────────────────────────────────┘
                            │
@@ -119,7 +119,7 @@ RailtracksSwift is a Swift 6 library for orchestrating LLM agent pipelines. It w
 │  ┌────────────────┐  ┌──────────────────────────────────┐  │
 │  │ RTSLLMGateway  │  │       RTSLLMSession              │  │
 │  │ select provider│  │  wraps provider session          │  │
-│  │ build sessions │  │  publishes messages to collector │  │
+│  │ build sessions │  │  stamps messages with runID      │  │
 │  └────────────────┘  └──────────────────────────────────┘  │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ RTSConduitToolBridge                                │   │
@@ -141,29 +141,37 @@ RailtracksSwift is a Swift 6 library for orchestrating LLM agent pipelines. It w
 ```
 RTSFlow.run(agent:prompt:gateway:)
   └── RTSNodeInvoker.invoke(_:input:session:)   // agent invocation
-        ├── publishes RTSNodeEvent (create + finish)
-        ├── publishes RTSEdgeEvent (create + finish)
+        ├── emits node.creation, node.invocation … node.destruction
         └── RTSAgentNode.invoke(runID:session:)
-              └── RTSLLMSession.run(_:runID:)    // sends to LLM via Conduit
-                    └── calls tool nodes via RTSConduitToolBridge
-                          └── RTSNodeInvoker.invoke(_:input:)  // tool invocation
+              ├── RTSLLMSession.run(_:runID:)    // sends to LLM via Conduit
+              │     └── calls tool nodes via RTSConduitToolBridge
+              │           └── RTSNodeInvoker.invoke(_:input:)  // tool invocation
+              └── llm.* events, rebuilt from the session's messages
 ```
 
-`RTSFlowGraphCollector` (an actor) subscribes to all node/edge event publishers on `RTSNodeInvoker`, funnels them into a single ordered `AsyncStream`, and drains that with one consumer so events are accumulated in publish order. When both the root node and root edge finish events are received, it writes the JSON file to the app's Documents directory and signals completion via an `AsyncStream`. `RTSFlow.run` awaits this signal before returning, which keeps all local instances alive.
+`RTSFlowGraphCollector` (an actor, one per run) builds the trace from the run's observability
+events. It subscribes to `RTSEventEmitter`'s internal typed tap, keeps only its own run's events (the
+`RTSEventEmitter.currentRunScope` task-local, which `RTSFlow.run` binds around the root), and drains
+them with one consumer in delivery order. It translates them into node and edge records: creation
+records at `node.invocation`, finish records at `node.destruction`, `guard_details` from the
+`middleware.guard.*` events and messages from `llm.*`, and numbers the steps as nodes are created and
+destroyed. When the root's `node.destruction` arrives it writes the JSON file to the app's Documents
+directory and signals completion, which `RTSFlow.run` awaits before returning. A run builds one only
+when its flow emits events and saves its trace. See `docs/trace-from-events.md`.
 
 ### Key design decisions
 
-**`runID` as the tracing thread** — Every node invocation receives a unique `runID`. Messages, node events, and edge events are all stamped with it. The collector uses `runID` as the key to associate messages with the node that produced them, with a message buffer to handle out-of-order delivery.
+**`runID` as the tracing thread** — Every node invocation receives a unique `runID`. The messages its LLM calls produce are stamped with it, which is how the invoker picks that invocation's messages out of its session for the `llm.*` events, and `node.invocation` carries it as the Swift-only `run_id`. The root's is the trace's `run_id` and its root edge ID.
 
 **Per-invocation node ids** — A node's *graph* identifier is minted per invocation (`invocationID` in `RTSNodeInvoker.invokeCore`), not per node instance, so a tool called N times yields N distinct node records and edges (matching the Python engine). Each invocation binds its `invocationID` on the `RTSNodeInvoker.currentInvocationID` `@TaskLocal` around its execution, so a child invocation reads it back as its edge `source` — propagating the parent link down through provider tool-calling code (Conduit's tool `TaskGroup`, Apple's `LanguageModelSession`) with no parameter threading. The instance `id` (`RTSNode.id`) is no longer used for tracing identity. See `docs/duplicate-node-id.md`.
 
-**Events published unconditionally** — `RTSNodeInvoker` always publishes finish events — success or failure. Errors are captured in the event (`error: String?`) and re-thrown after publication. This ensures the JSON trace is complete even for failed runs.
+**Events emitted unconditionally** — `RTSNodeInvoker` always emits a node's `node.destruction` — success or failure, with the failure details on failure — and re-throws the error after. This ensures the JSON trace is complete even for failed runs.
 
 **Gateway as the isolation boundary** — All Conduit and Apple Foundation Models–specific code is contained in `LLMGateway/`. Replacing the provider means re-implementing the `RTSLLMSession` builder and bridge, nothing more.
 
 **Session-per-invocation** — Each agent invocation gets its own `RTSLLMSession` backed by a fresh provider session. Sessions are never shared across concurrent invocations, making `runID`-based message capture safe without locks.
 
-**Collector finalizes on dual completion** — The collector tracks two independent completion signals: the root node's finish event and the root edge's finish event. Only when both have arrived does it write the JSON and tear down. This is reliable only because events are consumed in publish order (single ordered `AsyncStream`): the root's finish is published last, so it is processed after every descendant's events. A per-invocation in-process counter (node + edge) guards this — a non-zero value at finalization logs a warning, flagging any ordering violation.
+**Collector finalizes on the root's destruction** — The collector writes the JSON and tears down when the root's `node.destruction` arrives (it records the root's edge and node finish from it, and needs both). This is reliable only because events are consumed in delivery order: the emitter's serial queue keeps emission order, and the root's destruction is emitted last, so it is processed after every descendant's events. Per-run in-process counters (node + edge) guard this — a non-zero value at finalization logs a warning, flagging any ordering violation.
 
 ### Guardrails
 
@@ -171,7 +179,7 @@ Per-agent input/output guardrails live in `Guardrails/` (abstraction + runner) a
 
 - **Protocols** — `RTSAgentInputGuardrail` / `RTSAgentOutputGuardrail` (each requires `name` + async `check`), plus `RTSClosure{Input,Output}Guardrail` conformers. Results are two concrete enums (`RTSInputGuardrailResult` / `RTSOutputGuardrailResult`) with cases `.allowed` / `.blocked(reason:)` / `.transformed(_:)`, each carrying optional `metadata`; use the `.allow` / `.block` / `.transform` factories.
 - **Runner** — `RTSGuardrailRunner` executes the chain in array order: `.transformed` feeds the next, the first `.blocked` yields `RTSError.guardrailBlocked`, and a thrown `check` is recorded as an `error` step and propagated (fail-closed/strict). It never throws — it returns `(value, traces, error?)`; the invoker re-throws the error.
-- **Tracing** — verdicts become `RTSGuardrailTrace` values carried on `RTSNodeEvent.guardTraces` and serialized under `node.details.internals.guard_details`, matching the Python `GuardrailTrace` schema (`rail_name`/`phase`/`action`/`reason`/`meta`). Input guardrails run *before* the edge is published, so the edge's `input_kwargs` reflects the post-transform value (this diverges from Python, which records pre-transform — an open cross-team decision).
+- **Tracing** — verdicts become `RTSGuardrailTrace` values serialized under `node.details.internals.guard_details`, matching the Python `GuardrailTrace` schema (`rail_name`/`phase`/`action`/`reason`/`meta`). The collector builds them from the `middleware.guard.*` response and failure events, whose internal `railName` fills `rail_name` (`middleware.creation`, the only event naming the rail on the wire, is announced once per flow). The edge's `input_kwargs` is the post-transform value: the collector applies each input guard transform to `node.invocation`'s `kwargs` (this diverges from Python, which records pre-transform — an open cross-team decision).
 - **Prebuilt** — regex `RTSLength*`, `RTSBlockText*`, `RTSPIIRedact*` (ports of the Python guards), plus `RTSAppleAIPIIRedact*Guardrail`, a model-based PII redactor that calls FoundationModels **directly** (not via the gateway/flow) so raw pre-redaction text is never traced. AppleAI guards are `@available(macOS 26, iOS 26, *)`.
 
 ### Key types
@@ -179,8 +187,8 @@ Per-agent input/output guardrails live in `Guardrails/` (abstraction + runner) a
 - **`RTSValue`** — JSON-like enum (`null`, `bool`, `number`, `string`, `array`, `object`). `RTSInput` and `RTSOutput` are `[String: RTSValue]`. Has a custom `encode(to:)` that serializes as bare JSON primitives (not Swift's default tagged enum format).
 - **`RTSAgentNode`** — protocol for LLM-backed nodes. Requires `tools`, `llmProvider`, and standard input keys (`prompt`, `systemMessage`). `RTSAgent` is the concrete implementation.
 - **`RTSToolNode`** — protocol for function-backed nodes. Tools are registered on agents and invoked by the LLM via `RTSConduitToolBridge`, which adapts `RTSToolNode` to Conduit's `Tool` protocol. Set `isRequired = true` if schema conversion failure should be fatal rather than silently dropping the tool.
-- **`RTSNodeInvoker`** — all node invocations must go through this. It generates stamps, publishes create/finish events for both nodes and edges, and handles id assignment. Each invocation gets a unique `runID` (message-tracing key; the root agent's `runID` doubles as the root edge ID) **and** a unique `invocationID` (the graph node identifier, per-invocation — see "Per-invocation node ids"). The parent's `invocationID` flows to children via the `currentInvocationID` `@TaskLocal` to form edge `source`s.
-- **`RTSStamp`** — combines a monotonic step index (from `RTSStampFactory`) and a wall-clock timestamp. The step index provides deterministic ordering across concurrent events.
+- **`RTSNodeInvoker`** — all node invocations must go through this. It emits each node's observability events, publishes its create/execute/finish for `nodeStatusPublisher`, and handles id assignment. Each invocation gets a unique `runID` (message-tracing key; the root agent's `runID` doubles as the root edge ID) **and** a unique `invocationID` (the graph node identifier, per-invocation — see "Per-invocation node ids"). The parent's `invocationID` flows to children via the `currentInvocationID` `@TaskLocal` to form edge `source`s.
+- **`RTSStamp`** — combines a step index and a wall-clock timestamp. In the trace, the collector numbers steps as nodes are created and destroyed, in delivery order, from 0 per run; concurrent siblings take whichever order their events arrived in.
 - **`RTSLLMGateway`** — instantiated with a provider+apiKey at the app level. Builds `RTSLLMSession` instances per agent invocation using `agentNode.llmProvider` to select the model.
 
 ### JSON export
@@ -189,10 +197,10 @@ Per-agent input/output guardrails live in `Guardrails/` (abstraction + runner) a
 - Each `RTSFlowRun` has `nodes`, `edges`, and `steps` arrays.
 - Nodes and edges each have a `parent` field (creation snapshot) and a finish-time entry (the main record). Creation snapshots always carry `"parent": null`.
 - Several structs use custom `encode(to:)` to emit `null` for optional fields rather than omitting the key (required by the visualizer schema).
-- `flow_id` is a SHA-256 hex hash of `flow_name`. `session_id` is a UUID generated per collector instance.
+- `flow_id` is a SHA-256 hex hash of `flow_name`. `session_id` is the flow's id, the same for every run of one `RTSFlow`.
 - `input_kwargs` values are encoded as bare JSON scalars via `RTSValue`'s custom encoder, not as typed wrapper objects.
 - Run status reflects actual outcome: `.failed` if any edge event carries an error, `.completed` otherwise.
-- A failed edge's `output` is Python's `Failure.encode` object, `{"type", "message", "traceback"}`, for every node type. The v1 visualizer shows its error panel only for that shape. It comes from `RTSEdgeEvent.failure` (`RTSEdgeFailure`), built from the thrown error in `publishEdgeFinished`, since the type and the `RTSError.context` call site (the `traceback`, `null` for other errors) are lost once the error is a string. `type` and `message` match the events' `exception_name` / `exception_message`; Foundation errors arrive bridged, so their `type` reads `NSError`.
+- A failed edge's `output` is Python's `Failure.encode` object, `{"type", "message", "traceback"}`, for every node type. The v1 visualizer shows its error panel only for that shape. It comes from `RTSEdgeEvent.failure` (`RTSEdgeFailure`), which the collector builds from `node.destruction`'s failure details, since those keep the type and the `RTSError.context` call site (the `traceback`, `null` for other errors) that the error string has lost. `type` and `message` match the events' `exception_name` / `exception_message`; Foundation errors arrive bridged, so their `type` reads `NSError`.
 
 ### Extension points
 
@@ -206,11 +214,12 @@ Per-agent input/output guardrails live in `Guardrails/` (abstraction + runner) a
 | New RAG vector store | Conform to `RTSRAGVectorStore`, including `documents(under:scope:)` — the orphan sweep's listing; match scope exactly. See `docs/rag-orphan-sweep.md` |
 | New RAG loader | Return an `RTSRAGDocumentStream`; pass `root:` (the path it was given) to opt in to the orphan sweep |
 | Consume observability events | Subscribe to `RTSFlow.eventPublisher` — it's multicast, so add as many subscribers as you like. The one exception is a second `RTSEventWriter`: it would append to the same `<session id>.jsonl` as the flow's built-in writer. To own the file yourself, pass `savesEvents: false`; to observe it, read `flow.eventWriter` |
+| Show a new event family in the flow-graph trace | Emit it through `RTSEventEmitter` inside the run, then translate it in `RTSFlowGraphCollector.process(_:)` into the node and edge records. Anything the trace needs that the wire format lacks goes on the event as an internal property, outside `encodePayload()`. See `docs/trace-from-events.md` |
 
 ### Observability events
 
-A second, independent output stream alongside the flow-graph JSON — a port of the Python engine's
-event model (`node.*`, `session.*`, `llm.*`, `middleware.*`). `RTSEventEmitter` publishes envelopes
+A second output stream alongside the flow-graph JSON, and the source the JSON is now built from — a
+port of the Python engine's event model (`node.*`, `session.*`, `llm.*`, `middleware.*`). `RTSEventEmitter` publishes envelopes
 on `RTSFlow.eventPublisher`; `RTSEventWriter` appends them to `eventsOutputDirectory` as JSONL, one
 object per line, `<session id>.jsonl`. That directory — like `flowGraphOutputDirectory` and
 `evaluationOutputDirectory` — is derived and read-only; apps set only `RailtracksSwift.outputDirectory`,
@@ -235,8 +244,22 @@ FoundationModels `respond` rolls its transcript back, losing every round trip of
 success). Swift has no stack trace, so an `RTSError`'s call site stands in: `thrown at
 <file>:<line> in <function>` and one frame, or `""` and `[]` for other errors. `fatal` is always
 `false`. `invokeCore` builds one `RTSEventFailureDetails` from the node's final error and passes it
-to both events, so they agree. The trace's failed-edge `traceback` comes from the same
-`RTSEventFailure.callSite(of:)`. See `docs/node-failure-fields.md`.
+to both events, so they agree. The trace's failed-edge `traceback` is the same text, read from
+`node.destruction`'s details. See `docs/node-failure-fields.md`.
+
+**The flow-graph trace is built from these events** (#68). `RTSFlowGraphCollector` reads
+`RTSEventEmitter.observedEventPublisher`, an internal tap of the typed events: the same events as
+`eventPublisher`, in the same order, before encoding, so they keep full messages and Swift's provider
+spelling. Each carries the run scope it was emitted in, so a run's collector ignores another run's
+events on the same flow. What the trace needs beyond the wire is carried off the wire:
+- `node.invocation`'s `run_id` is Swift-only and public;
+- `RTSNodeCreationEvent`'s guardrail flags, provider and model, and the guard events' `railName`,
+  are internal properties outside `encodePayload()`.
+
+So `emitsEvents` is the master switch: with it off there is no trace, whatever `savesTrace` says,
+and `savesTrace` decides whether a run builds a collector at all (none means no trace file, no
+collector signposts, and `outputFileURLPublisher` never emits). A new event family that the trace
+should show needs a translation in the collector, not a new invoker subject.
 
 Design rationale, the Python mapping, and the verification runs live in `docs/observability-events.md`.
 
@@ -349,14 +372,14 @@ The rule, its use cases, and a possible injectable sweeper live in `docs/rag-orp
 
 ### Concurrency model
 
-The codebase targets Swift 6 strict concurrency. `RTSFlowGraphCollector` is an actor. `RTSNodeInvoker` is `@unchecked Sendable` (uses `PassthroughSubject` internally). `RTSLLMSession` is `Sendable` via closure capture. Combine sink closures always dispatch to actor methods via `Task { [weak self] in await self?.method() }`.
+The codebase targets Swift 6 strict concurrency. `RTSFlowGraphCollector` is an actor. `RTSNodeInvoker` is `@unchecked Sendable` (uses `PassthroughSubject` internally). `RTSLLMSession` is `Sendable` via closure capture. A Combine sink never awaits an actor itself: the collector's yields into an `AsyncStream` drained by one consumer task, which keeps delivery order.
 
-**Publishing must never run subscriber code on an invocation's thread.** `PassthroughSubject.send` delivers sinks synchronously on the caller's thread, so anything a subscriber does lands on the agent's critical path — and if the send is inside a lock (as `RTSNodeInvoker.lockedSend` still is), one slow subscriber blocks *every* node from publishing. The public streams are therefore isolated: `RTSEventEmitter` hands each envelope to a serial `DispatchQueue` that performs the send (no lock — the queue is the serialization), and `RTSFlow.nodeStatusPublisher` is `receive(on:)`-isolated. `RTSNodeInvoker`'s publishers stay synchronous because they are `internal` and both in-library subscribers do only bounded work (the collector yields into an `AsyncStream`; `RTSFlow` enqueues) — keep that invariant when adding one. Always a **serial** queue, never a `Task` per event: unordered dispatch is the race documented in `docs/duplicate-node-id.md`. The cost is asynchronous delivery, so `RTSFlow.run` joins the backlog on every exit path and `RTSFlow.flushEvents()` exposes the same barrier.
+**Publishing must never run subscriber code on an invocation's thread.** `PassthroughSubject.send` delivers sinks synchronously on the caller's thread, so anything a subscriber does lands on the agent's critical path — and if the send is inside a lock (as `RTSNodeInvoker.lockedSend` still is), one slow subscriber blocks *every* node from publishing. The public streams are therefore isolated: `RTSEventEmitter` hands each envelope to a serial `DispatchQueue` that performs the send (no lock — the queue is the serialization), and `RTSFlow.nodeStatusPublisher` is `receive(on:)`-isolated. `RTSNodeInvoker`'s publishers stay synchronous because they are `internal` and their one subscriber, `RTSFlow`, only enqueues — keep that invariant when adding one. The emitter's internal typed tap is sent on its delivery queue, so a subscriber there runs on that queue: the collector's sink only filters by run scope and yields. Always a **serial** queue, never a `Task` per event: unordered dispatch is the race documented in `docs/duplicate-node-id.md`. The cost is asynchronous delivery, so `RTSFlow.run` joins the backlog on every exit path and `RTSFlow.flushEvents()` exposes the same barrier.
 
 **Cancellation.** A run is stopped by cancelling the `Task` that awaits `RTSFlow.run`, or from inside: by the flow's `timeout`, or by a node failing under `endOnError` (`invokeCore` calls `RTSRunStop.nodeFailed`). With either set, `RTSFlow.withRunStops` runs the root in a task group next to a listener that waits on the run's `RTSRunStop` and cancels the work once a stop is requested (plus a timer for the timeout), then waits for the work to unwind. These rules keep that safe — keep them when touching the run path:
 - **Errors are normalized.** Anything thrown while the task is cancelled becomes `RTSError.runTerminated(reason:)` (`RTSRunCancellation.normalized`): in `invokeCore`, once the node's outcome is final (before `runStop.nodeFailed`), so a guardrail that throws because of a stop reports the stop; in `invokeCore`'s catch around the body as well, because `llm.failure` reads that error first; and in `RTSFlow.run`'s catch. A guardrail's own `guard_details` step and `middleware.*` events keep the raw error. The reason is `.cancelled` unless the run stopped itself: the timeout and a failing node record `.timeout` / `.endOnError` on the run's `RTSRunStop` (held by its per-run `RTSNodeInvoker`) **before** the listener cancels the work, and normalization and the node-boundary check read it back. A stop from inside the run must follow the same order: record, then cancel. A `runTerminated` error never triggers `endOnError`, so the nodes a stop cuts short can't start another. An app's own `CancellationError` thrown while the task is *not* cancelled passes through, and an existing `runTerminated` is kept (first stop wins).
-- **Nodes are checked, not skipped.** `invokeCore` checks `Task.isCancelled` after publishing the node's creation; a cancelled node still gets its finish events, but neither its guardrails nor its body runs. It checks again before output guardrails: a body that swallowed a stop and returned fails with the stop rather than running them, so unchecked output (text a redacting guardrail never saw) can't pass as a success. Never return before the node is created: the collector only finalizes on the root's finish events, so a root that skipped them would hang `awaitCompletion()` forever.
-- **Finalization is shielded.** An `AsyncStream` loop ends as soon as its task is cancelled, so `RTSFlowGraphCollector.awaitCompletion()` drains `completionStream` in an unstructured task; otherwise a cancelled run returns before its trace is written. Any new wait on the run's exit path needs the same treatment (continuations, like `flushEvents()`'s, are already unaffected).
+- **Nodes are checked, not skipped.** `invokeCore` checks `Task.isCancelled` after publishing the node's creation; a cancelled node still gets its finish events, but neither its guardrails nor its body runs. It checks again before output guardrails: a body that swallowed a stop and returned fails with the stop rather than running them, so unchecked output (text a redacting guardrail never saw) can't pass as a success. Never return before the node is created: the collector only finalizes on the root's `node.destruction`, so a root that skipped it would hang `awaitCompletion()` forever.
+- **Finalization is shielded.** An `AsyncStream` loop ends as soon as its task is cancelled, so `RTSFlowGraphCollector.awaitCompletion()` drains `completionStream` in an unstructured task; otherwise a cancelled run returns before its trace is written. Any new wait on the run's exit path needs the same treatment (continuations, like `flushEvents()`'s, are already unaffected). The other way round, an exit taken before the root node exists (today only a failed session build) must call `collector?.cancel()`: no root `node.destruction` will come, and an unfinished collector stays subscribed to the flow's emitter.
 - **The reason travels as a value.** `invokeCore`'s finish event carries `RTSNodeEvent.terminationReason`, which `RTSFlow.finishedState(of:)` maps to `RTSNodeStatus.State.cancelled` (for any stop: a cancel, a timeout or an end-on-error stop; the node that failed keeps its own error and is `.failed`). `session.completed`'s `fatal` and `termination_reason` come from the run's error through `RTSRunCancellation.terminationReason(of:)`. Never parse the error string to recover a reason.
 
 See `docs/flow-timeout.md`.

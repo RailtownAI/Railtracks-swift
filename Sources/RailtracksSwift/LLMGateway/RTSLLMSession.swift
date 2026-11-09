@@ -6,20 +6,14 @@
 //
 
 import Foundation
-import Combine
 import Conduit
 import Synchronization
-
-protocol MessagePublisher {
-    var messagePublisher: AnyPublisher<[RTSMessage], Never> { get }
-}
 
 /// Encapsulation layer for LLM session underneath
 public final class RTSLLMSession: Sendable {
     private let _run: @Sendable (String, [RTSImage], UUID?) async throws -> String
     private let _setSystemPrompt: @Sendable (String, UUID?) -> Void
     private let _messages: (@Sendable () -> [RTSMessage])
-    let messageSubject: BufferedPassthroughSubject<[RTSMessage]>
     private let agentName: String
 
     /// - Parameter run: Sends a prompt to the underlying LLM and returns the response text.
@@ -29,21 +23,17 @@ public final class RTSLLMSession: Sendable {
     ///   The optional `UUID` is a `runID` used to stamp the resulting system message, keeping it
     ///   associated with the same node invocation as the subsequent `run` call.
     /// - Parameter message: Returns all messages in the session mapped to `RTSMessage`, with
-    ///   `runID` associations injected at read time. Always reflects current session state.
-    /// - Parameter messageSubject: Subject through which new messages are published after each
-    ///   `run` or `setSystemPrompt` call. Subscribers (e.g. `RTSFlowGraphCollector`) use this
-    ///   to receive messages stamped with their `runID` without polling `messages()`.
+    ///   `runID` associations injected at read time. Always reflects current session state. The
+    ///   `llm.*` events, and through them the trace, are built from these.
     init(
         run: @escaping @Sendable (String, [RTSImage], UUID?) async throws -> String,
         setSystemPrompt: @escaping @Sendable (String, UUID?) -> Void,
         message: @escaping @Sendable () -> [RTSMessage],
-        messageSubject: BufferedPassthroughSubject<[RTSMessage]>,
         agentName: String
     ) {
         self._run = run
         self._setSystemPrompt = setSystemPrompt
         self._messages = message
-        self.messageSubject = messageSubject
         self.agentName = agentName
     }
 
@@ -96,12 +86,6 @@ public final class RTSLLMSession: Sendable {
     }
 }
 
-extension RTSLLMSession: MessagePublisher {
-    var messagePublisher: AnyPublisher<[RTSMessage], Never> {
-        return messageSubject.replayPublisher
-    }
-}
-
 // MARK: - static Builder
 
 extension RTSLLMSession {
@@ -122,18 +106,16 @@ extension RTSLLMSession {
             modelName = providerName
         }
         let runIDMap = RunIDMap()
-        // The stamped copies `publishNewMessages` sends the trace, so `message:` hands out the same
-        // ones: the `llm.*` events are built from `messages()`, and the raw transcript messages
-        // carry no model, tokens or latency.
+        // `message:` hands out the stamped copies `recordNewMessages` stores: the `llm.*` events are
+        // built from `messages()`, and the raw transcript messages carry no model, tokens or latency.
         let stampedMessages = StampedMessageStore()
-        let relay = BufferedPassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
             run: { prompt, images, runID in
                 if !images.isEmpty {
                     log.warning("⚠️ [\(agentName)] \(providerName) via FoundationModels is text-only here; ignoring \(images.count) image input(s).")
                 }
                 let beforeCount = appleAI.messages().count
-                let publishNewMessages: (AppleAIResponse?) -> Void = { response in
+                let recordNewMessages: (AppleAIResponse?) -> Void = { response in
                     guard let runID else { return }
                     let newMessages = Array(appleAI.messages().dropFirst(beforeCount))
                     for message in newMessages {
@@ -147,14 +129,13 @@ extension RTSLLMSession {
                         providerName: providerName
                     )
                     stampedMessages.store(stamped)
-                    relay.send(stamped)
                 }
                 do {
                     let response = try await appleAI.send(prompt)
-                    publishNewMessages(response)
+                    recordNewMessages(response)
                     return response.text
                 } catch {
-                    publishNewMessages(nil)
+                    recordNewMessages(nil)
                     throw error
                 }
             },
@@ -163,11 +144,9 @@ extension RTSLLMSession {
                 // capture new messages after the reset, not before.
                 appleAI.setInstruction(message)
                 if let runID {
-                    let newMessages = appleAI.messages()
-                    for message in newMessages {
+                    for message in appleAI.messages() {
                         runIDMap.set(runID, for: message.id)
                     }
-                    relay.send(newMessages.map { $0.stamped(runID: runID) })
                 }
             },
             message: {
@@ -176,7 +155,6 @@ extension RTSLLMSession {
                     stampedMessages[message.id] ?? message.stamped(runID: runIDMap[message.id])
                 }
             },
-            messageSubject: relay,
             agentName: agentName
         )
     }
@@ -208,7 +186,6 @@ extension RTSLLMSession {
                 .maxTokens(agentNode.outputSchemaMaxToken)
         }
         let runIDMap = RunIDMap()
-        let relay = BufferedPassthroughSubject<[RTSMessage]>()
         return RTSLLMSession(
             run: { prompt, images, runID in
                 // Capturing ids before send to filter out messages that doesn't belong to latest prompt
@@ -216,14 +193,12 @@ extension RTSLLMSession {
                 // and there's no intention to have same agent instance used in parallel pipeline
                 // this design is safe for now.
                 let beforeIds = Set(chatSession.messages.map { $0.id })
-                let publishNewMessages: () -> Void = {
+                let recordNewMessages: () -> Void = {
                     guard let runID else { return }
                     let newMessages = chatSession.messages.filter { !beforeIds.contains($0.id) }
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
-                    let rtsMessages = newMessages.map { $0.toRTSMessage(runID: runIDMap[$0.id], providerName: providerName) }
-                    relay.send(rtsMessages)
                     log.trace("💎 [\(agentName)] run(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }
                 do {
@@ -243,12 +218,13 @@ extension RTSLLMSession {
                     var requestConfig = chatSession.config
                     applyProviderOptions(&requestConfig, RTSRequestModalities(content))
                     let response = try await chatSession.send(content, config: requestConfig)
-                    publishNewMessages()
+                    recordNewMessages()
                     return response
                 } catch {
-                    // Publish messages accumulated before the error (user prompt, assistant tool
-                    // call, etc.) so the JSON trace and token counts are still recorded.
-                    publishNewMessages()
+                    // Record messages accumulated before the error (user prompt, assistant tool
+                    // call, etc.) so the `llm.*` events, and the trace built from them, still
+                    // include them and their token counts.
+                    recordNewMessages()
                     throw error
                 }
             },
@@ -260,15 +236,12 @@ extension RTSLLMSession {
                     for message in newMessages {
                         runIDMap.set(runID, for: message.id)
                     }
-                    let rtsMessages = newMessages.map { $0.toRTSMessage(runID: runIDMap[$0.id], providerName: providerName) }
-                    relay.send(rtsMessages)
                     log.trace("💎 [\(agentName)] setSystemPrompt(\(runID)) associated \(newMessages.count) message(s): \(newMessages.map { "[\($0.role):\($0.id)]" })")
                 }
             },
             message: {
                 chatSession.messages.map { $0.toRTSMessage(runID: runIDMap[$0.id], providerName: providerName) }
             },
-            messageSubject: relay,
             agentName: agentName
         )
     }

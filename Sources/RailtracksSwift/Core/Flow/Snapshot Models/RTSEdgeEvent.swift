@@ -20,8 +20,9 @@ struct RTSEdgeEvent {
     var input: RTSInput?
     var output: RTSOutput?
     var error: String?
-    /// The error's details for the trace, set on a failed finish event alongside `error`. Built
-    /// from the thrown error because its type and call site are gone once it's a string.
+    /// The error's details for the trace, set on a failed finish event alongside `error`. The
+    /// collector builds it from the node's `node.destruction` failure details, which keep the
+    /// error's type and call site that the `error` string has lost.
     var failure: RTSEdgeFailure?
 }
 
@@ -41,6 +42,14 @@ struct RTSEdgeFailure {
         self.type = fields.name
         self.message = fields.message
         self.traceback = RTSEventFailure.callSite(of: error)
+    }
+
+    /// The same values from a node event's failure details: the trace collector has those, not the
+    /// error. The details' `""` for an error with no call site is the trace's `null`.
+    init(_ details: RTSEventFailureDetails) {
+        self.type = details.exceptionName
+        self.message = details.exceptionMessage
+        self.traceback = details.traceback.isEmpty ? nil : details.traceback
     }
 
     /// The `output` value of a failed edge in the trace.

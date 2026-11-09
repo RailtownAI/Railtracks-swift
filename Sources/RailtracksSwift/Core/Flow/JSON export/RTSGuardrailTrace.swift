@@ -63,15 +63,52 @@ public struct RTSGuardrailTrace: Codable, Sendable {
         stage: RTSGuardrailStage,
         error: Error
     ) -> RTSGuardrailTrace {
+        let fields = RTSEventFailure.fields(from: error)
+        return self.error(
+            railName: railName,
+            stage: stage,
+            exceptionName: fields.name,
+            exceptionMessage: fields.message
+        )
+    }
+
+    /// ``error(railName:stage:error:)`` from the error's name and message, which is what a guard
+    /// failure event carries.
+    static func error(
+        railName: String,
+        stage: RTSGuardrailStage,
+        exceptionName: String,
+        exceptionMessage: String
+    ) -> RTSGuardrailTrace {
         RTSGuardrailTrace(
             railName: railName,
             stage: stage,
             action: .error,
             reason: "Guardrail raised exception",
             metadata: [
-                "exception_type": .string(String(describing: type(of: error))),
-                "exception_message": .string("\(error)")
+                "exception_type": .string(exceptionName),
+                "exception_message": .string(exceptionMessage)
             ]
+        )
+    }
+
+    /// The step a guard response event reports.
+    init(railName: String, stage: RTSGuardrailStage, decision: RTSGuardrailDecision) {
+        let action: Action
+        switch decision.action {
+        case .allow:
+            action = .allow
+        case .transform:
+            action = .transform
+        case .block:
+            action = .block
+        }
+        self.init(
+            railName: railName,
+            stage: stage,
+            action: action,
+            reason: decision.reason,
+            metadata: decision.metadata
         )
     }
 }

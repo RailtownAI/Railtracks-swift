@@ -36,8 +36,14 @@ struct RTSStamp: Codable {
     let event: Event
     
     init(stepIndex: Int, event: RTSStamp.Event) {
+        self.init(stepIndex: stepIndex, timestamp: Date(), event: event)
+    }
+
+    /// A stamp for something that happened at `timestamp`: the trace collector stamps a node at the
+    /// time of the observability event that reports it.
+    init(stepIndex: Int, timestamp: Date, event: RTSStamp.Event) {
         self.stepIndex = stepIndex
-        self.timestamp = Date()
+        self.timestamp = timestamp
         self.event = event
     }
 }
