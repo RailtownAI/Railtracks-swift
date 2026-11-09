@@ -99,17 +99,10 @@ final class RTSNodeStatusMapper: Sendable {
             log.warning("⚠️ node.destruction for a node never seen created")
             return nil
         }
-        return Self.status(
-            of: nodeID,
-            node: node,
-            state: Self.finishedState(of: destruction)
-        )
+        return Self.status(of: nodeID, node: node, state: Self.finishedState(of: destruction))
     }
 
-    private func status(
-        of nodeID: RTSInvocationID,
-        state: RTSNodeStatus.State
-    ) -> RTSNodeStatus? {
+    private func status(of nodeID: RTSInvocationID, state: RTSNodeStatus.State) -> RTSNodeStatus? {
         guard let node = nodes.withLock({ $0[nodeID] }) else {
             log.warning("⚠️ node status for a node never seen created")
             return nil

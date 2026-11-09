@@ -40,10 +40,7 @@ struct RTSNodeExecutingSignal: Sendable {
     let nodeID: RTSInvocationID
     let timestamp: Date
 
-    init(
-        nodeID: RTSInvocationID,
-        timestamp: Date = RTSEventTimestamp.now()
-    ) {
+    init(nodeID: RTSInvocationID, timestamp: Date = RTSEventTimestamp.now()) {
         self.nodeID = nodeID
         self.timestamp = timestamp
     }

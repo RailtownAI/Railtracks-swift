@@ -273,7 +273,10 @@ are per invocation. See `docs/node-status-from-events.md`.
 statuses never depend on it. With it off there are no envelopes and no event log, and `llm.*` is
 not rebuilt (that costs a pricing lookup per message), so a run builds no trace collector either,
 whatever `savesTrace` says. `savesTrace` decides whether a run builds a collector at all (none
-means no trace file, no collector signposts, and `outputFileURLPublisher` never emits). A new
+means no trace file, no collector signposts, and `outputFileURLPublisher` never emits). A known,
+accepted cost: with events off, `emit(_:)` still forwards *every* event to the internal stream,
+though without a collector only the mapper's three node events are read. If the per-event hop ever
+matters (`RTSJudgeEvaluator` runs many short flows), forward only those three when `!isEnabled`. A new
 event family that the trace or the statuses should show needs a translation in the collector or
 the mapper, not a new invoker subject.
 
