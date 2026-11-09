@@ -65,11 +65,13 @@ public class RTSFlow: @unchecked Sendable {
             .eraseToAnyPublisher()
     }
 
-    private let nodeStatusSubject = PassthroughSubject<RTSNodeStatus, Never>()
-    /// Serial, so statuses arrive in the order the invoker produced them. Its purpose is the
-    /// same as `RTSEventEmitter`'s delivery queue: these statuses are sent from sinks that run
-    /// on `RTSNodeInvoker`'s thread while its publish lock is held, so delivering subscribers
-    /// inline would let one slow app sink block every node in the flow from publishing.
+    private let nodeStatusSubject: PassthroughSubject<RTSNodeStatus, Never>
+    /// The flow's one `RTSNodeStatusMapper` sink on the emitter's internal stream, held for the
+    /// flow's lifetime, so statuses never depend on a per-run subscription being in place.
+    private let nodeStatusSubscription: AnyCancellable
+    /// Serial, so statuses arrive in the order the mapper produced them. The mapper runs on the
+    /// emitter's delivery queue, which the trace collector and the event writer share, so
+    /// delivering subscribers inline would let one slow app sink hold all of them up.
     private let nodeStatusDeliveryQueue = DispatchQueue(
         label: "ai.railtown.railtracks.nodestatus"
     )
@@ -80,7 +82,9 @@ public class RTSFlow: @unchecked Sendable {
     ///
     /// Each status carries `parentNodeID` — the invocation that triggered it, `nil` at the flow root —
     /// so consumers can reconstruct the call tree. Ids are per-invocation, so a node invoked N times
-    /// reports N distinct ids.
+    /// reports N distinct ids. Each also carries the invocation's `runID`, from `.queued` on.
+    ///
+    /// Built from the flow's observability events, which reach it even with `emitsEvents` off.
     ///
     /// Subscribers are delivered on a private serial queue, not on the invoking node's thread,
     /// so a slow sink here cannot slow the run down.
@@ -208,6 +212,14 @@ public class RTSFlow: @unchecked Sendable {
             isEnabled: emitsEvents
         )
         self.eventEmitter = emitter
+        // Subscribed here, before any run can emit, and held as long as the publisher it feeds.
+        // The emitter feeds its internal stream whatever `emitsEvents` says.
+        let statusSubject = PassthroughSubject<RTSNodeStatus, Never>()
+        let statusMapper = RTSNodeStatusMapper()
+        self.nodeStatusSubject = statusSubject
+        self.nodeStatusSubscription = emitter.observedEventPublisher
+            .compactMap { statusMapper.status(for: $0.event) }
+            .sink { statusSubject.send($0) }
         if savesEvents ?? savesTrace, emitsEvents {
             let writer = RTSEventWriter()
             // Subscribing here is what makes the built-in log immune to the no-replay trap an
@@ -290,7 +302,7 @@ public class RTSFlow: @unchecked Sendable {
         let settings = currentRunSettings()
         let startedAt = emitSessionStarted(entryPointName: agent.agentName, settings: settings)
         let runScope = UUID()
-        let (nodeInvoker, collector, subscriptions) = await startCollecting(
+        let (nodeInvoker, collector) = await startCollecting(
             settings: settings,
             runScope: runScope
         )
@@ -348,7 +360,6 @@ public class RTSFlow: @unchecked Sendable {
             reportFailure(reported)
         }
         await collector?.awaitCompletion()
-        _ = subscriptions       // keep alive until the run completes
         emitSessionCompleted(startedAt: startedAt, error: outcome.eventError, settings: settings)
         // Emission is isolated from execution, so the backlog is joined here rather than
         // interleaved with the run: subscribers cannot slow a node down, and the stream is
@@ -380,7 +391,7 @@ public class RTSFlow: @unchecked Sendable {
         let settings = currentRunSettings()
         let startedAt = emitSessionStarted(entryPointName: node.name(), settings: settings)
         let runScope = UUID()
-        let (nodeInvoker, collector, subscriptions) = await startCollecting(
+        let (nodeInvoker, collector) = await startCollecting(
             settings: settings,
             runScope: runScope
         )
@@ -411,7 +422,6 @@ public class RTSFlow: @unchecked Sendable {
             reportFailure(reported)
         }
         await collector?.awaitCompletion()
-        _ = subscriptions       // keep alive until the run completes
         emitSessionCompleted(startedAt: startedAt, error: outcome.eventError, settings: settings)
         // Emission is isolated from execution, so the backlog is joined here rather than
         // interleaved with the run: subscribers cannot slow a node down, and the stream is
@@ -600,16 +610,14 @@ public class RTSFlow: @unchecked Sendable {
         )
     }
 
-    /// Builds the per-run node invoker + graph collector and wires the
-    /// `nodeStatusPublisher` subscriptions. The returned cancellables must be held
-    /// for the duration of the run (they are kept alive by `run` awaiting completion).
+    /// Builds the per-run node invoker and graph collector.
     ///
     /// The collector builds the trace from the run's observability events, so there is none
     /// when the flow emits no events, or doesn't save its trace.
     private func startCollecting(
         settings: RunSettings,
         runScope: UUID
-    ) async -> (RTSNodeInvoker, RTSFlowGraphCollector?, Set<AnyCancellable>) {
+    ) async -> (RTSNodeInvoker, RTSFlowGraphCollector?) {
         // Warm the pricing map now (fire-and-forget) so the first per-node signpost cost
         // calculation doesn't pay the remote/disk fetch. It runs concurrently with the
         // flow and finishes long before the first node completes an LLM round-trip;
@@ -626,45 +634,8 @@ public class RTSFlow: @unchecked Sendable {
             runScope: runScope
         )
 
-        var subscriptions = Set<AnyCancellable>()
-        // Three lifecycle signals, one per state transition. `.queued` covers the window where input
-        // guardrails run — brief for most nodes, but a model-backed guardrail makes it visible.
-        let statusOf: @Sendable (RTSNodeEvent, RTSNodeStatus.State) -> RTSNodeStatus = { event, state in
-            RTSNodeStatus(
-                nodeID: event.id,
-                parentNodeID: event.parentNodeID,
-                nodeName: event.name,
-                nodeType: event.nodeType,
-                state: state,
-                runID: event.runID
-            )
-        }
-        nodeInvoker.nodeCreateEventPublisher
-            .map { statusOf($0, .queued) }
-            .sink { [weak self] in self?.nodeStatusSubject.send($0) }
-            .store(in: &subscriptions)
-        nodeInvoker.nodeExecutionEventPublisher
-            .map { event in
-                RTSNodeStatus(
-                    nodeID: event.nodeID,
-                    parentNodeID: event.parentNodeID,
-                    nodeName: event.name,
-                    nodeType: event.nodeType,
-                    state: .executing,
-                    runID: event.runID
-                )
-            }
-            .sink { [weak self] in self?.nodeStatusSubject.send($0) }
-            .store(in: &subscriptions)
-        nodeInvoker.nodeInvokeEventPublisher
-            .map { event -> RTSNodeStatus in
-                statusOf(event, RTSFlow.finishedState(of: event))
-            }
-            .sink { [weak self] in self?.nodeStatusSubject.send($0) }
-            .store(in: &subscriptions)
-
         guard savesTrace, eventEmitter.isEnabled else {
-            return (nodeInvoker, nil, subscriptions)
+            return (nodeInvoker, nil)
         }
         let collector = RTSFlowGraphCollector(
             flowName: title,
@@ -675,7 +646,7 @@ public class RTSFlow: @unchecked Sendable {
             signpostEmitter: signpostEmitter
         )
         await collector.setup()
-        return (nodeInvoker, collector, subscriptions)
+        return (nodeInvoker, collector)
     }
 
     /// `session.completed`'s `fatal`, by Python's rule: the run failed, and either the flow ends on

@@ -215,12 +215,13 @@ extension RailtracksSwiftTestSuite {
             RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
         }
 
-        /// The same sequence whether the flow saves its trace, doesn't, or emits no events: statuses
-        /// don't depend on either flag.
+        /// The same sequence whether the flow saves its trace, doesn't, emits no events, or both:
+        /// statuses don't depend on either flag.
         @Test("an agent root calling tools", arguments: [
             (savesTrace: true, emitsEvents: true),
             (savesTrace: false, emitsEvents: true),
             (savesTrace: true, emitsEvents: false),
+            (savesTrace: false, emitsEvents: false),
         ])
         func agentCallingTools(savesTrace: Bool, emitsEvents: Bool) async throws {
             let lookup = echoTool("Lookup")
@@ -285,7 +286,8 @@ extension RailtracksSwiftTestSuite {
             try expectSequence(rendered, matches: Self.orchestratorRootGolden, named: "orchestrator")
         }
 
-        /// A blocked node never executes: it goes from queued straight to failed.
+        /// A blocked node's body never runs, but it still reports executing before it fails:
+        /// `invokeCore` signals executing unconditionally, so no node finishes unseen to start.
         @Test("an input guardrail block")
         func inputBlock() async throws {
             let refuse = RTSClosureInputGuardrail(name: "Refuse") { _ in
@@ -445,30 +447,30 @@ extension RailtracksSwiftTestSuite {
 
 extension RailtracksSwiftTestSuite.NodeStatusSequenceTests {
     static let agentCallingToolsGolden = """
-        Assistant [Agent] queued node=node-1 parent=- run=-
+        Assistant [Agent] queued node=node-1 parent=- run=run-1
         Assistant [Agent] executing node=node-1 parent=- run=run-1
-        Lookup [Tool] queued node=node-2 parent=node-1 run=-
+        Lookup [Tool] queued node=node-2 parent=node-1 run=run-2
         Lookup [Tool] executing node=node-2 parent=node-1 run=run-2
         Lookup [Tool] completed node=node-2 parent=node-1 run=run-2
-        Lookup [Tool] queued node=node-3 parent=node-1 run=-
+        Lookup [Tool] queued node=node-3 parent=node-1 run=run-3
         Lookup [Tool] executing node=node-3 parent=node-1 run=run-3
         Lookup [Tool] completed node=node-3 parent=node-1 run=run-3
-        Summarize [Tool] queued node=node-4 parent=node-1 run=-
+        Summarize [Tool] queued node=node-4 parent=node-1 run=run-4
         Summarize [Tool] executing node=node-4 parent=node-1 run=run-4
         Summarize [Tool] completed node=node-4 parent=node-1 run=run-4
         Assistant [Agent] completed node=node-1 parent=- run=run-1
         """
 
     static let orchestratorRootGolden = """
-        Planner [Function] queued node=node-1 parent=- run=-
+        Planner [Function] queued node=node-1 parent=- run=run-1
         Planner [Function] executing node=node-1 parent=- run=run-1
-        Researcher [Agent] queued node=node-2 parent=node-1 run=-
+        Researcher [Agent] queued node=node-2 parent=node-1 run=run-2
         Researcher [Agent] executing node=node-2 parent=node-1 run=run-2
-        Lookup [Tool] queued node=node-3 parent=node-2 run=-
+        Lookup [Tool] queued node=node-3 parent=node-2 run=run-3
         Lookup [Tool] executing node=node-3 parent=node-2 run=run-3
         Lookup [Tool] completed node=node-3 parent=node-2 run=run-3
         Researcher [Agent] completed node=node-2 parent=node-1 run=run-2
-        Formatter [Function] queued node=node-4 parent=node-1 run=-
+        Formatter [Function] queued node=node-4 parent=node-1 run=run-4
         Formatter [Function] executing node=node-4 parent=node-1 run=run-4
         Formatter [Function] completed node=node-4 parent=node-1 run=run-4
         Planner [Function] completed node=node-1 parent=- run=run-1
@@ -477,17 +479,17 @@ extension RailtracksSwiftTestSuite.NodeStatusSequenceTests {
     /// `executing` is published even after a guardrail failed, so a node never finishes without
     /// having been seen to start.
     static let inputBlockGolden = """
-        Blocked [Agent] queued node=node-1 parent=- run=-
+        Blocked [Agent] queued node=node-1 parent=- run=run-1
         Blocked [Agent] executing node=node-1 parent=- run=run-1
         Blocked [Agent] failed(guardrailBlocked(guardrailName: "Refuse", stage: RailtracksSwift.RTSGuardrailStage.input, reason: "not allowed")) node=node-1 parent=- run=run-1
         """
 
     static let failurePropagatesGolden = """
-        Pipeline [Function] queued node=node-1 parent=- run=-
+        Pipeline [Function] queued node=node-1 parent=- run=run-1
         Pipeline [Function] executing node=node-1 parent=- run=run-1
-        Calculator [Agent] queued node=node-2 parent=node-1 run=-
+        Calculator [Agent] queued node=node-2 parent=node-1 run=run-2
         Calculator [Agent] executing node=node-2 parent=node-1 run=run-2
-        Divide [Tool] queued node=node-3 parent=node-2 run=-
+        Divide [Tool] queued node=node-3 parent=node-2 run=run-3
         Divide [Tool] executing node=node-3 parent=node-2 run=run-3
         Divide [Tool] failed(StatusTestError()) node=node-3 parent=node-2 run=run-3
         Calculator [Agent] failed(StatusTestError()) node=node-2 parent=node-1 run=run-2
@@ -495,11 +497,11 @@ extension RailtracksSwiftTestSuite.NodeStatusSequenceTests {
         """
 
     static let endOnErrorStopGolden = """
-        Pipeline [Function] queued node=node-1 parent=- run=-
+        Pipeline [Function] queued node=node-1 parent=- run=run-1
         Pipeline [Function] executing node=node-1 parent=- run=run-1
-        Calculator [Agent] queued node=node-2 parent=node-1 run=-
+        Calculator [Agent] queued node=node-2 parent=node-1 run=run-2
         Calculator [Agent] executing node=node-2 parent=node-1 run=run-2
-        Divide [Tool] queued node=node-3 parent=node-2 run=-
+        Divide [Tool] queued node=node-3 parent=node-2 run=run-3
         Divide [Tool] executing node=node-3 parent=node-2 run=run-3
         Divide [Tool] failed(StatusTestError()) node=node-3 parent=node-2 run=run-3
         Calculator [Agent] cancelled node=node-2 parent=node-1 run=run-2
@@ -509,25 +511,25 @@ extension RailtracksSwiftTestSuite.NodeStatusSequenceTests {
     /// For a cancel and a timeout alike. `Child` is created after the stop, so its body never runs,
     /// but it is still reported as executing before it is cancelled.
     static let stoppedRunGolden = """
-        IgnoresStop [Function] queued node=node-1 parent=- run=-
+        IgnoresStop [Function] queued node=node-1 parent=- run=run-1
         IgnoresStop [Function] executing node=node-1 parent=- run=run-1
-        Child [Function] queued node=node-2 parent=node-1 run=-
+        Child [Function] queued node=node-2 parent=node-1 run=run-2
         Child [Function] executing node=node-2 parent=node-1 run=run-2
         Child [Function] cancelled node=node-2 parent=node-1 run=run-2
         IgnoresStop [Function] cancelled node=node-1 parent=- run=run-1
         """
 
     static let overlappingRunsGolden = """
-        Root A [Function] queued node=node-1 parent=- run=-
+        Root A [Function] queued node=node-1 parent=- run=run-1
         Root A [Function] executing node=node-1 parent=- run=run-1
-        Worker A [Function] queued node=node-2 parent=node-1 run=-
+        Worker A [Function] queued node=node-2 parent=node-1 run=run-2
         Worker A [Function] executing node=node-2 parent=node-1 run=run-2
         Worker A [Function] completed node=node-2 parent=node-1 run=run-2
         Root A [Function] completed node=node-1 parent=- run=run-1
 
-        Root B [Function] queued node=node-1 parent=- run=-
+        Root B [Function] queued node=node-1 parent=- run=run-1
         Root B [Function] executing node=node-1 parent=- run=run-1
-        Worker B [Function] queued node=node-2 parent=node-1 run=-
+        Worker B [Function] queued node=node-2 parent=node-1 run=run-2
         Worker B [Function] executing node=node-2 parent=node-1 run=run-2
         Worker B [Function] completed node=node-2 parent=node-1 run=run-2
         Root B [Function] completed node=node-1 parent=- run=run-1

@@ -7,8 +7,9 @@ import Foundation
 
 /// Emitted by `RTSFlow.nodeStatusPublisher` as each node transitions through its lifecycle.
 ///
-/// A UI-facing projection of the invoker's node events, entirely separate from the trace:
-/// `RTSFlowGraphCollector` builds the JSON from the observability events, so nothing here reaches it.
+/// A UI-facing projection of the flow's node events, built by `RTSNodeStatusMapper` from the same
+/// observability events `RTSFlowGraphCollector` builds the trace from. Nothing here reaches the
+/// trace.
 public struct RTSNodeStatus: Sendable {
     public enum State: Sendable {
         /// Created, but its body has not started — input guardrails and edge publication run in this
@@ -37,7 +38,7 @@ public struct RTSNodeStatus: Sendable {
     public let runID: RTSRunID?
 
     /// Public so consumers can construct statuses for SwiftUI previews and tests without driving a
-    /// real flow. The library itself only ever builds these in `RTSFlow.startCollecting()`.
+    /// real flow. The library itself only ever builds these in `RTSNodeStatusMapper`.
     public init(
         nodeID: UUID,
         parentNodeID: UUID?,
