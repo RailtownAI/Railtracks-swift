@@ -64,18 +64,17 @@ extension RailtracksSwiftTestSuite {
             for messages: [RTSMessage]
         ) async throws -> [RTSFlowGraphLLMDetail] {
             let nodeID = UUID()
-            let stampFactory = RTSStampFactory()
             let create = RTSNodeEvent(
                 nodeID: nodeID,
                 name: "Agent",
                 nodeType: .agent,
-                stamp: await stampFactory.makeStamp(event: .startCreate("Agent"))
+                stamp: RTSStamp(stepIndex: 0, event: .startCreate("Agent"))
             )
             let finish = RTSNodeEvent(
                 nodeID: nodeID,
                 name: "Agent",
                 nodeType: .agent,
-                stamp: await stampFactory.makeStamp(event: .finishExecution("Agent")),
+                stamp: RTSStamp(stepIndex: 1, event: .finishExecution("Agent")),
                 runID: UUID(),
                 messages: messages
             )

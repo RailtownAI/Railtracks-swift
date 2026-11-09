@@ -305,7 +305,7 @@ extension RailtracksSwiftTestSuite {
             RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
             let source = RecordingSource(returning: [RTSKnowledgeHit(content: "found", score: 0.9)])
             let tool = makeTool(source: source)
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let invoker = RTSNodeInvoker(sessionID: UUID())
             let input: RTSInput = ["query": .string("refunds"), "topK": .number(1)]
 
             let output = try await invoker.invokeTool(tool, input: input)

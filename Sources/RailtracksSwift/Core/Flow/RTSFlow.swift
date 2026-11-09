@@ -624,9 +624,7 @@ public class RTSFlow: @unchecked Sendable {
         // respects the TTL cache, so it's a cheap no-op on subsequent runs.
         Task { await RTSCostCalculator.shared.preloadPricing() }
 
-        let stampFactory = RTSStampFactory()
         let nodeInvoker = RTSNodeInvoker(
-            stampFactory: stampFactory,
             sessionID: id,
             signpostEmitter: signpostEmitter,
             eventEmitter: eventEmitter,
@@ -661,19 +659,6 @@ public class RTSFlow: @unchecked Sendable {
             return false
         }
         return !RTSRunCancellation.isCancellation(error)
-    }
-
-    /// The state a finish event reports. A node a stop cut short, whether by a cancel, a timeout or
-    /// another node failing under `endOnError`, is `.cancelled`; a node that failed with its own
-    /// error, including the one that triggered an end-on-error stop, is `.failed`.
-    static func finishedState(of event: RTSNodeEvent) -> RTSNodeStatus.State {
-        if event.terminationReason != nil {
-            return .cancelled
-        }
-        guard let error = event.error else {
-            return .completed
-        }
-        return .failed(error)
     }
 
 }

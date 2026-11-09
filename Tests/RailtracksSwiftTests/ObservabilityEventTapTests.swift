@@ -182,12 +182,8 @@ extension RailtracksSwiftTestSuite {
         @Test("an invoker notices when it runs outside its run's scope")
         func lostRunScope() {
             let scope = UUID()
-            let scoped = RTSNodeInvoker(
-                stampFactory: RTSStampFactory(),
-                sessionID: UUID(),
-                runScope: scope
-            )
-            let unscoped = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let scoped = RTSNodeInvoker(sessionID: UUID(), runScope: scope)
+            let unscoped = RTSNodeInvoker(sessionID: UUID())
 
             // Outside any binding, as after a `Task.detached` inside the run.
             #expect(scoped.hasLostRunScope)
@@ -296,11 +292,7 @@ extension RailtracksSwiftTestSuite {
         @Test("node.creation and guard events carry what the trace needs, off the wire")
         func internalProperties() async throws {
             let recorder = TapRecorder(RTSEventEmitter(sessionID: "session-1", isEnabled: true))
-            let invoker = RTSNodeInvoker(
-                stampFactory: RTSStampFactory(),
-                sessionID: UUID(),
-                eventEmitter: recorder.emitter
-            )
+            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
             let check = RTSClosureInputGuardrail(name: "Check") { _ in
                 .allow("fine")
             }
