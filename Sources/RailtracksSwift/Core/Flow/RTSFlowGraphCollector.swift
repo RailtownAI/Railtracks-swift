@@ -8,8 +8,8 @@
 import Foundation
 import Combine
 
-/// Builds one run's flow-graph trace, and its Instruments signposts, from the run's observability
-/// events.
+/// Builds one run's flow-graph trace from the run's observability events. The run's Instruments
+/// signposts come from the flow's ``RTSSignpostWriter``, not from here.
 ///
 /// It reads the emitter's typed tap (`RTSEventEmitter.observedEventPublisher`), keeps only its own
 /// run's events (`runScope`), and translates them into the node and edge records `RTSFlowGraph.make`
@@ -43,7 +43,6 @@ actor RTSFlowGraphCollector {
         var messages: [RTSMessage] = []
     }
 
-    let signpostEmitter: (any RTSSignpostEmitting)?
     var sessionID: UUID
     var flowName: String
     var startTime: Date?
@@ -53,8 +52,6 @@ actor RTSFlowGraphCollector {
     var edgeEvents: [RTSEdgeEvent] = []
 
     internal var rootNodeID: UUID?
-    internal var rootRunID: UUID?
-    internal var ioIndex: Int = 0
     private var collectionState: CollectionState = .collecting
 
     private var pendingNodes: [UUID: PendingNode] = [:]
@@ -91,13 +88,11 @@ actor RTSFlowGraphCollector {
         sessionID: UUID,
         eventPublisher: AnyPublisher<RTSObservedEvent, Never>,
         runScope: UUID,
-        outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never>,
-        signpostEmitter: (any RTSSignpostEmitting)? = nil
+        outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never>
     ) {
         self.sessionID = sessionID
         self.flowName = flowName
         self.outputFileURLSubject = outputFileURLSubject
-        self.signpostEmitter = signpostEmitter
         (self.completionStream, self.streamContinuation) = AsyncStream<Void>.makeStream()
         (self.eventStream, self.eventContinuation) = AsyncStream.makeStream(
             of: (any RTSObservabilityEvent).self
@@ -246,9 +241,7 @@ actor RTSFlowGraphCollector {
                 nodeType: node.creation.nodeType,
                 stamp: creationStamp,
                 provider: node.creation.provider,
-                model: node.creation.model,
-                hasInputGuardrail: node.creation.hasInputGuardrail,
-                hasOutputGuardrail: node.creation.hasOutputGuardrail
+                model: node.creation.model
             )
         )
         await processEdgeEvent(
@@ -361,9 +354,7 @@ actor RTSFlowGraphCollector {
                 runID: runID,
                 runtime: destruction.durationSeconds,
                 messages: node.messages,
-                guardTraces: node.guardTraces,
-                hasInputGuardrail: node.creation.hasInputGuardrail,
-                hasOutputGuardrail: node.creation.hasOutputGuardrail
+                guardTraces: node.guardTraces
             )
         )
     }
@@ -423,10 +414,6 @@ actor RTSFlowGraphCollector {
             nodeInProcessCounter += 1
 
         case .finishExecution:
-            // The node's messages are on its finish record; emit point events now while all
-            // ancestor edge events are already in edgeEvents. This is synchronous — it snapshots
-            // state and hands async cost/emit to a detached task, so the actor never suspends here.
-            emitNodePointEvents(nodeEvent)
             nodeInProcessCounter -= 1
 
             // Finalize on the root node's finish.
@@ -454,7 +441,6 @@ actor RTSFlowGraphCollector {
         var isCollectionFinished = false
         switch edgeEvent.stamp.event {
         case .finishExecution:
-            emitEdgePointEvents(edgeEvent)
             edgeInProcessCounter -= 1
 
             // Finalize on the root edge's finish (source == nil).
@@ -471,30 +457,6 @@ actor RTSFlowGraphCollector {
 
         case .create, .startCreate:
             edgeInProcessCounter += 1
-            if edgeEvent.sourceNodeID == nil {
-                rootRunID = edgeEvent.runID ?? edgeEvent.id
-            }
-            let nodeIdentifier = edgeEvent.targetNodeID.uuidString
-            let parentIdentifier = edgeEvent.sourceNodeID?.uuidString ?? ""
-            let parentType: RTSFlowNodeType? = edgeEvent.sourceNodeID.flatMap { sourceID in
-                edgeEvents.first(where: { $0.targetNodeID == sourceID })?.nodeType
-            }
-            log.debug("🎁 emitGraphNode: '\(edgeEvent.targetName)' nodeID=\(nodeIdentifier) parentID=\(parentIdentifier) nodeType=\(edgeEvent.nodeType.rawValue) parentType=\(parentType?.rawValue ?? "nil")")
-            signpostEmitter?.emitGraphNode(
-                nodeID: nodeIdentifier,
-                parentID: parentIdentifier,
-                sessionID: sessionID.uuidString,
-                runID: rootRunID?.uuidString ?? edgeEvent.runID?.uuidString ?? edgeEvent.id.uuidString,
-                nodeType: edgeEvent.nodeType,
-                parentType: parentType,
-                error: false,
-                parentError: false,
-                cost: 0,
-                model: "",
-                parentName: edgeEvent.sourceName ?? "",
-                name: edgeEvent.targetName,
-                startTime: edgeEvent.stamp.timestamp.timeIntervalSince1970
-            )
         }
         edgeEvents.append(edgeEvent)
 

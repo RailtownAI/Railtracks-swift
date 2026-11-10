@@ -3,11 +3,12 @@
 //  RailtracksSwiftTests
 //
 
+import Combine
 import Testing
 import Foundation
 @testable import RailtracksSwift
 
-/// Records the interval calls `RTSNodeInvoker` makes; point events are ignored.
+/// Records the interval calls `RTSSignpostWriter` makes; point events are ignored.
 private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
     struct Start: Equatable {
         let nodeID: UUID
@@ -29,9 +30,12 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
     private let lock = NSLock()
     private var _starts: [Start] = []
     private var _ends: [End] = []
+    private var _graphNodeNames: [String] = []
 
     var starts: [Start] { lock.withLock { _starts } }
     var ends: [End] { lock.withLock { _ends } }
+    /// The Flow Graph points' node names, so a test can tell whether points were emitted at all.
+    var graphNodeNames: [String] { lock.withLock { _graphNodeNames } }
 
     func start(named name: String) -> Start? {
         starts.first { $0.nodeName == name }
@@ -81,7 +85,9 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
         nodeType: RTSFlowNodeType, parentType: RTSFlowNodeType?, error: Bool,
         parentError: Bool, cost: Double, model: String, parentName: String,
         name: String, startTime: TimeInterval
-    ) {}
+    ) {
+        lock.withLock { _graphNodeNames.append(name) }
+    }
 
     func emitTreeNode(
         nodeID: String, sessionID: String, runID: String, nodeType: RTSFlowNodeType,
@@ -98,6 +104,27 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
         outputTokens: Int, displayRole: String, toolName: String, content: String,
         startTime: TimeInterval, hasInputGuardrail: Bool, hasOutputGuardrail: Bool
     ) {}
+}
+
+/// An invoker whose events reach a recording emitter through an `RTSSignpostWriter`, wired the way
+/// `RTSFlow` wires them. Delivery is asynchronous, so read the recording after ``flush()``.
+private struct SignpostedInvoker {
+    let invoker: RTSNodeInvoker
+    private let eventEmitter: RTSEventEmitter
+    private let subscription: AnyCancellable
+
+    init(_ recording: RecordingSignpostEmitter) {
+        let sessionID = UUID()
+        let eventEmitter = RTSEventEmitter(sessionID: sessionID.uuidString, isEnabled: true)
+        let writer = RTSSignpostWriter(sessionID: sessionID, signpostEmitter: recording)
+        self.subscription = writer.subscribe(to: eventEmitter.observedEventPublisher)
+        self.eventEmitter = eventEmitter
+        self.invoker = RTSNodeInvoker(sessionID: sessionID, eventEmitter: eventEmitter)
+    }
+
+    func flush() async {
+        await eventEmitter.flushDelivery()
+    }
 }
 
 /// Captures the system prompts an agent sets on its session.
@@ -165,10 +192,55 @@ extension RailtracksSwiftTestSuite {
             expectEveryStartEnded(emitter)
         }
 
+        /// Signposts follow `emitsSignposts`, under `emitsEvents` as the master switch, and don't
+        /// depend on `savesTrace`.
+        @Test(
+            "which flags give signposts",
+            arguments: [
+                (savesTrace: true, emitsEvents: true, emitsSignposts: true, expected: true),
+                (savesTrace: false, emitsEvents: true, emitsSignposts: true, expected: true),
+                (savesTrace: true, emitsEvents: true, emitsSignposts: false, expected: false),
+                (savesTrace: true, emitsEvents: false, emitsSignposts: true, expected: false),
+            ]
+        )
+        func signpostFlags(
+            savesTrace: Bool,
+            emitsEvents: Bool,
+            emitsSignposts: Bool,
+            expected: Bool
+        ) async throws {
+            let emitter = RecordingSignpostEmitter()
+            let inner = StubOrchestrator(nodeName: "Inner") { _, _ in
+                ["result": .string("inner")]
+            }
+            let outer = StubOrchestrator(nodeName: "Outer") { _, context in
+                try await context.call(inner, input: [:])
+            }
+            let flow = RTSFlow(
+                title: "SignpostFlags",
+                savesTrace: savesTrace,
+                emitsEvents: emitsEvents,
+                emitsSignposts: emitsSignposts,
+                signpostEmitter: emitter
+            )
+            _ = try await flow.run(outer, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            if expected {
+                #expect(emitter.starts.map(\.nodeName) == ["Outer", "Inner"])
+                #expect(emitter.graphNodeNames == ["Outer", "Inner"])
+                expectEveryStartEnded(emitter)
+            } else {
+                #expect(emitter.starts.isEmpty)
+                #expect(emitter.ends.isEmpty)
+                #expect(emitter.graphNodeNames.isEmpty)
+            }
+        }
+
         @Test("a tool called from an agent reports the agent as its parent")
         func agentCallsTool() async throws {
             let emitter = RecordingSignpostEmitter()
-            let invoker = RTSNodeInvoker(sessionID: UUID(), signpostEmitter: emitter)
+            let signposted = SignpostedInvoker(emitter)
+            let invoker = signposted.invoker
             let agent = RTSAgent(llmProvider: .openAI(modelIDString: "gpt-4o"), name: "Agent")
             let tool = StubTool(toolName: "Lookup")
             // Stands in for the LLM: the session's `run` makes one tool call through the
@@ -188,6 +260,7 @@ extension RailtracksSwiftTestSuite {
                 input: ["prompt": .string("hi")],
                 session: session
             )
+            await signposted.flush()
 
             #expect(emitter.starts.count == 2)
             let agentStart = try #require(emitter.start(named: "Agent"))
@@ -208,7 +281,7 @@ extension RailtracksSwiftTestSuite {
         func agentConfiguredInstructions() async throws {
             let emitter = RecordingSignpostEmitter()
             let systemPrompts = SystemPromptRecorder()
-            let invoker = makeInvoker(emitter)
+            let signposted = SignpostedInvoker(emitter)
             let agent = RTSAgent(
                 llmProvider: .openAI(modelIDString: "gpt-4o"),
                 name: "Agent",
@@ -219,7 +292,12 @@ extension RailtracksSwiftTestSuite {
             var input = agent.inputs
             input["prompt"] = .string("hi")
 
-            _ = try await invoker.invokeAgent(agent, input: input, session: stubSession(systemPrompts))
+            _ = try await signposted.invoker.invokeAgent(
+                agent,
+                input: input,
+                session: stubSession(systemPrompts)
+            )
+            await signposted.flush()
 
             let start = try #require(emitter.start(named: "Agent"))
             #expect(start.instructions == "Be brief.")
@@ -231,7 +309,7 @@ extension RailtracksSwiftTestSuite {
         func callInputInstructionsWin() async throws {
             let emitter = RecordingSignpostEmitter()
             let systemPrompts = SystemPromptRecorder()
-            let invoker = makeInvoker(emitter)
+            let signposted = SignpostedInvoker(emitter)
             let agent = RTSAgent(
                 llmProvider: .openAI(modelIDString: "gpt-4o"),
                 name: "Agent",
@@ -243,7 +321,12 @@ extension RailtracksSwiftTestSuite {
             input["prompt"] = .string("hi")
             input["systemMessage"] = .string("Per call.")
 
-            _ = try await invoker.invokeAgent(agent, input: input, session: stubSession(systemPrompts))
+            _ = try await signposted.invoker.invokeAgent(
+                agent,
+                input: input,
+                session: stubSession(systemPrompts)
+            )
+            await signposted.flush()
 
             let start = try #require(emitter.start(named: "Agent"))
             #expect(start.instructions == "Per call.")
@@ -256,23 +339,20 @@ extension RailtracksSwiftTestSuite {
         func agentWithoutInstructions() async throws {
             let emitter = RecordingSignpostEmitter()
             let systemPrompts = SystemPromptRecorder()
-            let invoker = makeInvoker(emitter)
+            let signposted = SignpostedInvoker(emitter)
             let agent = RTSAgent(llmProvider: .openAI(modelIDString: "gpt-4o"), name: "Agent")
 
-            _ = try await invoker.invokeAgent(
+            _ = try await signposted.invoker.invokeAgent(
                 agent,
                 input: ["prompt": .string("hi")],
                 session: stubSession(systemPrompts)
             )
+            await signposted.flush()
 
             let start = try #require(emitter.start(named: "Agent"))
             #expect(start.instructions == nil)
             #expect(systemPrompts.prompts.isEmpty)
             expectEveryStartEnded(emitter)
-        }
-
-        private func makeInvoker(_ emitter: RecordingSignpostEmitter) -> RTSNodeInvoker {
-            RTSNodeInvoker(sessionID: UUID(), signpostEmitter: emitter)
         }
 
         /// A session that answers without an LLM and records every system prompt set on it.
