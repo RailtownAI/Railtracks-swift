@@ -6,11 +6,10 @@
 //
 
 import Foundation
-import Combine
 
 /// An operator that facilitate with node invoking, and publish node invoke event
 /// All node invoking should go through this, otherwise will have even record inconsistency
-public class RTSNodeInvoker: @unchecked Sendable {
+public final class RTSNodeInvoker: Sendable {
     typealias RunInputGuardrail = (RTSInput, RTSInvocationID) async -> RTSGuardrailInputOutcome
     typealias RunOutputGuardrail = (RTSOutput, RTSInvocationID) async -> RTSGuardrailOutputOutcome
     /// Called once the node body has finished, with the ids minted inside `invokeCore` and
@@ -21,26 +20,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
         _ runID: RTSRunID,
         _ error: Error?
     ) async -> Void
-    
-    let stampFactory: RTSStampFactory
+
     let sessionID: UUID
     let signpostEmitter: (any RTSSignpostEmitting)?
-
-    // A node's creation and finish, for `RTSFlow.nodeStatusPublisher`. The trace is built from the
-    // observability events instead (`RTSFlowGraphCollector`).
-    let nodeCreateEventSubject = PassthroughSubject<RTSNodeEvent, Never>()
-    let nodeInvokeEventSubject = PassthroughSubject<RTSNodeEvent, Never>()
-
-    /// Fires when a node's body is about to run — after input guardrails, immediately before
-    /// `execute`. Its only consumer today is `RTSFlow`, which turns it into the executing state of
-    /// `RTSNodeStatus` so a UI can show a node waiting on a slow guardrail.
-    let nodeExecutionEventSubject = PassthroughSubject<RTSNodeExecutionEvent, Never>()
-
-    /// Serializes the event `send(...)` calls below. One `RTSNodeInvoker` is shared by every
-    /// agent/tool in a flow, and `PassthroughSubject.send` is NOT safe under concurrent calls — so a
-    /// flow that runs agents in parallel would otherwise data-race on event publication. This backs the
-    /// `@unchecked Sendable` conformance with real synchronization.
-    private let publishLock = NSLock()
 
     /// The invocation id of the node currently executing on this task. A child invocation reads it
     /// as its parent (the edge `source`). It is bound around `execute` so it flows down the async
@@ -61,14 +43,12 @@ public class RTSNodeInvoker: @unchecked Sendable {
     let runScope: UUID?
 
     init(
-        stampFactory: RTSStampFactory,
         sessionID: UUID,
         signpostEmitter: (any RTSSignpostEmitting)? = nil,
         eventEmitter: RTSEventEmitter? = nil,
         runStop: RTSRunStop = RTSRunStop(),
         runScope: UUID? = nil
     ) {
-        self.stampFactory = stampFactory
         self.sessionID = sessionID
         self.signpostEmitter = signpostEmitter
         self.eventEmitter = eventEmitter
@@ -204,14 +184,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
         emitLLMEvents: EmitLLMEvents? = nil,
         execute: (UUID, RTSInput) async throws -> RTSOutput
     ) async throws -> RTSOutput {
-        let event: RTSStamp.Event
-        if let sourceName = createdBy?.name() {
-            event = .create(sourceName, node.name())
-        } else {
-            event = .startCreate(node.name())
-        }
-        let creationStamp = await stampFactory.makeStamp(event: event)
-
         // Per-invocation graph node id (matches Python): a node invoked N times yields N distinct
         // ids. The node *instance* id (`node.id`) is no longer used for tracing identity.
         let invocationID = RTSInvocationID()
@@ -226,22 +198,9 @@ public class RTSNodeInvoker: @unchecked Sendable {
         }
         #endif
 
-        await publishNodeCreated(
-            node,
-            nodeID: invocationID,
-            parentNodeID: parentInvocationID,
-            nodeType: nodeType,
-            provider: provider,
-            model: model,
-            stamp: creationStamp,
-            createdBy: createdBy,
-            hasInputGuardrail: runInputGuardrails != nil,
-            hasOutputGuardrail: runOutputGuardrails != nil
-        )
-
-        // Observability stream (independent of the trace above). `node.creation` is a
-        // creation event: it precedes the node entering its own scope, so it carries no
-        // parent — matching Python's `CreationEventBase`.
+        // The node's observability events, which the trace and the node statuses are built from.
+        // `node.creation` is a creation event: it precedes the node entering its own scope, so it
+        // carries no parent — matching Python's `CreationEventBase`.
         let eventParent = RTSEventParent.node(nodeID: invocationID.uuidString)
         let eventSpatialParent = RTSEventSpatialParent.node(nodeID: parentInvocationID?.uuidString)
         // The flags, provider and model are off the wire, for the trace collector's signposts.
@@ -277,7 +236,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
         // Input guardrails run before the body, which receives their post-transform input. The
         // trace's edge records that value too: the collector applies each guard transform to the
         // `kwargs` above.
-        var guardTraces: [RTSGuardrailTrace] = []
         var workingInput = input
         var guardError: Error?
         // A cancelled run stops at the next node, even if a provider ignores cancellation. The node
@@ -290,7 +248,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
         if guardError == nil, let runInputGuardrails {
             let result = await runInputGuardrails(input, invocationID)
             workingInput = result.value
-            guardTraces.append(contentsOf: result.traces)
             guardError = result.error
         }
 
@@ -311,15 +268,10 @@ public class RTSNodeInvoker: @unchecked Sendable {
         )
 
         // Guardrails are done and the body is about to run: the point where a UI flips this node from
-        // queued to executing. Published even when a guardrail already failed above, so a node never
-        // finishes without having been seen to start.
-        await publishNodeExecuting(
-            node,
-            nodeID: invocationID,
-            parentNodeID: parentInvocationID,
-            nodeType: nodeType,
-            runID: runID
-        )
+        // queued to executing. Signalled even when a guardrail already failed above, so a node
+        // never finishes without having been seen to start. Internal stream only, so it arrives
+        // even with events off.
+        eventEmitter?.emitNodeExecuting(RTSNodeExecutingSignal(nodeID: invocationID))
 
         var output: RTSOutput = [:]
         // A blocked/errored input guardrail short-circuits: the LLM never runs.
@@ -365,7 +317,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 } else {
                     let result = await runOutputGuardrails(output, invocationID)
                     output = result.value
-                    guardTraces.append(contentsOf: result.traces)
                     invokeError = result.error
                 }
             }
@@ -435,23 +386,6 @@ public class RTSNodeInvoker: @unchecked Sendable {
             error: invokeError
         )
 
-        let completionStamp = await stampFactory.makeStamp(event: .finishExecution(node.name()))
-        await publishNodeFinished(
-            node,
-            nodeID: invocationID,
-            parentNodeID: parentInvocationID,
-            nodeType: nodeType,
-            stamp: completionStamp,
-            runID: runID,
-            input: workingInput,
-            output: output,
-            error: invokeError,
-            runtime: runtime,
-            guardTraces: guardTraces,
-            hasInputGuardrail: runInputGuardrails != nil,
-            hasOutputGuardrail: runOutputGuardrails != nil
-        )
-
         // The final outcome, and the event Python's `node_internals` fold reads for latency.
         // `runtime` is the monotonic measurement taken above, never a stamp delta.
         eventEmitter?.emit(
@@ -460,7 +394,8 @@ public class RTSNodeInvoker: @unchecked Sendable {
                 spatialParent: eventSpatialParent,
                 response: invokeError == nil ? .object(output) : nil,
                 durationSeconds: runtime,
-                failure: failureDetails
+                failure: failureDetails,
+                terminationReason: RTSRunCancellation.terminationReason(of: invokeError)
             )
         )
 
@@ -468,122 +403,4 @@ public class RTSNodeInvoker: @unchecked Sendable {
         return output
     }
 
-    /// Serialized `send` — the invoker is shared across a flow's agents and `PassthroughSubject.send`
-    /// isn't concurrency-safe, so parallel agents would otherwise race on event publication. This is
-    /// synchronous (no suspension), so locking here is safe and legal from the async publish methods.
-    ///
-    /// - Important: subscribers' sinks run **inside this lock**, so a slow one does not merely
-    ///   delay its own node — it blocks every other node in the flow from publishing. These
-    ///   publishers are therefore `internal`, and every in-library subscriber must do only
-    ///   bounded work here. The one subscriber is `RTSFlow`, which hands node statuses to a
-    ///   delivery queue (`nodeStatusPublisher` is `receive(on:)`-isolated precisely so app sinks
-    ///   never reach this lock). Keep that invariant when adding a subscriber; if these ever
-    ///   become public, they need the isolation `RTSEventEmitter` uses.
-    private func lockedSend<Event>(_ subject: PassthroughSubject<Event, Never>, _ event: Event) {
-        publishLock.lock()
-        defer { publishLock.unlock() }
-        subject.send(event)
-    }
-
-    private func publishNodeCreated(
-        _ node: some RTSNode,
-        nodeID: UUID,
-        parentNodeID: UUID?,
-        nodeType: RTSFlowNodeType,
-        provider: String,
-        model: String,
-        stamp: RTSStamp,
-        createdBy: (any RTSNode)?,
-        hasInputGuardrail: Bool = false,
-        hasOutputGuardrail: Bool = false
-    ) async {
-        lockedSend(
-            nodeCreateEventSubject,
-            RTSNodeEvent(
-                nodeID: nodeID,
-                parentNodeID: parentNodeID,
-                name: node.name(),
-                nodeType: nodeType,
-                stamp: stamp,
-                provider: provider,
-                model: model,
-                hasInputGuardrail: hasInputGuardrail,
-                hasOutputGuardrail: hasOutputGuardrail
-            )
-        )
-    }
-
-    /// Announces that a node's body is starting, after input guardrails have run — the queued →
-    /// executing transition in `RTSNodeStatus`. Takes no stamp: `RTSStampFactory` hands out the
-    /// monotonic indices the trace orders by, and this event has no need to consume one.
-    private func publishNodeExecuting(
-        _ node: some RTSNode,
-        nodeID: UUID,
-        parentNodeID: UUID?,
-        nodeType: RTSFlowNodeType,
-        runID: RTSRunID
-    ) async {
-        lockedSend(
-            nodeExecutionEventSubject,
-            RTSNodeExecutionEvent(
-                nodeID: nodeID,
-                parentNodeID: parentNodeID,
-                name: node.name(),
-                nodeType: nodeType,
-                runID: runID
-            )
-        )
-    }
-
-    private func publishNodeFinished(
-        _ node: some RTSNode,
-        nodeID: UUID,
-        parentNodeID: UUID?,
-        nodeType: RTSFlowNodeType,
-        stamp: RTSStamp,
-        runID: RTSRunID,
-        input: RTSInput,
-        output: RTSOutput,
-        error: Error?,
-        runtime: TimeInterval? = nil,
-        guardTraces: [RTSGuardrailTrace] = [],
-        hasInputGuardrail: Bool = false,
-        hasOutputGuardrail: Bool = false
-    ) async {
-        lockedSend(
-            nodeInvokeEventSubject,
-            RTSNodeEvent(
-                nodeID: nodeID,
-                parentNodeID: parentNodeID,
-                name: node.name(),
-                nodeType: nodeType,
-                stamp: stamp,
-                input: input,
-                output: error == nil ? output : nil,
-                error: error.map { "\($0)" },
-                terminationReason: RTSRunCancellation.terminationReason(of: error),
-                runID: runID,
-                runtime: runtime,
-                guardTraces: guardTraces,
-                hasInputGuardrail: hasInputGuardrail,
-                hasOutputGuardrail: hasOutputGuardrail
-            )
-        )
-    }
-
-}
-
-// The node lifecycle `RTSFlow` turns into `RTSNodeStatus`: created (queued), executing, finished.
-extension RTSNodeInvoker {
-    var nodeCreateEventPublisher: AnyPublisher<RTSNodeEvent, Never> {
-        nodeCreateEventSubject.eraseToAnyPublisher()
-    }
-
-    var nodeInvokeEventPublisher: AnyPublisher<RTSNodeEvent, Never> {
-        nodeInvokeEventSubject.eraseToAnyPublisher()
-    }
-
-    var nodeExecutionEventPublisher: AnyPublisher<RTSNodeExecutionEvent, Never> {
-        nodeExecutionEventSubject.eraseToAnyPublisher()
-    }
 }

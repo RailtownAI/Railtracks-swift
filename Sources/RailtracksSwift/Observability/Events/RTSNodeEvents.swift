@@ -286,6 +286,13 @@ public struct RTSNodeDestructionEvent: RTSParentedEvent {
     /// Set when the node failed: the same details as its `node.failure`. `nil` on success.
     public let failure: RTSEventFailureDetails?
 
+    // Not part of the payload: set by `RTSNodeInvoker.invokeCore` for the node statuses.
+
+    /// How the run stopped, when a stop ended this node: a cancel, a timeout, or an end-on-error
+    /// stop that cut it short. `nil` when the node succeeded or failed on its own. Carried as a
+    /// value so a reader never parses it back out of the error text.
+    let terminationReason: RTSRunTerminationReason?
+
     /// `"failure"` when ``failure`` is set, `"success"` otherwise: Python's `status`.
     public var status: String {
         failure == nil ? "success" : "failure"
@@ -299,11 +306,33 @@ public struct RTSNodeDestructionEvent: RTSParentedEvent {
         failure: RTSEventFailureDetails? = nil,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
+        self.init(
+            parent: parent,
+            spatialParent: spatialParent,
+            response: response,
+            durationSeconds: durationSeconds,
+            failure: failure,
+            terminationReason: nil,
+            timestamp: timestamp
+        )
+    }
+
+    /// The public init plus the internal properties.
+    init(
+        parent: RTSEventParent,
+        spatialParent: RTSEventSpatialParent,
+        response: RTSValue?,
+        durationSeconds: TimeInterval,
+        failure: RTSEventFailureDetails?,
+        terminationReason: RTSRunTerminationReason?,
+        timestamp: Date = RTSEventTimestamp.now()
+    ) {
         self.parent = parent
         self.spatialParent = spatialParent
         self.response = response
         self.durationSeconds = durationSeconds
         self.failure = failure
+        self.terminationReason = terminationReason
         self.timestamp = timestamp
     }
 

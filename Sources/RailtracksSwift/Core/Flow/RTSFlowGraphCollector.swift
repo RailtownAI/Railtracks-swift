@@ -108,10 +108,11 @@ actor RTSFlowGraphCollector {
         log.debug("🎁 setup observability event collector")
         eventPublisher
             .sink { [eventContinuation] observed in
-                guard observed.runScope == runScope else {
+                guard observed.runScope == runScope,
+                      let event = observed.event.observabilityEvent else {
                     return
                 }
-                eventContinuation.yield(observed.event)
+                eventContinuation.yield(event)
             }
             .store(in: &cancellables)
     }

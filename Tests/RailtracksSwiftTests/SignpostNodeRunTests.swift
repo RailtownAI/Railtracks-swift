@@ -168,11 +168,7 @@ extension RailtracksSwiftTestSuite {
         @Test("a tool called from an agent reports the agent as its parent")
         func agentCallsTool() async throws {
             let emitter = RecordingSignpostEmitter()
-            let invoker = RTSNodeInvoker(
-                stampFactory: RTSStampFactory(),
-                sessionID: UUID(),
-                signpostEmitter: emitter
-            )
+            let invoker = RTSNodeInvoker(sessionID: UUID(), signpostEmitter: emitter)
             let agent = RTSAgent(llmProvider: .openAI(modelIDString: "gpt-4o"), name: "Agent")
             let tool = StubTool(toolName: "Lookup")
             // Stands in for the LLM: the session's `run` makes one tool call through the
@@ -276,7 +272,7 @@ extension RailtracksSwiftTestSuite {
         }
 
         private func makeInvoker(_ emitter: RecordingSignpostEmitter) -> RTSNodeInvoker {
-            RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID(), signpostEmitter: emitter)
+            RTSNodeInvoker(sessionID: UUID(), signpostEmitter: emitter)
         }
 
         /// A session that answers without an LLM and records every system prompt set on it.

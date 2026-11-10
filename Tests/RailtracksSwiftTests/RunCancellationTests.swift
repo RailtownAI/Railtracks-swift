@@ -769,26 +769,42 @@ private final class CheckedFlag: @unchecked Sendable {
     }
 }
 
-/// Collects the node finish events an invoker publishes, for tests that drive `RTSNodeInvoker`
-/// directly. The invoker sends them synchronously, so they're all here when the call returns.
+/// Records what the tests that drive `RTSNodeInvoker` directly need from its events: each node's
+/// statuses, built by `RTSNodeStatusMapper` as `RTSFlow.nodeStatusPublisher`'s are, and the input
+/// guardrail failures. Build the invoker with ``emitter``.
 ///
-/// Not `Sendable`: it stays in the test's task. The events are behind a `Mutex` because the invoker
-/// publishes them from whichever task finishes the node.
-private final class FinishEventRecorder {
-    private let events = Mutex<[RTSNodeEvent]>([])
+/// Not `Sendable`: it stays in the test's task. The events are behind a `Mutex` because the emitter
+/// delivers them on its own queue, so read them through the async methods, which wait for it.
+private final class InvokerEventRecorder {
+    let emitter = RTSEventEmitter(sessionID: "session-1", isEnabled: true)
+    private let statuses = Mutex<[RTSNodeStatus]>([])
+    private let inputGuardFailures = Mutex<[RTSGuardInputFailureEvent]>([])
     private var subscription: AnyCancellable?
 
-    init(_ invoker: RTSNodeInvoker) {
-        subscription = invoker.nodeInvokeEventPublisher.sink { [weak self] event in
-            self?.events.withLock { $0.append(event) }
+    init() {
+        let mapper = RTSNodeStatusMapper()
+        subscription = emitter.observedEventPublisher.sink { [weak self] observed in
+            if let status = mapper.status(for: observed.event) {
+                self?.statuses.withLock { $0.append(status) }
+            }
+            if let failure = observed.event.observabilityEvent as? RTSGuardInputFailureEvent {
+                self?.inputGuardFailures.withLock { $0.append(failure) }
+            }
         }
     }
 
-    /// The finish event of the node named `nodeName`.
-    func finishEvent(of nodeName: String) -> RTSNodeEvent? {
-        events.withLock { events in
-            events.first { $0.name == nodeName }
+    /// The last state of the node named `nodeName`.
+    func finalState(of nodeName: String) async -> RTSNodeStatus.State? {
+        await emitter.flushDelivery()
+        return statuses.withLock { statuses in
+            statuses.last { $0.nodeName == nodeName }?.state
         }
+    }
+
+    /// The `middleware.guard.input.failure` events, in emission order.
+    func inputGuardrailFailures() async -> [RTSGuardInputFailureEvent] {
+        await emitter.flushDelivery()
+        return inputGuardFailures.withLock { $0 }
     }
 }
 
@@ -833,7 +849,7 @@ extension RailtracksSwiftTestSuite {
                 name: "Guarded",
                 outputGuardrails: [redact]
             )
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let invoker = RTSNodeInvoker(sessionID: UUID())
             let session = stubSession(after: .milliseconds(200))
 
             let call = Task {
@@ -864,7 +880,7 @@ extension RailtracksSwiftTestSuite {
                 inputGuardrails: [block]
             )
             let stop = RTSRunStop(endsOnError: true)
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID(), runStop: stop)
+            let invoker = RTSNodeInvoker(sessionID: UUID(), runStop: stop)
 
             _ = try? await invoker.invokeAgent(
                 agent,
@@ -925,8 +941,8 @@ extension RailtracksSwiftTestSuite {
                 name: "Guarded",
                 inputGuardrails: [slowCheck]
             )
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
-            let recorder = FinishEventRecorder(invoker)
+            let recorder = InvokerEventRecorder()
+            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
 
             let thrown = await cancelWhileGuardrailRuns(
                 agent,
@@ -939,14 +955,13 @@ extension RailtracksSwiftTestSuite {
                 isCancelledRun(thrown),
                 "expected runTerminated(cancelled), got \(String(describing: thrown))"
             )
-            let finish = try #require(recorder.finishEvent(of: "Guarded"))
             #expect(
-                isCancelledState(RTSFlow.finishedState(of: finish)),
+                isCancelledState(await recorder.finalState(of: "Guarded")),
                 "the node should finish .cancelled"
             )
-            let trace = try #require(finish.guardTraces.first)
-            #expect(trace.action == "error")
-            #expect(trace.metadata?["exception_type"] == .string("CancellationError"))
+            let failure = try #require(await recorder.inputGuardrailFailures().first)
+            #expect(failure.railName == "slowCheck")
+            #expect(failure.exceptionName == "CancellationError")
         }
 
         /// Under endOnError, a user cancel during a guardrail is still a cancel: the guardrail's
@@ -964,11 +979,7 @@ extension RailtracksSwiftTestSuite {
                 inputGuardrails: [slowCheck]
             )
             let stop = RTSRunStop(endsOnError: true)
-            let invoker = RTSNodeInvoker(
-                stampFactory: RTSStampFactory(),
-                sessionID: UUID(),
-                runStop: stop
-            )
+            let invoker = RTSNodeInvoker(sessionID: UUID(), runStop: stop)
 
             let thrown = await cancelWhileGuardrailRuns(
                 agent,
@@ -1001,8 +1012,8 @@ extension RailtracksSwiftTestSuite {
                 name: "Guarded",
                 outputGuardrails: [slowCheck]
             )
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
-            let recorder = FinishEventRecorder(invoker)
+            let recorder = InvokerEventRecorder()
+            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
 
             let thrown = await cancelWhileGuardrailRuns(
                 agent,
@@ -1015,9 +1026,8 @@ extension RailtracksSwiftTestSuite {
                 isCancelledRun(thrown),
                 "expected runTerminated(cancelled), got \(String(describing: thrown))"
             )
-            let finish = try #require(recorder.finishEvent(of: "Guarded"))
             #expect(
-                isCancelledState(RTSFlow.finishedState(of: finish)),
+                isCancelledState(await recorder.finalState(of: "Guarded")),
                 "the node should finish .cancelled"
             )
         }
@@ -1037,12 +1047,12 @@ extension RailtracksSwiftTestSuite {
                 inputGuardrails: [slowCheck]
             )
             let stop = RTSRunStop()
+            let recorder = InvokerEventRecorder()
             let invoker = RTSNodeInvoker(
-                stampFactory: RTSStampFactory(),
                 sessionID: UUID(),
+                eventEmitter: recorder.emitter,
                 runStop: stop
             )
-            let recorder = FinishEventRecorder(invoker)
 
             let thrown = await cancelWhileGuardrailRuns(
                 agent,
@@ -1058,9 +1068,8 @@ extension RailtracksSwiftTestSuite {
                 Issue.record("expected runTerminated(timeout), got \(String(describing: thrown))")
                 return
             }
-            let finish = try #require(recorder.finishEvent(of: "Guarded"))
             #expect(
-                isCancelledState(RTSFlow.finishedState(of: finish)),
+                isCancelledState(await recorder.finalState(of: "Guarded")),
                 "the node should finish .cancelled"
             )
         }
@@ -1076,8 +1085,8 @@ extension RailtracksSwiftTestSuite {
                 name: "Guarded",
                 inputGuardrails: [failingCheck]
             )
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
-            let recorder = FinishEventRecorder(invoker)
+            let recorder = InvokerEventRecorder()
+            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
 
             var thrown: Error?
             do {
@@ -1094,10 +1103,9 @@ extension RailtracksSwiftTestSuite {
                 thrown is BoomError,
                 "expected the guardrail's own error, got \(String(describing: thrown))"
             )
-            let finish = try #require(recorder.finishEvent(of: "Guarded"))
-            let state = RTSFlow.finishedState(of: finish)
-            guard case .failed = state else {
-                Issue.record("the node should finish .failed, got \(state)")
+            let state = await recorder.finalState(of: "Guarded")
+            guard case .failed? = state else {
+                Issue.record("the node should finish .failed, got \(String(describing: state))")
                 return
             }
         }
@@ -1312,28 +1320,32 @@ extension RailtracksSwiftTestSuite {
 
     /// A cancel and a timeout both stop a node from outside, so both report `.cancelled`.
     @Test func cancelAndTimeoutFinishAsCancelled() {
-        let cancelled = finishEvent(error: RTSError.runTerminated(reason: .cancelled))
-        let timedOut = finishEvent(error: RTSError.runTerminated(reason: .timeout(after: 5)))
+        let cancelled = destruction(error: RTSError.runTerminated(reason: .cancelled))
+        let timedOut = destruction(error: RTSError.runTerminated(reason: .timeout(after: 5)))
 
-        #expect(isCancelledState(RTSFlow.finishedState(of: cancelled)))
-        #expect(isCancelledState(RTSFlow.finishedState(of: timedOut)))
+        #expect(isCancelledState(RTSNodeStatusMapper.finishedState(of: cancelled)))
+        #expect(isCancelledState(RTSNodeStatusMapper.finishedState(of: timedOut)))
     }
 
     /// A node an end-on-error stop cut short is `.cancelled`, like any stopped node. The node that
-    /// failed has its own error and is `.failed`; no error at all is a completion.
+    /// failed has its own error and is `.failed`, with the error's text; no error at all is a
+    /// completion.
     @Test func endOnErrorStopFinishesAsCancelledAndOwnErrorAsFailed() {
-        let underlying = URLError(.badServerResponse)
+        // Typed as `Error`, as the invoker holds it: a Foundation error then interpolates as its
+        // bridged `NSError`, which is the text the node's events and status carry.
+        let underlying: Error = URLError(.badServerResponse)
         let reason = RTSRunTerminationReason.endOnError(nodeName: "Tool", underlying: underlying)
-        let stopped = finishEvent(error: RTSError.runTerminated(reason: reason))
-        let failing = finishEvent(error: underlying)
-        let succeeded = finishEvent(error: nil)
+        let stopped = destruction(error: RTSError.runTerminated(reason: reason))
+        let failing = destruction(error: underlying)
+        let succeeded = destruction(error: nil)
 
-        #expect(isCancelledState(RTSFlow.finishedState(of: stopped)))
-        guard case .failed = RTSFlow.finishedState(of: failing) else {
+        #expect(isCancelledState(RTSNodeStatusMapper.finishedState(of: stopped)))
+        guard case .failed(let message) = RTSNodeStatusMapper.finishedState(of: failing) else {
             Issue.record("expected .failed for the node's own error")
             return
         }
-        guard case .completed = RTSFlow.finishedState(of: succeeded) else {
+        #expect(message == "\(underlying)")
+        guard case .completed = RTSNodeStatusMapper.finishedState(of: succeeded) else {
             Issue.record("expected .completed with no error")
             return
         }
@@ -1393,14 +1405,14 @@ extension RailtracksSwiftTestSuite {
         #expect(stop.reason == nil)
     }
 
-    /// A finish event the way `RTSNodeInvoker` builds one for `error`.
-    private func finishEvent(error: Error?) -> RTSNodeEvent {
-        RTSNodeEvent(
-            nodeID: UUID(),
-            name: "Node",
-            nodeType: .tool,
-            stamp: RTSStamp(stepIndex: 0, event: .finishExecution("Node")),
-            error: error.map { "\($0)" },
+    /// A `node.destruction` the way `RTSNodeInvoker` builds one for `error`.
+    private func destruction(error: Error?) -> RTSNodeDestructionEvent {
+        RTSNodeDestructionEvent(
+            parent: .node(nodeID: UUID().uuidString),
+            spatialParent: .node(nodeID: nil),
+            response: nil,
+            durationSeconds: 0,
+            failure: error.map { RTSEventFailureDetails($0) },
             terminationReason: RTSRunCancellation.terminationReason(of: error)
         )
     }

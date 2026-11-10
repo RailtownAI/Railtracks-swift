@@ -47,6 +47,19 @@ private final class TapRecorder: Sendable {
     }
 }
 
+private extension RTSObservedEvent {
+    /// The event's wire type, or `node.executing` for the executing signal, so a test can list the
+    /// internal stream in one line.
+    var eventType: String {
+        switch event {
+        case .observability(let event):
+            return event.eventType
+        case .nodeExecuting:
+            return "node.executing"
+        }
+    }
+}
+
 /// An orchestrator whose body is supplied as a closure.
 private struct TapOrchestrator: RTSOrchestratorNode {
     let id = UUID()
@@ -97,16 +110,58 @@ extension RailtracksSwiftTestSuite {
 
             let observed = await recorder.observedEvents
             let published = await recorder.publishedEvents
-            #expect(observed.map { $0.event.eventType } == published.map { $0.eventType })
+            let observedTypes = observed.compactMap { $0.event.observabilityEvent?.eventType }
+            #expect(observedTypes == published.map { $0.eventType })
 
             // Session events are emitted outside the run's scope; everything else inside it,
             // with one scope per run.
-            let sessionEvents = observed.filter { $0.event.eventType.hasPrefix("session.") }
-            let nodeEvents = observed.filter { $0.event.eventType.hasPrefix("node.") }
+            let sessionEvents = observed.filter { $0.eventType.hasPrefix("session.") }
+            let nodeEvents = observed.filter { $0.eventType.hasPrefix("node.") }
             #expect(sessionEvents.count == 4)
             #expect(sessionEvents.allSatisfy { $0.runScope == nil })
             #expect(nodeEvents.allSatisfy { $0.runScope != nil })
             #expect(Set(nodeEvents.compactMap { $0.runScope }).count == 2)
+        }
+
+        /// The executing signal goes on the internal stream only, between the node's invocation and
+        /// its destruction, in its run's scope.
+        @Test("the executing signal is internal, and comes between invocation and destruction")
+        func executingSignal() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            let child = TapOrchestrator(nodeName: "Child") { _, _ in
+                ["result": .string("child")]
+            }
+            let root = TapOrchestrator(nodeName: "Root") { input, context in
+                try await context.call(child, input: input)
+            }
+            let flow = RTSFlow(title: "TapExecuting", savesTrace: false)
+            let recorder = TapRecorder(flow.eventEmitter)
+
+            _ = try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            let observed = await recorder.observedEvents
+            let nodeTypes = observed.map { $0.eventType }.filter { $0.hasPrefix("node.") }
+            #expect(nodeTypes == [
+                "node.creation", "node.invocation", "node.executing",
+                "node.creation", "node.invocation", "node.executing",
+                "node.response", "node.destruction",
+                "node.response", "node.destruction",
+            ])
+            let creations = observed.compactMap { observed in
+                observed.event.observabilityEvent as? RTSNodeCreationEvent
+            }
+            let signals = observed.compactMap { observed -> RTSNodeExecutingSignal? in
+                guard case .nodeExecuting(let signal) = observed.event else {
+                    return nil
+                }
+                return signal
+            }
+            #expect(signals.map { $0.nodeID.uuidString } == creations.map { $0.nodeID })
+            let scopes = observed.filter { $0.eventType == "node.executing" }.map { $0.runScope }
+            #expect(scopes.allSatisfy { $0 != nil })
+
+            let published = await recorder.publishedEvents
+            #expect(!published.contains { $0.eventType.contains("executing") })
         }
 
         @Test("an event's scope is the run scope bound where it was emitted")
@@ -127,12 +182,8 @@ extension RailtracksSwiftTestSuite {
         @Test("an invoker notices when it runs outside its run's scope")
         func lostRunScope() {
             let scope = UUID()
-            let scoped = RTSNodeInvoker(
-                stampFactory: RTSStampFactory(),
-                sessionID: UUID(),
-                runScope: scope
-            )
-            let unscoped = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let scoped = RTSNodeInvoker(sessionID: UUID(), runScope: scope)
+            let unscoped = RTSNodeInvoker(sessionID: UUID())
 
             // Outside any binding, as after a `Task.detached` inside the run.
             #expect(scoped.hasLostRunScope)
@@ -177,23 +228,71 @@ extension RailtracksSwiftTestSuite {
             #expect(released == nil)
         }
 
-        @Test("a disabled emitter taps nothing")
+        /// Node statuses are built from the internal stream and work with events off, so a disabled
+        /// emitter still feeds it. Only the public stream is off.
+        @Test("a disabled emitter feeds the internal stream, not the public one")
         func disabledEmitter() async throws {
             let recorder = TapRecorder(RTSEventEmitter(sessionID: "session-1", isEnabled: false))
 
             recorder.emitter.emit(RTSNodeCreationEvent(nodeID: "n1", name: "Node", nodeType: .tool))
+            recorder.emitter.emitNodeExecuting(RTSNodeExecutingSignal(nodeID: UUID()))
+            recorder.emitter.emitMiddlewareCreationOnce(typeID: "rail", name: "Rail")
 
-            #expect(await recorder.observedEvents.isEmpty)
+            let observed = await recorder.observedEvents
+            #expect(observed.map { $0.eventType } == [
+                "node.creation",
+                "node.executing",
+                "middleware.creation",
+            ])
+            #expect(await recorder.publishedEvents.isEmpty)
+        }
+
+        /// A stop's reason rides on `node.destruction`, off the wire: set for the nodes the stop
+        /// ended, `nil` for one that failed on its own or succeeded.
+        @Test("node.destruction carries the termination reason, off the wire")
+        func terminationReason() async throws {
+            RailtracksSwift.outputDirectory = FileManager.default.temporaryDirectory
+            struct OwnFailure: Error {
+            }
+            let succeeds = TapOrchestrator(nodeName: "Succeeds") { _, _ in
+                ["result": .string("ok")]
+            }
+            let fails = TapOrchestrator(nodeName: "Fails") { _, _ in
+                throw OwnFailure()
+            }
+            let root = TapOrchestrator(nodeName: "Root") { _, context in
+                _ = try await context.call(succeeds, input: [:])
+                _ = try? await context.call(fails, input: [:])
+                // Waits for the stop rather than rethrowing, so the root deterministically ends
+                // with the stop instead of racing it with the child's error.
+                try await Task.sleep(for: .seconds(30))
+                return ["result": .string("never")]
+            }
+            let flow = RTSFlow(title: "TapTermination", savesTrace: false, endOnError: true)
+            let recorder = TapRecorder(flow.eventEmitter)
+
+            _ = try? await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+
+            let observed = await recorder.observedEvents
+            let destructions = observed.compactMap { observed in
+                observed.event.observabilityEvent as? RTSNodeDestructionEvent
+            }
+            #expect(destructions.count == 3)
+            // In order: Succeeds, Fails, then Root, which the end-on-error stop cut short.
+            #expect(destructions[0].terminationReason == nil)
+            #expect(destructions[1].terminationReason == nil)
+            guard case .endOnError(let nodeName, _)? = destructions[2].terminationReason else {
+                Issue.record("expected the root to carry the end-on-error stop")
+                return
+            }
+            #expect(nodeName == "Fails")
+            #expect(!destructions[2].encodePayload().keys.contains { $0.contains("termination") })
         }
 
         @Test("node.creation and guard events carry what the trace needs, off the wire")
         func internalProperties() async throws {
             let recorder = TapRecorder(RTSEventEmitter(sessionID: "session-1", isEnabled: true))
-            let invoker = RTSNodeInvoker(
-                stampFactory: RTSStampFactory(),
-                sessionID: UUID(),
-                eventEmitter: recorder.emitter
-            )
+            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
             let check = RTSClosureInputGuardrail(name: "Check") { _ in
                 .allow("fine")
             }
@@ -221,7 +320,8 @@ extension RailtracksSwiftTestSuite {
             _ = try await invoker.invokeTool(TapTool(), input: [:])
 
             let observed = await recorder.observedEvents
-            let creations = observed.compactMap { $0.event as? RTSNodeCreationEvent }
+            let events = observed.compactMap { $0.event.observabilityEvent }
+            let creations = events.compactMap { $0 as? RTSNodeCreationEvent }
             let agentCreation = try #require(creations.first { $0.name == "Agent" })
             #expect(agentCreation.hasInputGuardrail)
             #expect(!agentCreation.hasOutputGuardrail)
@@ -233,7 +333,7 @@ extension RailtracksSwiftTestSuite {
             #expect(toolCreation.model == "")
 
             let guardResponse = try #require(
-                observed.compactMap { $0.event as? RTSGuardInputResponseEvent }.first
+                events.compactMap { $0 as? RTSGuardInputResponseEvent }.first
             )
             #expect(guardResponse.railName == "Check")
 

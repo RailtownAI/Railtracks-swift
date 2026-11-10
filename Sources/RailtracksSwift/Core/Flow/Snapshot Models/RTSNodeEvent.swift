@@ -10,11 +10,8 @@ import Foundation
 /// Node snapshot
 struct RTSNodeEvent {
     let id: UUID
-    /// The invocation that triggered this one; `nil` at the flow root. Read from the
-    /// `currentInvocationID` task-local, the same source as the edge's `source`.
-    ///
-    /// Carried for `RTSNodeStatus` (the UI projection) — the trace derives parentage from edges, not
-    /// from this field.
+    /// The invocation that triggered this one; `nil` at the flow root, from `node.invocation`'s
+    /// spatial parent. The trace derives parentage from edges, not from this field.
     let parentNodeID: UUID?
     let name: String
     let nodeType: RTSFlowNodeType
@@ -22,9 +19,6 @@ struct RTSNodeEvent {
     var input: RTSInput?
     var output: RTSOutput?
     var error: String?
-    /// Set on a finish event when `error` is `RTSError.runTerminated`, so `RTSNodeStatus` can tell a
-    /// stopped node from a failed one without parsing the error string.
-    var terminationReason: RTSRunTerminationReason?
     var runID: RTSRunID?
     /// Measured execution time (seconds) for this invocation, set on finish events only (nil on create
     /// snapshots). Measured at the source with a monotonic clock — never negative, unlike reconstructing
@@ -49,7 +43,6 @@ struct RTSNodeEvent {
         input: RTSInput? = nil,
         output: RTSOutput? = nil,
         error: String? = nil,
-        terminationReason: RTSRunTerminationReason? = nil,
         runID: RTSRunID? = nil,
         runtime: TimeInterval? = nil,
         messages: [RTSMessage] = [],
@@ -67,7 +60,6 @@ struct RTSNodeEvent {
         self.input = input
         self.output = output
         self.error = error
-        self.terminationReason = terminationReason
         self.runID = runID
         self.runtime = runtime
         self.messages = messages

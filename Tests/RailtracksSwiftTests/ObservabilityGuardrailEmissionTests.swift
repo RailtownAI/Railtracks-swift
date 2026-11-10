@@ -348,11 +348,7 @@ extension RailtracksSwiftTestSuite {
         }
 
         private func invoker(_ emitter: RTSEventEmitter) -> RTSNodeInvoker {
-            RTSNodeInvoker(
-                stampFactory: RTSStampFactory(),
-                sessionID: UUID(),
-                eventEmitter: emitter
-            )
+            RTSNodeInvoker(sessionID: UUID(), eventEmitter: emitter)
         }
 
         @Test("A blocked input guardrail still leaves the node a complete lifecycle")

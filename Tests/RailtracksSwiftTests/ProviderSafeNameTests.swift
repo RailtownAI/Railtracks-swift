@@ -138,7 +138,7 @@ private struct StubAgentNode: RTSAgentNode {
 /// what is under test here, and swallowing it keeps these tests offline.
 private func buildSessionIgnoringProviderErrors(for agent: any RTSAgentNode) {
     let gateway = RTSLLMGateway(apiKeys: [:])
-    let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+    let invoker = RTSNodeInvoker(sessionID: UUID())
     _ = try? gateway.session(invoker: invoker, agentNode: agent)
 }
 
@@ -505,7 +505,7 @@ extension RailtracksSwiftTestSuite {
         func conduitToolBridgeSanitizes() {
             let tool = StubTool(toolName: "Photo Summary Search")
             let agent = RTSAgent(llmProvider: .openAI(modelIDString: "gpt-4o"), name: "Root Agent")
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let invoker = RTSNodeInvoker(sessionID: UUID())
             let bridge = RTSConduitToolBridge(node: tool, nodeInvoker: invoker, createdBy: agent)
 
             #expect(bridge.name == "Photo_Summary_Search")
@@ -524,7 +524,7 @@ extension RailtracksSwiftTestSuite {
             }
 
             let tool = UnbridgeableAppleAITool(toolName: "Photo Search")
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let invoker = RTSNodeInvoker(sessionID: UUID())
             let agent = RTSAgent(llmProvider: .appleAI, name: "Root Agent")
 
             // Precondition for this test to mean anything: no bridge, so `AppleAISession.build` passes
@@ -547,7 +547,7 @@ extension RailtracksSwiftTestSuite {
             }
 
             let tool = BridgeableAppleAITool(toolName: "Photo Search")
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let invoker = RTSNodeInvoker(sessionID: UUID())
             let agent = RTSAgent(llmProvider: .appleAI, name: "Root Agent")
 
             let bridge = try #require(tool.makeAppleAIBridge(invoker: invoker, createdBy: agent))
@@ -567,7 +567,7 @@ extension RailtracksSwiftTestSuite {
                 parameters: RTSToolSchema(parameters: [])
             )
             let parent = RTSAgent(llmProvider: .openAI(modelIDString: "gpt-4o"), name: "Root Agent")
-            let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+            let invoker = RTSNodeInvoker(sessionID: UUID())
             let bridge = RTSConduitAgentToolBridge(
                 agentTool: agentTool,
                 makeSession: { throw RTSError.encodingFailed() },

@@ -294,7 +294,7 @@ struct FoundationModelProviderTests {
             systemMessage: "You must use the addition tool for any addition."
         )
         let gateway = RTSLLMGateway(apiKeys: [:])
-        let invoker = RTSNodeInvoker(stampFactory: RTSStampFactory(), sessionID: UUID())
+        let invoker = RTSNodeInvoker(sessionID: UUID())
         let session = try gateway.session(invoker: invoker, agentNode: agent)
 
         _ = try await session.run("What is 2 + 3? Reply with just the number.", runID: UUID())
