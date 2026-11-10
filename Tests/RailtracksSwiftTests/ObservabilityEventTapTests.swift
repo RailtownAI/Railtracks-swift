@@ -343,5 +343,52 @@ extension RailtracksSwiftTestSuite {
                 payloadKeys == ["timestamp", "spatial_parent_type", "node_id", "name", "node_type"]
             )
         }
+
+        /// An app subscriber to `eventPublisher` runs on a queue of its own, so one that blocks
+        /// holds up only the public stream. Everything built from the internal stream, the node
+        /// statuses here, keeps arriving. Were it on the emitter's delivery queue, the root's
+        /// `.completed` status would wait behind it, and this test would time out.
+        @Test("an app subscriber blocking on eventPublisher doesn't hold up the internal stream")
+        func blockedAppSubscriberIsIsolated() async throws {
+            let released = Mutex(false)
+            let release = DispatchSemaphore(value: 0)
+            let root = TapOrchestrator(nodeName: "Root") { _, _ in
+                ["result": .string("done")]
+            }
+            let flow = RTSFlow(title: "TapIsolation", savesTrace: false)
+            let blocking = flow.eventPublisher.sink { _ in
+                if !released.withLock({ $0 }) {
+                    release.wait()
+                }
+            }
+            let rootCompleted = Mutex<RTSNodeStatus?>(nil)
+            let statuses = flow.nodeStatusPublisher.sink { status in
+                guard case .completed = status.state, status.parentNodeID == nil else {
+                    return
+                }
+                rootCompleted.withLock { $0 = status }
+            }
+
+            // `run` joins the public stream's backlog before returning, so it waits for the
+            // blocked subscriber: run it alongside, and release the subscriber once the status
+            // is in, or after 5 seconds.
+            let running = Task {
+                try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+            }
+            for _ in 0..<250 where rootCompleted.withLock({ $0 }) == nil {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let status = rootCompleted.withLock { $0 }
+            released.withLock { $0 = true }
+            release.signal()
+
+            #expect(
+                status?.nodeName == "Root",
+                "the root's status waited behind the app subscriber"
+            )
+            _ = try await running.value
+            blocking.cancel()
+            statuses.cancel()
+        }
     }
 }

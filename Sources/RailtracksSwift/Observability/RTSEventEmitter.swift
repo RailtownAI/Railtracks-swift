@@ -35,7 +35,12 @@ struct RTSObservedEvent: Sendable {
 ///
 /// Instead, `emit` builds the envelope and hands it to ``deliveryQueue``. The invoking thread
 /// does bounded work and returns; the send, and every subscriber's sink, runs on that queue.
-/// Nothing an app attaches to `RTSFlow.eventPublisher` can slow a run down.
+/// Nothing a subscriber does can slow a run down.
+///
+/// Subscribers on this queue share it, so each must do only bounded work. The library's own do:
+/// the trace collector, the node status mapper and the event writer. App subscribers never run
+/// here: `RTSFlow.eventPublisher` moves them to a queue of their own, so a slow one can't delay
+/// the trace, the statuses or the signposts.
 ///
 /// The queue is **serial**, so events reach subscribers in the order they were emitted — this
 /// is deliberately not a concurrent queue and deliberately not a `Task` per event, which is

@@ -95,20 +95,28 @@ public class RTSFlow: @unchecked Sendable {
     }
 
     let eventEmitter: RTSEventEmitter
+    /// Serial, so envelopes arrive in the order they were emitted. The emitter's delivery queue
+    /// also feeds the trace collector, the node statuses and the built-in event writer, so
+    /// delivering app subscribers there would let one slow app sink hold all of those up, and
+    /// delay the run's Instruments signposts. Here it holds up only other app subscribers.
+    private let eventDeliveryQueue = DispatchQueue(label: "ai.railtown.railtracks.events.public")
     /// Publishes the structured observability event stream — the Swift port of the Python
     /// engine's event pipeline. Each value is a session-scoped ``RTSEvent`` envelope whose
     /// `payload` carries one typed event (`node.*`, `session.*`, `middleware.guard.*`).
     ///
-    /// Independent of the JSON trace: the two are produced side by side and neither feeds
-    /// the other. Silent when the flow was built with `emitsEvents: false`.
+    /// The flow-graph trace is built from the same events, typed and before encoding, on the
+    /// emitter's internal stream. Silent when the flow was built with `emitsEvents: false`.
     ///
-    /// Subscribers are delivered on a private serial queue rather than on the invoking node's
-    /// thread, so a slow sink cannot slow a run down — but delivery is therefore asynchronous.
-    /// Each `run` joins that backlog before returning, so the stream is complete once a run
-    /// ends; call ``flushEvents()`` if you need the same guarantee at any other moment, such
-    /// as before tearing a subscriber down mid-flow.
+    /// Subscribers are delivered on a private serial queue, not on the invoking node's thread
+    /// nor on the queue the trace, the node statuses and the signposts are built on, so a slow
+    /// sink can slow neither a run nor those. Delivery is therefore asynchronous. Each `run`
+    /// joins that backlog before returning, so the stream is complete once a run ends; call
+    /// ``flushEvents()`` if you need the same guarantee at any other moment, such as before
+    /// tearing a subscriber down mid-flow.
     public var eventPublisher: AnyPublisher<RTSEvent, Never> {
         eventEmitter.eventPublisher
+            .receive(on: eventDeliveryQueue)
+            .eraseToAnyPublisher()
     }
 
     /// This flow's event log, or `nil` when it does not write one.
@@ -157,6 +165,13 @@ public class RTSFlow: @unchecked Sendable {
     /// `session.completed` and announces the file on its own publisher.
     public func flushEvents() async {
         await eventEmitter.flushDelivery()
+        // Every envelope delivered above has been handed on to the public queue by now, so a
+        // barrier there runs after the last of them.
+        await withCheckedContinuation { continuation in
+            eventDeliveryQueue.async {
+                continuation.resume()
+            }
+        }
     }
 
     /// - Parameters:
