@@ -666,7 +666,6 @@ public class RTSFlow: @unchecked Sendable {
         Task { await RTSCostCalculator.shared.preloadPricing() }
 
         let nodeInvoker = RTSNodeInvoker(
-            sessionID: id,
             eventEmitter: eventEmitter,
             runStop: RTSRunStop(endsOnError: settings.endOnError),
             runScope: runScope

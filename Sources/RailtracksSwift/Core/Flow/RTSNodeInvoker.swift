@@ -21,8 +21,6 @@ public final class RTSNodeInvoker: Sendable {
         _ error: Error?
     ) async -> Void
 
-    let sessionID: UUID
-
     /// The invocation id of the node currently executing on this task. A child invocation reads it
     /// as its parent (the edge `source`). It is bound around `execute` so it flows down the async
     /// call tree — including Conduit's tool `TaskGroup` and Apple's `LanguageModelSession.respond`,
@@ -42,12 +40,10 @@ public final class RTSNodeInvoker: Sendable {
     let runScope: UUID?
 
     init(
-        sessionID: UUID,
         eventEmitter: RTSEventEmitter? = nil,
         runStop: RTSRunStop = RTSRunStop(),
         runScope: UUID? = nil
     ) {
-        self.sessionID = sessionID
         self.eventEmitter = eventEmitter
         self.runStop = runStop
         self.runScope = runScope

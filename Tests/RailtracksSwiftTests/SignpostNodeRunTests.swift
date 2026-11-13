@@ -119,7 +119,7 @@ private struct SignpostedInvoker {
         let writer = RTSSignpostWriter(sessionID: sessionID, signpostEmitter: recording)
         self.subscription = writer.subscribe(to: eventEmitter.observedEventPublisher)
         self.eventEmitter = eventEmitter
-        self.invoker = RTSNodeInvoker(sessionID: sessionID, eventEmitter: eventEmitter)
+        self.invoker = RTSNodeInvoker(eventEmitter: eventEmitter)
     }
 
     func flush() async {
