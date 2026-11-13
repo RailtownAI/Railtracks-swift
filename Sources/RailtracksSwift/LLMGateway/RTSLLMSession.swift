@@ -111,9 +111,6 @@ extension RTSLLMSession {
         let stampedMessages = StampedMessageStore()
         return RTSLLMSession(
             run: { prompt, images, runID in
-                if !images.isEmpty {
-                    log.warning("⚠️ [\(agentName)] \(providerName) via FoundationModels is text-only here; ignoring \(images.count) image input(s).")
-                }
                 let beforeCount = appleAI.messages().count
                 let recordNewMessages: (AppleAIResponse?) -> Void = { response in
                     guard let runID else { return }
@@ -131,7 +128,7 @@ extension RTSLLMSession {
                     stampedMessages.store(stamped)
                 }
                 do {
-                    let response = try await appleAI.send(prompt)
+                    let response = try await appleAI.send(prompt, images: images)
                     recordNewMessages(response)
                     return response.text
                 } catch {

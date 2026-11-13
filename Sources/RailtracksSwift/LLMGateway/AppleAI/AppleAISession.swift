@@ -39,17 +39,30 @@ final class AppleAISession: @unchecked Sendable {
     private let sessionTools: [any Tool]
     private let outputSchema: GenerationSchema?
     private let makeSession: MakeSession
+    /// Whether the model takes image input. Read once at build, because a `LanguageModelSession`
+    /// does not expose its model. A plain `Bool`, so this OS 26 class can hold it.
+    private let supportsVision: Bool
+    /// The agent's name, for log messages.
+    private let agentName: String
+    /// The provider's description, naming the model in errors and log messages.
+    private let modelDescription: String
     private var _messages: [RTSMessage] = []
     private let lock = NSLock()
 
     private init(
         tools: [any Tool],
         outputSchema: GenerationSchema?,
-        makeSession: @escaping MakeSession
+        makeSession: @escaping MakeSession,
+        supportsVision: Bool,
+        agentName: String,
+        modelDescription: String
     ) {
         self.sessionTools = tools
         self.outputSchema = outputSchema
         self.makeSession = makeSession
+        self.supportsVision = supportsVision
+        self.agentName = agentName
+        self.modelDescription = modelDescription
         self.session = makeSession(nil, tools)
     }
 
@@ -64,7 +77,74 @@ final class AppleAISession: @unchecked Sendable {
         }
     }
 
-    func send(_ prompt: String) async throws -> AppleAIResponse {
+    /// Sends `prompt`, with `images` attached after its text where the platform and model allow.
+    ///
+    /// Without images the `String` overloads of `respond` are used, exactly as before image support.
+    /// Below OS 27 images are dropped with a warning; on a model without vision they fail with
+    /// `RTSError.invalidInvocation`, and undecodable ones with `RTSError.decodingFailed`, both before
+    /// anything is sent. See `RTSAppleAIImageDelivery`.
+    func send(_ prompt: String, images: [RTSImage] = []) async throws -> AppleAIResponse {
+        let delivery = try RTSAppleAIImageDelivery.decide(
+            imageCount: images.count,
+            platformSupportsImages: RTSAppleAIImageDelivery.platformSupportsImages,
+            modelSupportsVision: supportsVision,
+            modelDescription: modelDescription
+        )
+        switch delivery {
+        case .textOnly:
+            break
+        case .dropped:
+            // OS26-FLOOR: below OS 27 Foundation Models has no image input.
+            log.warning("⚠️ [\(agentName)] \(modelDescription): image input needs macOS 27 / iOS 27; ignoring \(images.count) image input(s).")
+        case .attached:
+            // XCODE26-SDK: `Attachment` and `respond(to: Prompt)` with one need the OS 27 SDK
+            // (Xcode 27, Swift 6.4). `.attached` is only decided when both are present.
+            #if compiler(>=6.4)
+            if #available(macOS 27, iOS 27, *) {
+                let attachments = try images.enumerated().map { index, image in
+                    try image.foundationModelsAttachment(index: index)
+                }
+                let promptWithImages = Prompt {
+                    prompt
+                    attachments
+                }
+                return try await respond(
+                    recordingAs: prompt,
+                    text: { session in
+                        try await session.respond(to: promptWithImages)
+                    },
+                    structured: { session, schema in
+                        try await session.respond(to: promptWithImages, schema: schema)
+                    }
+                )
+            }
+            #endif
+        }
+        return try await respond(
+            recordingAs: prompt,
+            text: { session in
+                try await session.respond(to: prompt)
+            },
+            structured: { session, schema in
+                try await session.respond(to: prompt, schema: schema)
+            }
+        )
+    }
+
+    /// Runs one `respond` on the current session and records what it left behind: the new transcript
+    /// entries on success, or what was sent on failure.
+    ///
+    /// The two closures are the plain and the structured-output `respond`, so the prompt they send
+    /// (text only, or text with attachments) is chosen by the caller. `recordingAs` is the prompt's
+    /// text, recorded when a failed `respond` rolls back the transcript.
+    private func respond(
+        recordingAs prompt: String,
+        text respondText: (LanguageModelSession) async throws -> LanguageModelSession.Response<String>,
+        structured respondStructured: (
+            LanguageModelSession,
+            GenerationSchema
+        ) async throws -> LanguageModelSession.Response<GeneratedContent>
+    ) async throws -> AppleAIResponse {
         let currentSession = lock.withLock { session }
         let beforeCount = currentSession.transcript.count
         let usageBefore = Self.sessionTokenTotals(of: currentSession)
@@ -73,7 +153,7 @@ final class AppleAISession: @unchecked Sendable {
         let metrics: AppleAIResponse
         do {
             if let schema = outputSchema {
-                let response = try await currentSession.respond(to: prompt, schema: schema)
+                let response = try await respondStructured(currentSession, schema)
                 responseText = response.content.jsonString
                 metrics = responseMetrics(
                     from: response,
@@ -85,7 +165,7 @@ final class AppleAISession: @unchecked Sendable {
                     )
                 )
             } else {
-                let response = try await currentSession.respond(to: prompt)
+                let response = try await respondText(currentSession)
                 responseText = response.content
                 metrics = responseMetrics(
                     from: response,
@@ -305,13 +385,15 @@ final class AppleAISession: @unchecked Sendable {
     /// Returns non-conforming tools separately so the caller can warn about them.
     ///
     /// `sessionFactory` is `nil` for the on-device system model; `.foundationModel` passes one
-    /// built from its `LanguageModel`.
+    /// built from its `LanguageModel`. `supportsVision` is that model's `.vision` capability, read
+    /// by the caller because the session cannot report its model.
     static func build(
         fromAgentTools tools: [any RTSToolNode],
         invoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode,
         makeSubSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
-        sessionFactory: MakeSession? = nil
+        sessionFactory: MakeSession? = nil,
+        supportsVision: Bool
     ) throws -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
         var unsupportedTools: [any RTSToolNode] = []
@@ -369,9 +451,25 @@ final class AppleAISession: @unchecked Sendable {
             outputSchema: schema,
             makeSession: sessionFactory ?? { instructions, tools in
                 makeSystemSession(instruction: instructions, tools: tools)
-            }
+            },
+            supportsVision: supportsVision,
+            agentName: createdBy.agentName,
+            modelDescription: createdBy.llmProvider.description
         )
         return (session, unsupportedTools)
+    }
+
+    /// Whether the on-device system model takes image input. `false` below OS 27, where nothing
+    /// can be attached.
+    static var systemModelSupportsVision: Bool {
+        // XCODE26-SDK: `capabilities` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+        #if compiler(>=6.4)
+        // OS26-FLOOR: `SystemLanguageModel.capabilities` is OS 27 API.
+        if #available(macOS 27, iOS 27, *) {
+            return RTSAppleAIImageDelivery.supportsVision(SystemLanguageModel.default.capabilities)
+        }
+        #endif
+        return false
     }
 
     /// A session on the on-device system model.

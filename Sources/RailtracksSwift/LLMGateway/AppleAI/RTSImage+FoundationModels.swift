@@ -44,8 +44,68 @@ extension RTSImage {
     }
 }
 
-// XCODE26-SDK: `Attachment` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+/// What the FoundationModels path does with an agent's images.
+///
+/// A pure function of the platform and the model, so it is decided (and tested) apart from the
+/// session that acts on it.
+enum RTSAppleAIImageDelivery: Equatable {
+    /// No images: the prompt is sent as text, exactly as before image support.
+    case textOnly
+    /// The images are attached to the prompt after its text.
+    case attached
+    /// Below OS 27 Foundation Models has no image input; the images are dropped with a warning
+    /// and the text is sent. Not an error, so an agent sent the same images on every OS still runs.
+    case dropped
+
+    /// Decides how `imageCount` images are delivered.
+    ///
+    /// - Throws: `RTSError.invalidInvocation` when there are images, the platform can attach them,
+    ///   and the model reports no `.vision` capability. Checked before sending, because the model's
+    ///   own refusal would come only after the prompt went out and the transcript rolled back.
+    static func decide(
+        imageCount: Int,
+        platformSupportsImages: Bool,
+        modelSupportsVision: Bool,
+        modelDescription: String
+    ) throws -> RTSAppleAIImageDelivery {
+        guard imageCount > 0 else {
+            return .textOnly
+        }
+        guard platformSupportsImages else {
+            return .dropped
+        }
+        guard modelSupportsVision else {
+            throw RTSError.invalidInvocation(
+                "\(modelDescription) does not support image input; \(imageCount) image(s) not sent"
+            )
+        }
+        return .attached
+    }
+
+    /// Whether this OS, and the SDK the library was built with, can attach images to a prompt.
+    static var platformSupportsImages: Bool {
+        // XCODE26-SDK: `Attachment` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+        #if canImport(FoundationModels) && compiler(>=6.4)
+        // OS26-FLOOR: image attachments are OS 27 API.
+        if #available(macOS 27, iOS 27, *) {
+            return true
+        }
+        #endif
+        return false
+    }
+}
+
+// XCODE26-SDK: `Attachment` and `LanguageModelCapabilities` exist only in the OS 27 SDK
+// (Xcode 27, Swift 6.4).
 #if canImport(FoundationModels) && compiler(>=6.4)
+@available(macOS 27, iOS 27, *)
+extension RTSAppleAIImageDelivery {
+    /// Whether a model with these capabilities takes image input.
+    static func supportsVision(_ capabilities: LanguageModelCapabilities) -> Bool {
+        capabilities.contains(.vision)
+    }
+}
+
 @available(macOS 27, iOS 27, *)
 extension RTSImage {
     /// The image as a Foundation Models prompt attachment.

@@ -113,8 +113,9 @@ struct AppleAIImageDecodingTests {
 
     // MARK: - Fixtures
 
-    /// Draws a solid image and encodes it, optionally tagged with an EXIF orientation.
-    private static func encodedImage(
+    /// Draws a solid red image and encodes it, optionally tagged with an EXIF orientation.
+    /// Shared with `AppleAIImageDeliveryTests`.
+    static func encodedImage(
         width: Int,
         height: Int,
         type: UTType,

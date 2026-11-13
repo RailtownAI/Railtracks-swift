@@ -63,6 +63,14 @@ public struct RTSFoundationLanguageModel: Sendable {
 #if compiler(>=6.4)
 @available(macOS 27, iOS 27, *)
 extension RTSFoundationLanguageModel {
+    /// Whether the wrapped model takes image input, from its `.vision` capability.
+    var supportsVision: Bool {
+        guard let languageModel = model as? any LanguageModel else {
+            return false
+        }
+        return RTSAppleAIImageDelivery.supportsVision(languageModel.capabilities)
+    }
+    
     /// A factory building each `LanguageModelSession` on this model, for `AppleAISession`.
     func sessionFactory() throws -> AppleAISession.MakeSession {
         // Unreachable in practice: the only initializer stores a `LanguageModel`.
