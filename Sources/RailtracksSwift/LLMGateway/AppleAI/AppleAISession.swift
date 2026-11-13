@@ -7,6 +7,7 @@
 
 import Foundation
 import FoundationModels
+import Synchronization
 
 /// Wraps `LanguageModelSession` and exposes the subset of its API that
 /// `RTSLLMSession` needs, mirroring the role `ChatSession` plays for
@@ -24,7 +25,7 @@ struct AppleAIResponse {
 }
 
 @available(macOS 26, iOS 26, *)
-final class AppleAISession: @unchecked Sendable {
+final class AppleAISession: Sendable {
     /// Builds a `LanguageModelSession` from optional instructions and the bridged tools.
     ///
     /// The one thing that differs between `.appleAI` (the system model) and `.foundationModel`
@@ -35,7 +36,14 @@ final class AppleAISession: @unchecked Sendable {
         _ tools: [any Tool]
     ) -> LanguageModelSession
 
-    private var session: LanguageModelSession
+    /// What changes after `init`: the current session and the messages recorded so far.
+    /// `setInstruction` replaces both at once, so they share one lock.
+    private struct State {
+        var session: LanguageModelSession
+        var messages: [RTSMessage] = []
+    }
+
+    private let state: Mutex<State>
     private let sessionTools: [any Tool]
     private let outputSchema: GenerationSchema?
     private let makeSession: MakeSession
@@ -46,8 +54,6 @@ final class AppleAISession: @unchecked Sendable {
     private let agentName: String
     /// The provider's description, naming the model in errors and log messages.
     private let modelDescription: String
-    private var _messages: [RTSMessage] = []
-    private let lock = NSLock()
 
     private init(
         tools: [any Tool],
@@ -63,7 +69,7 @@ final class AppleAISession: @unchecked Sendable {
         self.supportsVision = supportsVision
         self.agentName = agentName
         self.modelDescription = modelDescription
-        self.session = makeSession(nil, tools)
+        self.state = Mutex(State(session: makeSession(nil, tools)))
     }
 
     /// Applies a system instruction by recreating the session and capturing
@@ -71,9 +77,9 @@ final class AppleAISession: @unchecked Sendable {
     func setInstruction(_ instruction: String) {
         let newSession = makeSession(instruction, sessionTools)
         let newMessages = newSession.transcript.compactMap { $0.toRTSMessage() }
-        lock.withLock {
-            session = newSession
-            _messages = newMessages
+        state.withLock { state in
+            state.session = newSession
+            state.messages = newMessages
         }
     }
 
@@ -159,8 +165,8 @@ final class AppleAISession: @unchecked Sendable {
                 metadata: nil,
                 runID: nil
             )
-            lock.withLock {
-                _messages.append(message)
+            state.withLock { state in
+                state.messages.append(message)
             }
             throw error
         }
@@ -188,7 +194,9 @@ final class AppleAISession: @unchecked Sendable {
         text respondText: RespondText,
         structured respondStructured: RespondStructured
     ) async throws -> AppleAIResponse {
-        let currentSession = lock.withLock { session }
+        let currentSession = state.withLock { state in
+            state.session
+        }
         let beforeCount = currentSession.transcript.count
         let usageBefore = Self.sessionTokenTotals(of: currentSession)
         let startedAt = Date()
@@ -238,8 +246,8 @@ final class AppleAISession: @unchecked Sendable {
         log.debug(
             "🍎 send: \(rawCount) new transcript entries, \(newMessages.count) converted to RTSMessage"
         )
-        lock.withLock {
-            _messages.append(contentsOf: newMessages)
+        state.withLock { state in
+            state.messages.append(contentsOf: newMessages)
         }
         return metrics
     }
@@ -289,8 +297,8 @@ final class AppleAISession: @unchecked Sendable {
             let used = TokenTotals(input: after.input - before.input, output: after.output - before.output)
             log.debug("🍎 the failed respond used \(used); not reported, llm.failure has no token fields")
         }
-        lock.withLock {
-            _messages.append(contentsOf: recorded)
+        state.withLock { state in
+            state.messages.append(contentsOf: recorded)
         }
     }
 
@@ -419,7 +427,9 @@ final class AppleAISession: @unchecked Sendable {
     }
 
     func messages() -> [RTSMessage] {
-        lock.withLock { _messages }
+        state.withLock { state in
+            state.messages
+        }
     }
 
     /// Builds an `AppleAISession` from `agentNode.tools`, wrapping each tool in its
