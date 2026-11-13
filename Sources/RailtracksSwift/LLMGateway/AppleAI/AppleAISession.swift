@@ -109,7 +109,7 @@ final class AppleAISession: @unchecked Sendable {
                     attachments
                 }
                 return try await respond(
-                    recordingAs: prompt,
+                    recordingAs: .sentPrompt(prompt, attachedImageCount: attachments.count),
                     text: { session in
                         try await session.respond(to: promptWithImages)
                     },
@@ -121,7 +121,7 @@ final class AppleAISession: @unchecked Sendable {
             #endif
         }
         return try await respond(
-            recordingAs: prompt,
+            recordingAs: .sentPrompt(prompt, attachedImageCount: 0),
             text: { session in
                 try await session.respond(to: prompt)
             },
@@ -135,10 +135,10 @@ final class AppleAISession: @unchecked Sendable {
     /// entries on success, or what was sent on failure.
     ///
     /// The two closures are the plain and the structured-output `respond`, so the prompt they send
-    /// (text only, or text with attachments) is chosen by the caller. `recordingAs` is the prompt's
-    /// text, recorded when a failed `respond` rolls back the transcript.
+    /// (text only, or text with attachments) is chosen by the caller. `recordingAs` is that prompt
+    /// as a message's content, recorded when a failed `respond` rolls back the transcript.
     private func respond(
-        recordingAs prompt: String,
+        recordingAs sentPrompt: RTSMessage.Content,
         text respondText: (LanguageModelSession) async throws -> LanguageModelSession.Response<String>,
         structured respondStructured: (
             LanguageModelSession,
@@ -179,7 +179,7 @@ final class AppleAISession: @unchecked Sendable {
             }
         } catch {
             recordFailedSend(
-                prompt: prompt,
+                prompt: sentPrompt,
                 startedAt: startedAt,
                 session: currentSession,
                 transcriptCountBefore: beforeCount,
@@ -214,7 +214,7 @@ final class AppleAISession: @unchecked Sendable {
     /// The session's usage does keep the failed call's tokens. Python's `llm.failure` has no
     /// token fields, so they are only logged.
     private func recordFailedSend(
-        prompt: String,
+        prompt: RTSMessage.Content,
         startedAt: Date,
         session: LanguageModelSession,
         transcriptCountBefore: Int,
@@ -234,7 +234,7 @@ final class AppleAISession: @unchecked Sendable {
             let sentPrompt = RTSMessage(
                 id: UUID(),
                 role: .user,
-                content: .text(prompt),
+                content: prompt,
                 timestamp: startedAt,
                 metadata: nil,
                 runID: nil
@@ -507,7 +507,7 @@ extension Transcript.Entry {
             return RTSMessage(
                 id: UUID(),
                 role: .user,
-                content: .text(joinedText(of: prompt.segments)),
+                content: promptContent(of: prompt.segments),
                 timestamp: timestamp,
                 metadata: nil,
                 runID: nil
@@ -600,9 +600,66 @@ func joinedText(of segments: [Transcript.Segment]) -> String {
             case .structure(let structuredSegment):
                 return structuredSegment.content.jsonString
             default:
-                // `.attachment` (OS 27): an image has no text form.
+                // `.attachment` (OS 27): an image has no text form. A prompt's attachments are
+                // recorded as image parts by `promptContent(of:)`.
                 return nil
             }
         }
         .joined(separator: " ")
+}
+
+/// A prompt entry's content: plain text, as before image support, unless it holds an attachment,
+/// in which case it is `.parts` in segment order, each image a redacted inline descriptor.
+@available(macOS 26, iOS 26, *)
+func promptContent(of segments: [Transcript.Segment]) -> RTSMessage.Content {
+    // XCODE26-SDK: `.attachment` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+    #if compiler(>=6.4)
+    // OS26-FLOOR: attachment segments are OS 27 API, and below it a prompt never holds one.
+    if #available(macOS 27, iOS 27, *), let parts = attachmentParts(of: segments) {
+        return .parts(parts)
+    }
+    #endif
+    return .text(joinedText(of: segments))
+}
+
+// XCODE26-SDK: as above.
+#if compiler(>=6.4)
+/// The segments as message parts, or `nil` when none is an attachment.
+///
+/// Only the segment's case is read, never its pixels, so no image data can reach the trace. Images
+/// are sent inline, so each is the same `data_uri` descriptor the Conduit path records.
+@available(macOS 27, iOS 27, *)
+private func attachmentParts(of segments: [Transcript.Segment]) -> [RTSMessage.ContentPart]? {
+    var parts: [RTSMessage.ContentPart] = []
+    var hasAttachment = false
+    for segment in segments {
+        switch segment {
+        case .text(let textSegment):
+            parts.append(.text(textSegment.content))
+        case .structure(let structuredSegment):
+            parts.append(.text(structuredSegment.content.jsonString))
+        case .attachment:
+            hasAttachment = true
+            parts.append(.image(.redactedInline))
+        default:
+            continue
+        }
+    }
+    return hasAttachment ? parts : nil
+}
+#endif
+
+extension RTSMessage.Content {
+    /// What a send put in its prompt: the text, then one redacted inline image part per attached
+    /// image. Plain text when nothing was attached, matching what the transcript records.
+    ///
+    /// Recorded when a failed `respond` rolls back the transcript, so the failure's `llm.*` events
+    /// still show that images were sent.
+    static func sentPrompt(_ text: String, attachedImageCount: Int) -> RTSMessage.Content {
+        guard attachedImageCount > 0 else {
+            return .text(text)
+        }
+        let images = Array(repeating: RTSMessage.ContentPart.image(.redactedInline), count: attachedImageCount)
+        return .parts([.text(text)] + images)
+    }
 }
