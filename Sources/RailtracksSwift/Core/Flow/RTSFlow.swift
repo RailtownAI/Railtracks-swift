@@ -57,11 +57,6 @@ public class RTSFlow: @unchecked Sendable {
     var writesSignposts: Bool {
         signpostSubscription != nil
     }
-    
-    
-    // THROWAWAY (#70 step 1).
-    let lagProbe: RTSSignpostLagProbe
-    private let lagProbeSubscription: AnyCancellable
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never> = .init(nil)
     /// Publishes the outcome of the JSON trace write after each completed run.
     /// Emits `.success(url)` when the file is written, or `.failure(RTSError.writeFileFailed(path))`
@@ -266,10 +261,6 @@ public class RTSFlow: @unchecked Sendable {
         self.nodeStatusSubscription = emitter.observedEventPublisher
             .compactMap { statusMapper.status(for: $0.event) }
             .sink { statusSubject.send($0) }
-        // THROWAWAY (#70 step 1): subscribed where the signpost writer would be.
-        let lagProbe = RTSSignpostLagProbe()
-        self.lagProbe = lagProbe
-        self.lagProbeSubscription = lagProbe.subscribe(to: emitter.observedEventPublisher)
         if savesEvents ?? savesTrace, emitsEvents {
             let writer = RTSEventWriter()
             // Subscribing here is what makes the built-in log immune to the no-replay trap an
