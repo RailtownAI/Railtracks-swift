@@ -248,9 +248,7 @@ final class RTSSignpostWriter: Sendable {
         }
         guard let finished,
               let invocationID = UUID(uuidString: nodeID),
-              let runID = finished.node.runID,
-              let edgeID = finished.node.edgeID,
-              let run = finished.run else {
+              let runID = finished.node.runID else {
             log.warning("⚠️🚧 node.destruction for a node the writer never saw invoked")
             return
         }
@@ -261,6 +259,7 @@ final class RTSSignpostWriter: Sendable {
             output = nil
         }
 
+        // Ended whatever else is missing: an interval left open holds its Instruments row.
         let creation = finished.node.creation
         if finished.node.hasBegun {
             signpostEmitter.emitNodeEnd(
@@ -277,6 +276,10 @@ final class RTSSignpostWriter: Sendable {
             log.warning("⚠️🚧 node.destruction for \(creation.name) with no executing signal before it")
         }
 
+        guard let edgeID = finished.node.edgeID, let run = finished.run else {
+            log.warning("⚠️🚧 node.destruction for \(creation.name) outside a run the writer saw begin")
+            return
+        }
         let point = PointContext(
             nodeID: nodeID,
             sessionID: sessionID.uuidString,
