@@ -105,7 +105,12 @@ final class AppleAISession: Sendable {
             break
         case .dropped:
             // OS26-FLOOR: below OS 27 Foundation Models has no image input.
-            log.warning("⚠️ [\(agentName)] \(modelDescription): image input needs macOS 27 / iOS 27; ignoring \(images.count) image input(s).")
+            log.warning(
+                """
+                ⚠️ [\(agentName)] \(modelDescription): image input needs macOS 27 / iOS 27; \
+                ignoring \(images.count) image input(s).
+                """
+            )
         case .attached:
             // XCODE26-SDK: `Attachment` and `respond(to: Prompt)` with one need the OS 27 SDK
             // (Xcode 27, Swift 6.4). `.attached` is only decided when both are present.
@@ -712,7 +717,10 @@ extension RTSMessage.Content {
         guard attachedImageCount > 0 else {
             return .text(text)
         }
-        let images = Array(repeating: RTSMessage.ContentPart.image(.redactedInline), count: attachedImageCount)
+        let images = Array(
+            repeating: RTSMessage.ContentPart.image(.redactedInline),
+            count: attachedImageCount
+        )
         return .parts([.text(text)] + images)
     }
 }

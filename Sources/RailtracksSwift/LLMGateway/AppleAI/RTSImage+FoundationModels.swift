@@ -35,7 +35,9 @@ extension RTSImage {
             let source = CGImageSourceCreateWithData(data as CFData, nil),
             let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else {
-            throw RTSError.decodingFailed("image \(index) (\(mimeType)) could not be decoded as an image")
+            throw RTSError.decodingFailed(
+                "image \(index) (\(mimeType)) could not be decoded as an image"
+            )
         }
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         let rawOrientation = properties?[kCGImagePropertyOrientation] as? UInt32
