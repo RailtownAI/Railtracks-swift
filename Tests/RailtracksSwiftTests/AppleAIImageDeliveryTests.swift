@@ -128,5 +128,91 @@ struct AppleAIImageDeliveryTests {
         #expect(!answer.isEmpty)
         print("ℹ️ live image run answered: \(answer)")
     }
+
+    // MARK: - Failures before the call
+
+    /// A failure before `respond` (no vision, an undecodable image) records the prompt it would
+    /// have sent, as a failed `respond` does. Without it, whether the failure reached `llm.failure`
+    /// would depend on whether the agent happened to have a system message already in the log.
+    @Test("A model without vision records the unsent prompt, images included")
+    func noVisionRecordsPrompt() async throws {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let session = try Self.appleAISession(supportsVision: false)
+        let data = try AppleAIImageDecodingTests.encodedImage(width: 2, height: 2, type: .png)
+        let image = RTSImage(data: data, mimeType: "image/png")
+
+        await #expect(throws: RTSError.self) {
+            try await session.send("Describe this", images: [image, image])
+        }
+
+        Self.expectRecordedPrompt(session.messages(), text: "Describe this", imageCount: 2)
+    }
+
+    @Test("An undecodable image records the unsent prompt, images included")
+    func undecodableImageRecordsPrompt() async throws {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let session = try Self.appleAISession(supportsVision: true)
+        let image = RTSImage(data: Data("not an image".utf8), mimeType: "image/png")
+
+        await #expect(throws: RTSError.self) {
+            try await session.send("Describe this", images: [image])
+        }
+
+        Self.expectRecordedPrompt(session.messages(), text: "Describe this", imageCount: 1)
+    }
+
+    /// A session on the system model with no tools or instructions, so the only message a failed
+    /// send can leave is the prompt it records. Nothing here reaches the model.
+    @available(macOS 27, iOS 27, *)
+    private static func appleAISession(supportsVision: Bool) throws -> AppleAISession {
+        let agent = RTSAgent(llmProvider: .appleAI, name: "Image Failure Probe")
+        let (session, _) = try AppleAISession.build(
+            fromAgentTools: [],
+            invoker: RTSNodeInvoker(sessionID: UUID()),
+            createdBy: agent,
+            makeSubSession: { _ in
+                throw RTSError.providerUnavailable("no sub-agents in this test")
+            },
+            supportsVision: supportsVision
+        )
+        return session
+    }
+
+    private static func expectRecordedPrompt(
+        _ messages: [RTSMessage],
+        text: String,
+        imageCount: Int,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(messages.count == 1, sourceLocation: sourceLocation)
+        guard let message = messages.last, message.role == .user else {
+            Issue.record(
+                "expected one user message, got \(messages)",
+                sourceLocation: sourceLocation
+            )
+            return
+        }
+        guard case .parts(let parts) = message.content else {
+            Issue.record("expected .parts, got \(message.content)", sourceLocation: sourceLocation)
+            return
+        }
+        #expect(parts.count == 1 + imageCount, sourceLocation: sourceLocation)
+        guard case .text(let recordedText)? = parts.first else {
+            Issue.record("expected the text first, got \(parts)", sourceLocation: sourceLocation)
+            return
+        }
+        #expect(recordedText == text, sourceLocation: sourceLocation)
+        for part in parts.dropFirst() {
+            guard case .image(let image) = part else {
+                Issue.record("expected an image part, got \(part)", sourceLocation: sourceLocation)
+                continue
+            }
+            #expect(image.info == "...", sourceLocation: sourceLocation)
+        }
+    }
     #endif
 }

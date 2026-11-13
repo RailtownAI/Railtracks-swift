@@ -82,14 +82,18 @@ final class AppleAISession: @unchecked Sendable {
     /// Without images the `String` overloads of `respond` are used, exactly as before image support.
     /// Below OS 27 images are dropped with a warning; on a model without vision they fail with
     /// `RTSError.invalidInvocation`, and undecodable ones with `RTSError.decodingFailed`, both before
-    /// anything is sent. See `RTSAppleAIImageDelivery`.
+    /// anything is sent. Those two failures still record the prompt, images included, as a failed
+    /// `respond` does. See `RTSAppleAIImageDelivery`.
     func send(_ prompt: String, images: [RTSImage] = []) async throws -> AppleAIResponse {
-        let delivery = try RTSAppleAIImageDelivery.decide(
-            imageCount: images.count,
-            platformSupportsImages: RTSAppleAIImageDelivery.platformSupportsImages,
-            modelSupportsVision: supportsVision,
-            modelDescription: modelDescription
-        )
+        let unsentPrompt = RTSMessage.Content.sentPrompt(prompt, attachedImageCount: images.count)
+        let delivery = try recordingOnFailure(unsentPrompt) {
+            try RTSAppleAIImageDelivery.decide(
+                imageCount: images.count,
+                platformSupportsImages: RTSAppleAIImageDelivery.platformSupportsImages,
+                modelSupportsVision: supportsVision,
+                modelDescription: modelDescription
+            )
+        }
         switch delivery {
         case .textOnly:
             break
@@ -101,8 +105,10 @@ final class AppleAISession: @unchecked Sendable {
             // (Xcode 27, Swift 6.4). `.attached` is only decided when both are present.
             #if compiler(>=6.4)
             if #available(macOS 27, iOS 27, *) {
-                let attachments = try images.enumerated().map { index, image in
-                    try image.foundationModelsAttachment(index: index)
+                let attachments = try recordingOnFailure(unsentPrompt) {
+                    try images.enumerated().map { index, image in
+                        try image.foundationModelsAttachment(index: index)
+                    }
                 }
                 let promptWithImages = Prompt {
                     prompt
@@ -131,6 +137,46 @@ final class AppleAISession: @unchecked Sendable {
         )
     }
 
+    /// Runs `prepare`. If it throws, records `unsentPrompt` as the user message, then rethrows.
+    ///
+    /// For the steps of a send that can fail before `respond`: the vision check and the image
+    /// decode. Recording the prompt makes them report like a failed `respond`, whose prompt
+    /// `recordFailedSend` records. Without it, whether the failure reached `llm.failure` would
+    /// depend on whether the agent's system message was already in the log, since `llm.failure`
+    /// is only reported for a session that recorded a message.
+    private func recordingOnFailure<Value>(
+        _ unsentPrompt: RTSMessage.Content,
+        _ prepare: () throws -> Value
+    ) throws -> Value {
+        do {
+            return try prepare()
+        } catch {
+            let message = RTSMessage(
+                id: UUID(),
+                role: .user,
+                content: unsentPrompt,
+                timestamp: Date(),
+                metadata: nil,
+                runID: nil
+            )
+            lock.withLock {
+                _messages.append(message)
+            }
+            throw error
+        }
+    }
+
+    /// The plain `respond` on a session, with the prompt the caller chose.
+    private typealias RespondText = (
+        LanguageModelSession
+    ) async throws -> LanguageModelSession.Response<String>
+
+    /// The structured-output `respond` on a session, with the prompt the caller chose.
+    private typealias RespondStructured = (
+        LanguageModelSession,
+        GenerationSchema
+    ) async throws -> LanguageModelSession.Response<GeneratedContent>
+
     /// Runs one `respond` on the current session and records what it left behind: the new transcript
     /// entries on success, or what was sent on failure.
     ///
@@ -139,11 +185,8 @@ final class AppleAISession: @unchecked Sendable {
     /// as a message's content, recorded when a failed `respond` rolls back the transcript.
     private func respond(
         recordingAs sentPrompt: RTSMessage.Content,
-        text respondText: (LanguageModelSession) async throws -> LanguageModelSession.Response<String>,
-        structured respondStructured: (
-            LanguageModelSession,
-            GenerationSchema
-        ) async throws -> LanguageModelSession.Response<GeneratedContent>
+        text respondText: RespondText,
+        structured respondStructured: RespondStructured
     ) async throws -> AppleAIResponse {
         let currentSession = lock.withLock { session }
         let beforeCount = currentSession.transcript.count
