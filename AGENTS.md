@@ -102,9 +102,9 @@ RailtracksSwift is a Swift 6 library for orchestrating LLM agent pipelines. It w
 │  Core                                                       │
 │                                                             │
 │  ┌──────────────────┐   ┌────────────────────────────────┐ │
-│  │  RTSNodeInvoker  │   │    RTSFlowGraphCollector       │ │
-│  │  run nodes & emit│   │    builds trace & signposts    │ │
-│  │  events          │   │    from observability events   │ │
+│  │  RTSNodeInvoker  │   │ RTSFlowGraphCollector: trace   │ │
+│  │  run nodes & emit│   │ RTSSignpostWriter: signposts   │ │
+│  │  events          │   │ both from observability events │ │
 │  └──────────────────┘   └──────────────┬───────────────┬─┘ │
 │  ┌──────────────────┐                  │               │   │
 │  │ RTSEventEmitter  │           JSON file         Instruments
@@ -157,6 +157,19 @@ records at `node.invocation`, finish records at `node.destruction`, `guard_detai
 destroyed. When the root's `node.destruction` arrives it writes the JSON file to the app's Documents
 directory and signals completion, which `RTSFlow.run` awaits before returning. A run builds one only
 when its flow emits events and saves its trace. See `docs/trace-from-events.md`.
+
+`RTSSignpostWriter` (one per flow, built and subscribed in `RTSFlow.init`) builds the Instruments
+signposts from the same internal stream, independently of the trace, and passes them to the flow's
+`RTSSignpostEmitting` (by default `RTSSignpostEmitter`, through RailtracksInstrumentationKit). It
+keeps a table per node, filled from `node.creation` and `node.invocation`:
+- the graph point at `node.invocation`;
+- the Node Runs interval's begin at the executing signal;
+- at `node.destruction`, the interval's end first, then the edge I/O rows, then the tree point and
+  message I/O rows from a detached task.
+
+`os_signpost` stamps an interval when begin or end is called, so the bars run slightly late, by the
+delivery delay: measured p99 duration error is under 1 ms. Nothing in `RTSNodeInvoker` or the
+collector calls the emitter. See `docs/signposts-from-events.md`.
 
 ### Key design decisions
 
@@ -214,6 +227,7 @@ Per-agent input/output guardrails live in `Guardrails/` (abstraction + runner) a
 | New RAG loader | Return an `RTSRAGDocumentStream`; pass `root:` (the path it was given) to opt in to the orphan sweep |
 | Consume observability events | Subscribe to `RTSFlow.eventPublisher` — it's multicast, so add as many subscribers as you like. The one exception is a second `RTSEventWriter`: it would append to the same `<session id>.jsonl` as the flow's built-in writer. To own the file yourself, pass `savesEvents: false`; to observe it, read `flow.eventWriter` |
 | Show a new event family in the flow-graph trace | Emit it through `RTSEventEmitter` inside the run, then translate it in `RTSFlowGraphCollector.process(_:)` into the node and edge records. Anything the trace needs that the wire format lacks goes on the event as an internal property, outside `encodePayload()`. See `docs/trace-from-events.md` |
+| Show a new event family in Instruments | Emit it through `RTSEventEmitter` inside the run, then handle it in `RTSSignpostWriter.write(_:)`, which calls `RTSSignpostEmitting`. See `docs/signposts-from-events.md` |
 
 ### Observability events
 
@@ -273,12 +287,14 @@ are per invocation. See `docs/node-status-from-events.md`.
 statuses never depend on it. With it off there are no envelopes and no event log, and `llm.*` is
 not rebuilt (that costs a pricing lookup per message), so a run builds no trace collector either,
 whatever `savesTrace` says. `savesTrace` decides whether a run builds a collector at all (none
-means no trace file, no collector signposts, and `outputFileURLPublisher` never emits). A known,
+means no trace file, and `outputFileURLPublisher` never emits). Signposts don't depend on it:
+`emitsSignposts` decides whether the flow builds a signpost writer, and with `emitsEvents` off there
+are none either way. `RTSJudgeEvaluator`'s per-call flows pass `emitsSignposts: false`. A known,
 accepted cost: with events off, `emit(_:)` still forwards *every* event to the internal stream,
 though without a collector only the mapper's three node events are read. If the per-event hop ever
 matters (`RTSJudgeEvaluator` runs many short flows), forward only those three when `!isEnabled`. A new
-event family that the trace or the statuses should show needs a translation in the collector or
-the mapper, not a new invoker subject.
+event family that the trace, the statuses or Instruments should show needs a translation in the
+collector, the mapper or the signpost writer, not a new invoker subject.
 
 Design rationale, the Python mapping, and the verification runs live in `docs/observability-events.md`.
 
@@ -393,7 +409,7 @@ The rule, its use cases, and a possible injectable sweeper live in `docs/rag-orp
 
 The codebase targets Swift 6 strict concurrency. `RTSFlowGraphCollector` is an actor. `RTSNodeInvoker` is a `final class` and plain `Sendable`: it publishes nothing itself, only through `RTSEventEmitter`. `RTSNodeStatusMapper` is `Sendable` through a `Mutex`. `RTSLLMSession` is `Sendable` via closure capture. A Combine sink never awaits an actor itself: the collector's yields into an `AsyncStream` drained by one consumer task, which keeps delivery order.
 
-**Publishing must never run subscriber code on an invocation's thread.** `PassthroughSubject.send` delivers sinks synchronously on the caller's thread, so anything a subscriber does would land on the agent's critical path. So the invoker never sends to a subject: `RTSEventEmitter` hands each event to a serial `DispatchQueue` that performs the sends, to both of its streams (no lock — the queue is the serialization). A subscriber to the internal stream runs on that queue, which the collector, the status mapper and the event writer share, so it must do only bounded work: the collector's sink only filters by run scope and yields, and the mapper only updates its table and forwards a status. App subscribers never run on it: `RTSFlow.nodeStatusPublisher` and `RTSFlow.eventPublisher` are each `receive(on:)`-isolated onto a serial queue of their own, so a slow app sink holds up only that publisher's other subscribers, never the trace, the statuses or the signposts. That isolation is per publisher, not per subscriber. The built-in `RTSEventWriter` subscribes to the emitter directly and stays on the delivery queue, which its buffering sink allows. Always a **serial** queue, never a `Task` per event: unordered dispatch is the race documented in `docs/duplicate-node-id.md`. The cost is asynchronous delivery, so `RTSFlow.run` joins the backlog on every exit path and `RTSFlow.flushEvents()` exposes the same barrier, draining the delivery queue and then `eventPublisher`'s.
+**Publishing must never run subscriber code on an invocation's thread.** `PassthroughSubject.send` delivers sinks synchronously on the caller's thread, so anything a subscriber does would land on the agent's critical path. So the invoker never sends to a subject: `RTSEventEmitter` hands each event to a serial `DispatchQueue` that performs the sends, to both of its streams (no lock — the queue is the serialization). A subscriber to the internal stream runs on that queue, which the signpost writer, the collector, the status mapper and the event writer share, so it must do only bounded work: the collector's sink only filters by run scope and yields, the mapper only updates its table and forwards a status, and the signpost writer updates its table and calls the emitter, sending its costliest points from a detached task. The signpost writer subscribes first, because an interval is stamped when the writer gets to the event. App subscribers never run on it: `RTSFlow.nodeStatusPublisher` and `RTSFlow.eventPublisher` are each `receive(on:)`-isolated onto a serial queue of their own, so a slow app sink holds up only that publisher's other subscribers, never the trace, the statuses or the signposts. That isolation is per publisher, not per subscriber. The built-in `RTSEventWriter` subscribes to the emitter directly and stays on the delivery queue, which its buffering sink allows. Always a **serial** queue, never a `Task` per event: unordered dispatch is the race documented in `docs/duplicate-node-id.md`. The cost is asynchronous delivery, so `RTSFlow.run` joins the backlog on every exit path and `RTSFlow.flushEvents()` exposes the same barrier, draining the delivery queue and then `eventPublisher`'s.
 
 **Cancellation.** A run is stopped by cancelling the `Task` that awaits `RTSFlow.run`, or from inside: by the flow's `timeout`, or by a node failing under `endOnError` (`invokeCore` calls `RTSRunStop.nodeFailed`). With either set, `RTSFlow.withRunStops` runs the root in a task group next to a listener that waits on the run's `RTSRunStop` and cancels the work once a stop is requested (plus a timer for the timeout), then waits for the work to unwind. These rules keep that safe — keep them when touching the run path:
 - **Errors are normalized.** Anything thrown while the task is cancelled becomes `RTSError.runTerminated(reason:)` (`RTSRunCancellation.normalized`): in `invokeCore`, once the node's outcome is final (before `runStop.nodeFailed`), so a guardrail that throws because of a stop reports the stop; in `invokeCore`'s catch around the body as well, because `llm.failure` reads that error first; and in `RTSFlow.run`'s catch. A guardrail's own `guard_details` step and `middleware.*` events keep the raw error. The reason is `.cancelled` unless the run stopped itself: the timeout and a failing node record `.timeout` / `.endOnError` on the run's `RTSRunStop` (held by its per-run `RTSNodeInvoker`) **before** the listener cancels the work, and normalization and the node-boundary check read it back. A stop from inside the run must follow the same order: record, then cancel. A `runTerminated` error never triggers `endOnError`, so the nodes a stop cuts short can't start another. An app's own `CancellationError` thrown while the task is *not* cancelled passes through, and an existing `runTerminated` is kept (first stop wins).
