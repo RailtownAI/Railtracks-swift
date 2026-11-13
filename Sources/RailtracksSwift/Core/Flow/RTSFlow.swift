@@ -48,7 +48,15 @@ public class RTSFlow: @unchecked Sendable {
     }
     /// Backs `endOnError`, locked for the same reason as `storedTimeout`.
     private let storedEndOnError: Mutex<Bool>
-    let signpostEmitter: any RTSSignpostEmitting
+    /// The flow's ``RTSSignpostWriter`` sink on the emitter's internal stream, held for the flow's
+    /// lifetime. `nil` when the flow emits no events or no signposts.
+    private let signpostSubscription: AnyCancellable?
+
+    /// Whether the flow's runs emit Instruments signposts: `emitsEvents && emitsSignposts`, read
+    /// from whether a writer was actually built.
+    var writesSignposts: Bool {
+        signpostSubscription != nil
+    }
     private let outputFileURLSubject: CurrentValueSubject<Result<URL, Error>?, Never> = .init(nil)
     /// Publishes the outcome of the JSON trace write after each completed run.
     /// Emits `.success(url)` when the file is written, or `.failure(RTSError.writeFileFailed(path))`
@@ -95,20 +103,28 @@ public class RTSFlow: @unchecked Sendable {
     }
 
     let eventEmitter: RTSEventEmitter
+    /// Serial, so envelopes arrive in the order they were emitted. The emitter's delivery queue
+    /// also feeds the trace collector, the node statuses and the built-in event writer, so
+    /// delivering app subscribers there would let one slow app sink hold all of those up, and
+    /// delay the run's Instruments signposts. Here it holds up only other app subscribers.
+    private let eventDeliveryQueue = DispatchQueue(label: "ai.railtown.railtracks.events.public")
     /// Publishes the structured observability event stream — the Swift port of the Python
     /// engine's event pipeline. Each value is a session-scoped ``RTSEvent`` envelope whose
     /// `payload` carries one typed event (`node.*`, `session.*`, `middleware.guard.*`).
     ///
-    /// Independent of the JSON trace: the two are produced side by side and neither feeds
-    /// the other. Silent when the flow was built with `emitsEvents: false`.
+    /// The flow-graph trace is built from the same events, typed and before encoding, on the
+    /// emitter's internal stream. Silent when the flow was built with `emitsEvents: false`.
     ///
-    /// Subscribers are delivered on a private serial queue rather than on the invoking node's
-    /// thread, so a slow sink cannot slow a run down — but delivery is therefore asynchronous.
-    /// Each `run` joins that backlog before returning, so the stream is complete once a run
-    /// ends; call ``flushEvents()`` if you need the same guarantee at any other moment, such
-    /// as before tearing a subscriber down mid-flow.
+    /// Subscribers are delivered on a private serial queue, not on the invoking node's thread
+    /// nor on the queue the trace, the node statuses and the signposts are built on, so a slow
+    /// sink can slow neither a run nor those. Delivery is therefore asynchronous. Each `run`
+    /// joins that backlog before returning, so the stream is complete once a run ends; call
+    /// ``flushEvents()`` if you need the same guarantee at any other moment, such as before
+    /// tearing a subscriber down mid-flow.
     public var eventPublisher: AnyPublisher<RTSEvent, Never> {
         eventEmitter.eventPublisher
+            .receive(on: eventDeliveryQueue)
+            .eraseToAnyPublisher()
     }
 
     /// This flow's event log, or `nil` when it does not write one.
@@ -157,6 +173,13 @@ public class RTSFlow: @unchecked Sendable {
     /// `session.completed` and announces the file on its own publisher.
     public func flushEvents() async {
         await eventEmitter.flushDelivery()
+        // Every envelope delivered above has been handed on to the public queue by now, so a
+        // barrier there runs after the last of them.
+        await withCheckedContinuation { continuation in
+            eventDeliveryQueue.async {
+                continuation.resume()
+            }
+        }
     }
 
     /// - Parameters:
@@ -165,9 +188,9 @@ public class RTSFlow: @unchecked Sendable {
     ///     `flowGraphOutputDirectory`. Set false to run without persisting a trace (mirrors Python's
     ///     `rt.Flow(save_state=False)`) — used for internal sub-flows like the evaluation judge, whose
     ///     runs should not spill trace files. The completion lifecycle is unaffected. With it off
-    ///     the run builds no trace collector, so it also emits none of the collector's Instruments
-    ///     signposts (graph, tree and IO), and `outputFileURLPublisher` never emits. Has no effect
-    ///     when `emitsEvents` is false.
+    ///     the run builds no trace collector, and `outputFileURLPublisher` never emits. Instruments
+    ///     signposts are unaffected; `emitsSignposts` decides those. Has no effect when
+    ///     `emitsEvents` is false.
     ///   - savesEvents: Whether the flow writes its observability event stream to a JSONL file in
     ///     `eventsOutputDirectory` through ``eventWriter``. Defaults to `nil`, meaning **follow
     ///     `savesTrace`** — the two artifacts usually want the same persistence policy, and it
@@ -179,9 +202,16 @@ public class RTSFlow: @unchecked Sendable {
     ///     `eventPublisher`, matching the Python engine, which emits unless
     ///     `RAILTRACKS_DISABLE_EVENTS` is set. Set false to skip it entirely — payloads are
     ///     never built, so a flow with no event consumer pays no encoding cost. With it off there
-    ///     is no event log, and no trace either, whatever `savesTrace` says, since the trace is
-    ///     built from these events. `nodeStatusPublisher` is unaffected.
-    ///   - signpostEmitter: Emitter for Instruments signpost events. Defaults to a standard `RTSSignpostEmitter`.
+    ///     is no event log, no trace and no Instruments signposts, whatever `savesTrace` and
+    ///     `emitsSignposts` say, since all three are built from these events.
+    ///     `nodeStatusPublisher` is unaffected.
+    ///   - emitsSignposts: When true (default), the flow's runs emit Instruments signposts: a
+    ///     Node Runs interval per node call, and the Flow Graph, Flow Tree and Tool I/O points.
+    ///     Set false to keep a flow out of Instruments, as the evaluation judge's per-call
+    ///     sub-flows do. Has no effect when `emitsEvents` is false.
+    ///   - signpostEmitter: Receives the signposts. Defaults to an `RTSSignpostEmitter`, which
+    ///     sends them to Instruments through RailtracksInstrumentationKit. Unused when the flow
+    ///     emits no signposts.
     ///   - timeout: The most seconds each run may take, from invoking its root node to that node
     ///     finishing. At the deadline the run is cancelled, and `run` throws
     ///     `RTSError.runTerminated(reason: .timeout(after:))` once it has unwound. No node starts
@@ -196,6 +226,7 @@ public class RTSFlow: @unchecked Sendable {
         savesTrace: Bool = true,
         savesEvents: Bool? = nil,
         emitsEvents: Bool = true,
+        emitsSignposts: Bool = true,
         signpostEmitter: (any RTSSignpostEmitting)? = nil,
         timeout: TimeInterval? = nil,
         endOnError: Bool = false
@@ -204,7 +235,6 @@ public class RTSFlow: @unchecked Sendable {
         self.savesTrace = savesTrace
         self.storedTimeout = Mutex(timeout)
         self.storedEndOnError = Mutex(endOnError)
-        self.signpostEmitter = signpostEmitter ?? RTSSignpostEmitter()
         // Held as a local as well: `self` cannot be used to reach the emitter until every
         // stored property is assigned, and the writer has to subscribe before `init` returns.
         let emitter = RTSEventEmitter(
@@ -212,6 +242,17 @@ public class RTSFlow: @unchecked Sendable {
             isEnabled: emitsEvents
         )
         self.eventEmitter = emitter
+        // Subscribed first: the delivery queue hands each event to its subscribers in turn, and an
+        // interval is stamped when the writer gets to it.
+        if emitsEvents, emitsSignposts {
+            let signpostWriter = RTSSignpostWriter(
+                sessionID: id,
+                signpostEmitter: signpostEmitter ?? RTSSignpostEmitter()
+            )
+            self.signpostSubscription = signpostWriter.subscribe(to: emitter.observedEventPublisher)
+        } else {
+            self.signpostSubscription = nil
+        }
         // Subscribed here, before any run can emit, and held as long as the publisher it feeds.
         // The emitter feeds its internal stream whatever `emitsEvents` says.
         let statusSubject = PassthroughSubject<RTSNodeStatus, Never>()
@@ -625,8 +666,6 @@ public class RTSFlow: @unchecked Sendable {
         Task { await RTSCostCalculator.shared.preloadPricing() }
 
         let nodeInvoker = RTSNodeInvoker(
-            sessionID: id,
-            signpostEmitter: signpostEmitter,
             eventEmitter: eventEmitter,
             runStop: RTSRunStop(endsOnError: settings.endOnError),
             runScope: runScope
@@ -640,8 +679,7 @@ public class RTSFlow: @unchecked Sendable {
             sessionID: id,
             eventPublisher: eventEmitter.observedEventPublisher,
             runScope: runScope,
-            outputFileURLSubject: outputFileURLSubject,
-            signpostEmitter: signpostEmitter
+            outputFileURLSubject: outputFileURLSubject
         )
         await collector.setup()
         return (nodeInvoker, collector)

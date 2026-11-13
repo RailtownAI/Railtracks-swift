@@ -182,8 +182,8 @@ extension RailtracksSwiftTestSuite {
         @Test("an invoker notices when it runs outside its run's scope")
         func lostRunScope() {
             let scope = UUID()
-            let scoped = RTSNodeInvoker(sessionID: UUID(), runScope: scope)
-            let unscoped = RTSNodeInvoker(sessionID: UUID())
+            let scoped = RTSNodeInvoker(runScope: scope)
+            let unscoped = RTSNodeInvoker()
 
             // Outside any binding, as after a `Task.detached` inside the run.
             #expect(scoped.hasLostRunScope)
@@ -292,7 +292,7 @@ extension RailtracksSwiftTestSuite {
         @Test("node.creation and guard events carry what the trace needs, off the wire")
         func internalProperties() async throws {
             let recorder = TapRecorder(RTSEventEmitter(sessionID: "session-1", isEnabled: true))
-            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
+            let invoker = RTSNodeInvoker(eventEmitter: recorder.emitter)
             let check = RTSClosureInputGuardrail(name: "Check") { _ in
                 .allow("fine")
             }
@@ -342,6 +342,53 @@ extension RailtracksSwiftTestSuite {
             #expect(
                 payloadKeys == ["timestamp", "spatial_parent_type", "node_id", "name", "node_type"]
             )
+        }
+
+        /// An app subscriber to `eventPublisher` runs on a queue of its own, so one that blocks
+        /// holds up only the public stream. Everything built from the internal stream, the node
+        /// statuses here, keeps arriving. Were it on the emitter's delivery queue, the root's
+        /// `.completed` status would wait behind it, and this test would time out.
+        @Test("an app subscriber blocking on eventPublisher doesn't hold up the internal stream")
+        func blockedAppSubscriberIsIsolated() async throws {
+            let released = Mutex(false)
+            let release = DispatchSemaphore(value: 0)
+            let root = TapOrchestrator(nodeName: "Root") { _, _ in
+                ["result": .string("done")]
+            }
+            let flow = RTSFlow(title: "TapIsolation", savesTrace: false)
+            let blocking = flow.eventPublisher.sink { _ in
+                if !released.withLock({ $0 }) {
+                    release.wait()
+                }
+            }
+            let rootCompleted = Mutex<RTSNodeStatus?>(nil)
+            let statuses = flow.nodeStatusPublisher.sink { status in
+                guard case .completed = status.state, status.parentNodeID == nil else {
+                    return
+                }
+                rootCompleted.withLock { $0 = status }
+            }
+
+            // `run` joins the public stream's backlog before returning, so it waits for the
+            // blocked subscriber: run it alongside, and release the subscriber once the status
+            // is in, or after 5 seconds.
+            let running = Task {
+                try await flow.run(root, input: [:], gateway: RTSLLMGateway(apiKeys: [:]))
+            }
+            for _ in 0..<250 where rootCompleted.withLock({ $0 }) == nil {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let status = rootCompleted.withLock { $0 }
+            released.withLock { $0 = true }
+            release.signal()
+
+            #expect(
+                status?.nodeName == "Root",
+                "the root's status waited behind the app subscriber"
+            )
+            _ = try await running.value
+            blocking.cancel()
+            statuses.cancel()
         }
     }
 }

@@ -448,7 +448,7 @@ extension RailtracksSwiftTestSuite {
                 },
                 agentName: "Stub"
             )
-            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
+            let invoker = RTSNodeInvoker(eventEmitter: recorder.emitter)
             let agent = RTSAgent(llmProvider: Self.provider, name: "Agent")
 
             _ = try await invoker.invokeAgent(
@@ -483,7 +483,7 @@ extension RailtracksSwiftTestSuite {
                 setSystemPrompt: { _, _ in },
                 message: { [stale] },                agentName: "Stub"
             )
-            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
+            let invoker = RTSNodeInvoker(eventEmitter: recorder.emitter)
             let agent = RTSAgent(llmProvider: Self.provider, name: "Agent")
 
             _ = try await invoker.invokeAgent(

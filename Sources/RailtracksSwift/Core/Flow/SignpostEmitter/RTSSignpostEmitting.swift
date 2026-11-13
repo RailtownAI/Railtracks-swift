@@ -11,14 +11,21 @@ import Foundation
 /// Inject a conformer into `RTSFlow.init` to enable Instruments tracing without
 /// coupling RailtracksSwift to any specific instrumentation library.
 ///
-/// `RTSNodeInvoker` calls `emitNodeStart`/`emitNodeEnd` in real time at execution
-/// boundaries — suitable for interval signposts. `RTSFlowGraphCollector` calls the
-/// four point-event methods from within its publisher receive closures, so messages
-/// are already attached and the full ancestor chain is derivable from accumulated
-/// edge events.
+/// Every method is called by the flow's signpost writer, which builds the signposts from the
+/// run's observability events on the emitter's delivery queue, one call at a time per event:
+/// - `emitNodeStart` when a node's guardrails are done and its body is about to run, and
+///   `emitNodeEnd` when the node finishes. Both are called as the events are delivered, so an
+///   interval is stamped slightly after the moment it marks, by however long delivery took.
+/// - The point-event methods at `node.invocation` (the graph node) and `node.destruction` (the
+///   edge I/O, then the tree node and message I/O), once the data they report is complete. The
+///   tree node and message I/O are sent from a detached task, for their cost. Points carry their
+///   start time as a field, so when they're sent doesn't matter.
+///
+/// Every call except those last two arrives on the delivery queue, shared with the trace and the
+/// node statuses, so a conformer should return quickly.
 public protocol RTSSignpostEmitting: Sendable {
 
-    // MARK: - Interval (called by RTSNodeInvoker, real-time)
+    // MARK: - Interval (called by the signpost writer, as events are delivered)
 
     /// Called when a node call (agent, tool, function) begins, once per invocation.
     /// - Parameters:
@@ -54,7 +61,7 @@ public protocol RTSSignpostEmitting: Sendable {
         error: Error?
     )
 
-    // MARK: - Point events (called by RTSFlowGraphCollector, with complete data)
+    // MARK: - Point events (called by the signpost writer, with complete data)
 
     func emitGraphNode(
         nodeID: String,

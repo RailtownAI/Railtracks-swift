@@ -331,6 +331,220 @@ private final class RecordingPointSignposts: RTSSignpostEmitting, Sendable {
     }
 }
 
+/// Records the interval signposts (`emitNodeStart` / `emitNodeEnd`) as one line each, in call
+/// order, which is deterministic for these sequential flows. Point signposts are ignored.
+///
+/// Every field is recorded. Node ids become `<node:Name>` and run ids `<run:Name>`, labelled at the
+/// node's begin, with `-2`, `-3`… for a name seen again. The session id becomes `<session>`, and
+/// a call site's line number `<line>`.
+private final class RecordingIntervalSignposts: RTSSignpostEmitting, Sendable {
+    private enum Record {
+        case begin(
+            nodeID: UUID,
+            parentNodeID: UUID?,
+            nodeName: String,
+            runID: RTSRunID,
+            line: String
+        )
+        case end(nodeID: UUID, runID: RTSRunID, line: String)
+    }
+
+    private let records = Mutex<[Record]>([])
+
+    func emitNodeStart(
+        nodeID: UUID,
+        parentNodeID: UUID?,
+        nodeName: String,
+        nodeType: RTSFlowNodeType,
+        sessionID: UUID,
+        parentName: String,
+        runID: RTSRunID,
+        input: RTSInput,
+        instructions: String?,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
+    ) {
+        let line = "begin \(nodeName) node=\(nodeID.uuidString)"
+            + " parent=\(parentNodeID?.uuidString ?? "none") parentName=\(parentName)"
+            + " type=\(nodeType.rawValue) session=\(sessionID.uuidString) run=\(runID.uuidString)"
+            + " guards=\(hasInputGuardrail)/\(hasOutputGuardrail)"
+            + " instructions=\(instructions ?? "nil") input=\(Self.text(of: input))"
+        records.withLock { records in
+            records.append(
+                .begin(
+                    nodeID: nodeID,
+                    parentNodeID: parentNodeID,
+                    nodeName: nodeName,
+                    runID: runID,
+                    line: line
+                )
+            )
+        }
+    }
+
+    func emitNodeEnd(
+        nodeID: UUID,
+        nodeName: String,
+        nodeType: RTSFlowNodeType,
+        sessionID: UUID,
+        parentName: String,
+        runID: RTSRunID,
+        output: RTSOutput?,
+        error: Error?
+    ) {
+        let line = "end \(nodeName) node=\(nodeID.uuidString) parentName=\(parentName)"
+            + " type=\(nodeType.rawValue) session=\(sessionID.uuidString) run=\(runID.uuidString)"
+            + " output=\(output.map(Self.text(of:)) ?? "nil")"
+            + " error=\(error.map { String(describing: $0) } ?? "nil")"
+        records.withLock { $0.append(.end(nodeID: nodeID, runID: runID, line: line)) }
+    }
+
+    func emitGraphNode(
+        nodeID: String,
+        parentID: String,
+        sessionID: String,
+        runID: String,
+        nodeType: RTSFlowNodeType,
+        parentType: RTSFlowNodeType?,
+        error: Bool,
+        parentError: Bool,
+        cost: Double,
+        model: String,
+        parentName: String,
+        name: String,
+        startTime: TimeInterval
+    ) {
+    }
+
+    func emitTreeNode(
+        nodeID: String,
+        sessionID: String,
+        runID: String,
+        nodeType: RTSFlowNodeType,
+        model: String,
+        provider: String,
+        cost: Double,
+        latency: Double,
+        inputTokens: Int,
+        outputTokens: Int,
+        error: Bool,
+        ancestors: [String],
+        name: String,
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
+    ) {
+    }
+
+    func emitIO(
+        nodeID: String,
+        sessionID: String,
+        runID: String,
+        messageID: String,
+        source: String,
+        direction: String,
+        role: String,
+        model: String,
+        provider: String,
+        cost: Double,
+        latency: Double,
+        inputTokens: Int,
+        outputTokens: Int,
+        displayRole: String,
+        toolName: String,
+        content: String,
+        startTime: TimeInterval,
+        hasInputGuardrail: Bool,
+        hasOutputGuardrail: Bool
+    ) {
+    }
+
+    /// The lines in call order, normalized. Also checks what a golden can't show directly: every
+    /// begin has exactly one end, after it, and a child's interval sits inside its parent's.
+    func lines(sessionID: UUID, sourceLocation: SourceLocation = #_sourceLocation) -> String {
+        let recorded = records.withLock { $0 }
+        var labels: [UUID: String] = [:]
+        var nameCounts: [String: Int] = [:]
+        var open: Set<UUID> = []
+        for record in recorded {
+            switch record {
+            case .begin(let nodeID, let parentNodeID, let nodeName, let runID, _):
+                nameCounts[nodeName, default: 0] += 1
+                let count = nameCounts[nodeName] ?? 1
+                let label = count == 1 ? nodeName : "\(nodeName)-\(count)"
+                labels[nodeID] = "<node:\(label)>"
+                labels[runID] = "<run:\(label)>"
+                if let parentNodeID {
+                    #expect(
+                        open.contains(parentNodeID),
+                        "\(label) began outside its parent's interval",
+                        sourceLocation: sourceLocation
+                    )
+                }
+                open.insert(nodeID)
+            case .end(let nodeID, _, _):
+                #expect(
+                    open.remove(nodeID) != nil,
+                    "an end with no open begin",
+                    sourceLocation: sourceLocation
+                )
+            }
+        }
+        #expect(open.isEmpty, "intervals never ended", sourceLocation: sourceLocation)
+
+        let uuidPattern = /[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/
+        return recorded
+            .map { record in
+                switch record {
+                case .begin(_, _, _, _, let line), .end(_, _, let line):
+                    return line
+                }
+            }
+            .map { line in
+                line
+                    .replacing(uuidPattern) { match in
+                        let identifier = String(match.output)
+                        if identifier == sessionID.uuidString {
+                            return "<session>"
+                        }
+                        return UUID(uuidString: identifier).flatMap { labels[$0] } ?? "<id>"
+                    }
+                    .replacing(/:\d+(?= in )/, with: ":<line>")
+            }
+            .joined(separator: "\n")
+    }
+
+    /// `key: value` pairs in key order, each value as the signposts render it.
+    private static func text(of values: [String: RTSValue]) -> String {
+        let pairs = values.keys.sorted().map { key in
+            "\(key): \((values[key] ?? .null).signpostText)"
+        }
+        return "{" + pairs.joined(separator: ", ") + "}"
+    }
+}
+
+/// Compares a flow's interval signposts with their golden. On a mismatch the actual lines are saved
+/// next to the other test output, so a deliberate change can be reviewed and pasted in.
+private func expectIntervals(
+    _ signposts: RecordingIntervalSignposts,
+    of flow: RTSFlow,
+    match golden: String,
+    named name: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) throws {
+    let lines = signposts.lines(sessionID: flow.id, sourceLocation: sourceLocation)
+    guard lines != golden else {
+        return
+    }
+    let saved = FileManager.default.temporaryDirectory
+        .appendingPathComponent("trace-golden-intervals-\(name).txt")
+    try lines.write(to: saved, atomically: true, encoding: .utf8)
+    Issue.record(
+        "intervals \(name) differ from their golden; actual saved to \(saved.path)",
+        sourceLocation: sourceLocation
+    )
+}
+
 extension RailtracksSwiftTestSuite {
     // Serialized: runs full flows, which share the process-global output directory.
     @Suite("Trace golden", .serialized)
@@ -357,7 +571,8 @@ extension RailtracksSwiftTestSuite {
                 ],
                 reply: "alpha and beta"
             )
-            let flow = RTSFlow(title: "Golden Tools")
+            let intervals = RecordingIntervalSignposts()
+            let flow = RTSFlow(title: "Golden Tools", signpostEmitter: intervals)
 
             _ = try await flow.run(
                 agent: agent,
@@ -368,6 +583,12 @@ extension RailtracksSwiftTestSuite {
 
             let trace = try await writtenTrace(of: flow)
             try expectTrace(trace, matches: Self.agentCallingToolsGolden, named: "tools")
+            try expectIntervals(
+                intervals,
+                of: flow,
+                match: Self.agentCallingToolsIntervals,
+                named: "tools"
+            )
         }
 
         @Test("input and output guardrails, with a transform")
@@ -389,7 +610,8 @@ extension RailtracksSwiftTestSuite {
                 inputGuardrails: [redact, length],
                 outputGuardrails: [tone]
             )
-            let flow = RTSFlow(title: "Golden Guardrails")
+            let intervals = RecordingIntervalSignposts()
+            let flow = RTSFlow(title: "Golden Guardrails", signpostEmitter: intervals)
 
             _ = try await flow.run(
                 agent: agent,
@@ -399,6 +621,12 @@ extension RailtracksSwiftTestSuite {
 
             let trace = try await writtenTrace(of: flow)
             try expectTrace(trace, matches: Self.guardrailsGolden, named: "guardrails")
+            try expectIntervals(
+                intervals,
+                of: flow,
+                match: Self.guardrailsIntervals,
+                named: "guardrails"
+            )
         }
 
         @Test("an input guardrail block fails the run")
@@ -411,7 +639,8 @@ extension RailtracksSwiftTestSuite {
                 name: "Blocked",
                 inputGuardrails: [refuse]
             )
-            let flow = RTSFlow(title: "Golden Block")
+            let intervals = RecordingIntervalSignposts()
+            let flow = RTSFlow(title: "Golden Block", signpostEmitter: intervals)
 
             await #expect(throws: RTSError.self) {
                 _ = try await flow.run(
@@ -423,6 +652,12 @@ extension RailtracksSwiftTestSuite {
 
             let trace = try await writtenTrace(of: flow)
             try expectTrace(trace, matches: Self.inputBlockGolden, named: "block")
+            try expectIntervals(
+                intervals,
+                of: flow,
+                match: Self.inputBlockIntervals,
+                named: "block"
+            )
         }
 
         @Test("an orchestrator root calling an agent and a function")
@@ -448,7 +683,8 @@ extension RailtracksSwiftTestSuite {
                 providerName: "Gemini",
                 model: "not-a-priced-model"
             )
-            let flow = RTSFlow(title: "Golden Orchestrator")
+            let intervals = RecordingIntervalSignposts()
+            let flow = RTSFlow(title: "Golden Orchestrator", signpostEmitter: intervals)
 
             _ = try await flow.run(
                 planner,
@@ -458,6 +694,12 @@ extension RailtracksSwiftTestSuite {
 
             let trace = try await writtenTrace(of: flow)
             try expectTrace(trace, matches: Self.orchestratorRootGolden, named: "orchestrator")
+            try expectIntervals(
+                intervals,
+                of: flow,
+                match: Self.orchestratorRootIntervals,
+                named: "orchestrator"
+            )
         }
 
         @Test("an end-on-error stop")
@@ -480,7 +722,8 @@ extension RailtracksSwiftTestSuite {
                 toolCalls: [ScriptedToolCall(tool: divide, input: ["query": .string("1 / 0")])],
                 waitsForStopAfterToolFailure: true
             )
-            let flow = RTSFlow(title: "Golden End On Error")
+            let intervals = RecordingIntervalSignposts()
+            let flow = RTSFlow(title: "Golden End On Error", signpostEmitter: intervals)
             flow.endOnError = true
 
             await #expect(throws: RTSError.self) {
@@ -493,6 +736,65 @@ extension RailtracksSwiftTestSuite {
 
             let trace = try await writtenTrace(of: flow)
             try expectTrace(trace, matches: Self.endOnErrorStopGolden, named: "end-on-error")
+            try expectIntervals(
+                intervals,
+                of: flow,
+                match: Self.endOnErrorStopIntervals,
+                named: "end-on-error"
+            )
+        }
+
+        /// A node invoked after the run stopped is created and finished, but neither its guardrails
+        /// nor its body runs. It still gets an interval: begun and ended, with the stop as its error.
+        @Test("a node invoked after an end-on-error stop still gets its interval")
+        func nodeAfterStop() async throws {
+            struct DivisionByZero: Error {
+            }
+            let divide = ScriptedTool("Divide") { _ in
+                throw DivisionByZero()
+            }
+            let calculator = RTSAgent(
+                llmProvider: toolCallingProvider,
+                name: "Calculator",
+                tools: [divide]
+            )
+            let cleanup = ScriptedOrchestrator(nodeName: "Cleanup") { _, _ in
+                Issue.record("a node invoked after the stop ran its body")
+                return [:]
+            }
+            // The calculator only fails once the stop has cancelled the run, so the cleanup is
+            // invoked on a cancelled task.
+            let pipeline = ScriptedOrchestrator(nodeName: "Pipeline") { _, context in
+                do {
+                    let answer = try await context.call(calculator, prompt: "What is 1 / 0?")
+                    return ["answer": .string(answer)]
+                } catch {
+                    _ = try? await context.call(cleanup, input: ["reason": .string("failed")])
+                    throw error
+                }
+            }
+            let script = ScriptedReply(
+                toolCalls: [ScriptedToolCall(tool: divide, input: ["query": .string("1 / 0")])],
+                waitsForStopAfterToolFailure: true
+            )
+            let intervals = RecordingIntervalSignposts()
+            let flow = RTSFlow(title: "Golden Node After Stop", signpostEmitter: intervals)
+            flow.endOnError = true
+
+            await #expect(throws: RTSError.self) {
+                _ = try await flow.run(
+                    pipeline,
+                    input: [:],
+                    makeSession: scriptedSessions(["Calculator": script])
+                )
+            }
+
+            try expectIntervals(
+                intervals,
+                of: flow,
+                match: Self.nodeAfterStopIntervals,
+                named: "node-after-stop"
+            )
         }
 
         @Test("two runs on one flow write the same trace")

@@ -49,7 +49,8 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             runId: sessionID.uuidString,
             parentName: parentName,
             input: Self.inputSummary(input, nodeType: nodeType),
-            instructions: instructions ?? ""
+            // Cut like the input summary, for the same reason; the kit caps at the same length.
+            instructions: String((instructions ?? "").prefix(Self.inputSummaryLimit))
         )
         let handle = RailtracksSignposts.begin(event)
         log.trace("🚧 emitting begin: \(event) | \(handle)")
@@ -217,14 +218,15 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         }
         var summary = ""
         for key in input.keys.sorted() {
-            if summary.utf8.count > inputSummaryLimit {
-                summary += "…"
-                break
-            }
             if !summary.isEmpty {
                 summary += ", "
             }
             summary += "\(key): \((input[key] ?? .null).signpostText)"
+            // Checked after each pair, so one huge value is cut too: the kit collapses the
+            // whitespace of everything it's given before capping it, on the event delivery queue.
+            if summary.utf8.count > inputSummaryLimit {
+                return String(summary.prefix(inputSummaryLimit)) + "…"
+            }
         }
         return summary
     }

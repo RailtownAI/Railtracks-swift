@@ -21,9 +21,6 @@ public final class RTSNodeInvoker: Sendable {
         _ error: Error?
     ) async -> Void
 
-    let sessionID: UUID
-    let signpostEmitter: (any RTSSignpostEmitting)?
-
     /// The invocation id of the node currently executing on this task. A child invocation reads it
     /// as its parent (the edge `source`). It is bound around `execute` so it flows down the async
     /// call tree — including Conduit's tool `TaskGroup` and Apple's `LanguageModelSession.respond`,
@@ -43,14 +40,10 @@ public final class RTSNodeInvoker: Sendable {
     let runScope: UUID?
 
     init(
-        sessionID: UUID,
-        signpostEmitter: (any RTSSignpostEmitting)? = nil,
         eventEmitter: RTSEventEmitter? = nil,
         runStop: RTSRunStop = RTSRunStop(),
         runScope: UUID? = nil
     ) {
-        self.sessionID = sessionID
-        self.signpostEmitter = signpostEmitter
         self.eventEmitter = eventEmitter
         self.runStop = runStop
         self.runScope = runScope
@@ -203,7 +196,7 @@ public final class RTSNodeInvoker: Sendable {
         // carries no parent — matching Python's `CreationEventBase`.
         let eventParent = RTSEventParent.node(nodeID: invocationID.uuidString)
         let eventSpatialParent = RTSEventSpatialParent.node(nodeID: parentInvocationID?.uuidString)
-        // The flags, provider and model are off the wire, for the trace collector's signposts.
+        // The flags, provider and model are off the wire, for the trace and the signposts.
         eventEmitter?.emit(
             RTSNodeCreationEvent(
                 nodeID: invocationID.uuidString,
@@ -251,26 +244,10 @@ public final class RTSNodeInvoker: Sendable {
             guardError = result.error
         }
 
-        signpostEmitter?.emitNodeStart(
-            nodeID: invocationID,
-            parentNodeID: parentInvocationID,
-            nodeName: node.name(),
-            nodeType: nodeType,
-            sessionID: sessionID,
-            parentName: createdBy?.name() ?? "",
-            runID: runID,
-            input: workingInput,
-            // `invokeAgent` makes `workingInput` the agent's whole `inputs`, so this is the
-            // system message `invoke` will set — whatever the caller put in the call input.
-            instructions: nodeType == .agent ? RTSAgentInput.systemMessage(in: workingInput) : nil,
-            hasInputGuardrail: runInputGuardrails != nil,
-            hasOutputGuardrail: runOutputGuardrails != nil
-        )
-
         // Guardrails are done and the body is about to run: the point where a UI flips this node from
-        // queued to executing. Signalled even when a guardrail already failed above, so a node
-        // never finishes without having been seen to start. Internal stream only, so it arrives
-        // even with events off.
+        // queued to executing, and where its Instruments interval begins. Signalled even when a
+        // guardrail already failed above, so a node never finishes without having been seen to
+        // start. Internal stream only, so it arrives even with events off.
         eventEmitter?.emitNodeExecuting(RTSNodeExecutingSignal(nodeID: invocationID))
 
         var output: RTSOutput = [:]
@@ -375,19 +352,9 @@ public final class RTSNodeInvoker: Sendable {
             )
         }
 
-        signpostEmitter?.emitNodeEnd(
-            nodeID: invocationID,
-            nodeName: node.name(),
-            nodeType: nodeType,
-            sessionID: sessionID,
-            parentName: createdBy?.name() ?? "",
-            runID: runID,
-            output: invokeError == nil ? output : nil,
-            error: invokeError
-        )
-
         // The final outcome, and the event Python's `node_internals` fold reads for latency.
-        // `runtime` is the monotonic measurement taken above, never a stamp delta.
+        // `runtime` is the monotonic measurement taken above, never a stamp delta. It also ends the
+        // node's Instruments interval, with the error itself.
         eventEmitter?.emit(
             RTSNodeDestructionEvent(
                 parent: eventParent,
@@ -395,7 +362,8 @@ public final class RTSNodeInvoker: Sendable {
                 response: invokeError == nil ? .object(output) : nil,
                 durationSeconds: runtime,
                 failure: failureDetails,
-                terminationReason: RTSRunCancellation.terminationReason(of: invokeError)
+                terminationReason: RTSRunCancellation.terminationReason(of: invokeError),
+                error: invokeError
             )
         )
 

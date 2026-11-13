@@ -416,7 +416,7 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
                 name: "JudgeAgent",
                 outputSchema: RTSJudgeResponse.schema(includesReasoning: includesReasoning)
             )
-            let flow = RTSFlow(title: "JudgeEvaluatorFlow", savesTrace: savesTrace)
+            let flow = judgeFlow(savesTrace: savesTrace)
             let resultString = try await flow.run(
                 agent: agent,
                 prompt: user,
@@ -428,5 +428,12 @@ public struct RTSJudgeEvaluator: RTSEvaluator {
             }
             return try JSONDecoder().decode(RTSJudgeResponse.self, from: data)
         }
+    }
+
+    /// The flow one judge call runs in. There is one per call (metrics × datapoints × agents), so
+    /// it writes no signposts: in Instruments they would bury the app's own runs. Its event log
+    /// already follows `savesTrace`.
+    static func judgeFlow(savesTrace: Bool) -> RTSFlow {
+        RTSFlow(title: "JudgeEvaluatorFlow", savesTrace: savesTrace, emitsSignposts: false)
     }
 }
