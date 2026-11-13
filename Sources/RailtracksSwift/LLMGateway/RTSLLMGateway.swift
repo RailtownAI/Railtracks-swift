@@ -54,7 +54,8 @@ public struct RTSLLMGateway: Sendable {
                 apiKeys: apiKeys,
                 invoker: invoker,
                 agentNode: agentNode,
-                sessionFactory: nil
+                sessionFactory: nil,
+                supportsVision: AppleAISession.systemModelSupportsVision
             )
 
         // XCODE26-SDK: `sessionFactory()` needs the OS 27 SDK (Xcode 27, Swift 6.4). Built with an
@@ -70,7 +71,8 @@ public struct RTSLLMGateway: Sendable {
                 apiKeys: apiKeys,
                 invoker: invoker,
                 agentNode: agentNode,
-                sessionFactory: try languageModel.sessionFactory()
+                sessionFactory: try languageModel.sessionFactory(),
+                supportsVision: languageModel.supportsVision
             )
         #else
         case .foundationModel:
@@ -132,7 +134,8 @@ public struct RTSLLMGateway: Sendable {
         apiKeys: [RTSLLMProviderKind: String],
         invoker: RTSNodeInvoker,
         agentNode: any RTSAgentNode,
-        sessionFactory: AppleAISession.MakeSession?
+        sessionFactory: AppleAISession.MakeSession?,
+        supportsVision: Bool
     ) throws -> RTSLLMSession {
         let (appleAISession, unsupported) = try AppleAISession.build(
             fromAgentTools: agentNode.tools,
@@ -141,7 +144,8 @@ public struct RTSLLMGateway: Sendable {
             makeSubSession: { subAgent in
                 try RTSLLMGateway.buildSession(apiKeys: apiKeys, invoker: invoker, agentNode: subAgent)
             },
-            sessionFactory: sessionFactory
+            sessionFactory: sessionFactory,
+            supportsVision: supportsVision
         )
         if !unsupported.isEmpty {
             log.warning("⚠️ [\(agentNode.agentName)] \(unsupported.count) tool(s) ignored — conform to RTSAppleAIToolNode to use tools with \(agentNode.llmProvider.providerName) via FoundationModels: [\(unsupported.map(\.toolName))]")
