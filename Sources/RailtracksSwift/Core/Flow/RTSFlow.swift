@@ -51,6 +51,12 @@ public class RTSFlow: @unchecked Sendable {
     /// The flow's ``RTSSignpostWriter`` sink on the emitter's internal stream, held for the flow's
     /// lifetime. `nil` when the flow emits no events or no signposts.
     private let signpostSubscription: AnyCancellable?
+
+    /// Whether the flow's runs emit Instruments signposts: `emitsEvents && emitsSignposts`, read
+    /// from whether a writer was actually built.
+    var writesSignposts: Bool {
+        signpostSubscription != nil
+    }
     
     
     // THROWAWAY (#70 step 1).
