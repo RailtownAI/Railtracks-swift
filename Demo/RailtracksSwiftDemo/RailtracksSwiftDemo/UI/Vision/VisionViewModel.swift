@@ -12,12 +12,47 @@ import UIKit
 #elseif canImport(AppKit)
 import AppKit
 #endif
+#if OS27
+import ClaudeForFoundationModels
+#endif
 
-/// Vision demo: pick a photo, then ask a Gemini vision model to summarize it. Demonstrates
-/// multimodal input — an `RTSImage` attached to the prompt via `flow.run(agent:prompt:images:)`.
+/// Vision demo: pick a photo, then ask a vision model to summarize it. Demonstrates multimodal
+/// input — an `RTSImage` attached to the prompt via `flow.run(agent:prompt:images:)` — on Gemini
+/// through Conduit, and on the Foundation Models path (on-device, and Claude in the OS 27 target).
 @Observable
 class VisionViewModel {
+    /// The model a run is sent to.
+    enum Model: String, CaseIterable, Identifiable {
+        case gemini = "Gemini"
+        /// The on-device system model. Takes images from OS 27; below it they are dropped with a
+        /// warning and only the prompt is sent.
+        case appleAI = "On-device"
+        #if OS27
+        /// Claude through Foundation Models (`.foundationModel`), rather than Conduit.
+        case claudeFoundationModels = "Claude (FM)"
+        #endif
+
+        var id: Self {
+            self
+        }
+
+        /// The key this model needs, or `nil` when it needs none.
+        var keyProvider: DemoAPIKeyProvider? {
+            switch self {
+            case .gemini:
+                return .gemini
+            case .appleAI:
+                return nil
+            #if OS27
+            case .claudeFoundationModels:
+                return .anthropic
+            #endif
+            }
+        }
+    }
+
     let prompt: String = "Summarize what is shown in this image in a few sentences."
+    var model: Model = .gemini
     /// Picked photo, normalized to JPEG for consistent provider support and display.
     var pickedImageData: Data?
     var promptResult: String = ""
@@ -65,7 +100,18 @@ class VisionViewModel {
     }
 
     func startPrompt() {
-        guard let apiKey = KeychainHelper.readGeminiKey() else {
+        let apiKey: String?
+        switch model.keyProvider {
+        case .gemini:
+            apiKey = KeychainHelper.readGeminiKey()
+        case .anthropic:
+            apiKey = KeychainHelper.readAnthropicKey()
+        case .openAI:
+            apiKey = KeychainHelper.readOpenAIKey()
+        case nil:
+            apiKey = ""
+        }
+        guard let apiKey else {
             isShowingKeyPrompt = true
             return
         }
@@ -75,24 +121,18 @@ class VisionViewModel {
         isRunning = true
         promptResult = ""
         let prompt = self.prompt
+        let model = self.model
         Task { [weak self] in
             defer { self?.isRunning = false }
-            let gateway = RTSLLMGateway(apiKeys: [.gemini: apiKey])
-            let flow = RTSFlow(title: "Image Summary")
-            // `.medium` is already Gemini 2.5's default, so this pins today's cost rather than
-            // lowering it. Set explicitly because the families default differently — Gemini 3 defaults
-            // to `.high`, roughly 4x the image tokens — so pinning keeps this demo's cost the same if
-            // the model changes. Summarizing a scene does not need that detail; raise it for OCR.
+            let (provider, gateway) = Self.providerAndGateway(for: model, apiKey: apiKey)
+            let flow = RTSFlow(title: "Image Summary (\(model.rawValue))")
             let agent = RTSAgent(
-                llmProvider: .gemini(
-                    modelIDString: RTSGeminiModelID.gemini25Flash.modelIDString,
-                    options: RTSGeminiOptions(mediaResolution: .medium)
-                ),
+                llmProvider: provider,
                 name: "Image Summarizer",
                 systemMessage: "You are a helpful assistant that describes and summarizes images."
             )
             let image = RTSImage(data: imageData, mimeType: "image/jpeg")
-            Log.debug("🖼️ starting image summary...")
+            Log.debug("🖼️ starting image summary on \(model.rawValue)...")
             do {
                 let result = try await flow.run(
                     agent: agent,
@@ -105,6 +145,39 @@ class VisionViewModel {
                 self?.promptResult = "Error: \(error)"
             }
             Log.debug("🖼️ image summary finished")
+        }
+    }
+
+    /// The agent's provider and the gateway it runs through. Only Gemini puts its key in the gateway:
+    /// the on-device model needs none, and Claude through Foundation Models carries its own auth.
+    private static func providerAndGateway(
+        for model: Model,
+        apiKey: String
+    ) -> (RTSLLMProvider, RTSLLMGateway) {
+        switch model {
+        case .gemini:
+            // `.medium` is already Gemini 2.5's default, so this pins today's cost rather than
+            // lowering it. Set explicitly because the families default differently — Gemini 3
+            // defaults to `.high`, roughly 4x the image tokens — so pinning keeps this demo's cost
+            // the same if the model changes. Summarizing a scene does not need that detail; raise it
+            // for OCR. Foundation Models has no equivalent setting: each model sizes images itself.
+            let provider = RTSLLMProvider.gemini(
+                modelIDString: RTSGeminiModelID.gemini25Flash.modelIDString,
+                options: RTSGeminiOptions(mediaResolution: .medium)
+            )
+            return (provider, RTSLLMGateway(apiKeys: [.gemini: apiKey]))
+        case .appleAI:
+            return (.appleAI, RTSLLMGateway(apiKeys: [:]))
+        #if OS27
+        case .claudeFoundationModels:
+            let claude = ClaudeLanguageModel(name: .sonnet4_6, auth: .apiKey(apiKey))
+            let languageModel = RTSFoundationLanguageModel(
+                claude,
+                kind: .anthropic,
+                modelID: RTSAnthropicModelID.claudeSonnet46.modelIDString
+            )
+            return (.foundationModel(languageModel), RTSLLMGateway(apiKeys: [:]))
+        #endif
         }
     }
 

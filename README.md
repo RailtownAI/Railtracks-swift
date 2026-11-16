@@ -27,7 +27,7 @@ The providers are checked at run time: below their OS, the gateway throws `RTSEr
 | Apple Intelligence (on-device) | `.appleAI` | — |
 | Any FoundationModels `LanguageModel`, e.g. Claude via `ClaudeForFoundationModels` | `.foundationModel(RTSFoundationLanguageModel)` | — |
 
-`RTSGeminiOptions` carries Gemini-only settings, such as `mediaResolution` for image input.
+`RTSGeminiOptions` carries Gemini-only settings, such as `mediaResolution` for image input. Foundation Models has no such setting; see [RTSFoundationLanguageModel](#rtsfoundationlanguagemodel).
 
 ## Quick Start
 
@@ -246,7 +246,9 @@ let agent = RTSAgent(
 let gateway = RTSLLMGateway(apiKeys: [:])   // the model carries its own auth
 ```
 
-`kind` says who serves the model, so pricing, traces and rate limiting treat it as that provider; `modelID` is the pricing key. Tools follow the `.appleAI` rules: conform to `RTSAppleAIToolNode`. Image input is not yet supported on this path.
+`kind` says who serves the model, so pricing, traces and rate limiting treat it as that provider; `modelID` is the pricing key. Tools follow the `.appleAI` rules: conform to `RTSAppleAIToolNode`.
+
+Image input works on `.appleAI` and `.foundationModel` from macOS/iOS 27: the images are attached after the prompt's text. A model without the `.vision` capability fails with `RTSError.invalidInvocation` before anything is sent. Below OS 27 the images are dropped with a warning and only the text is sent. There is no resolution setting: each model sizes images itself.
 
 ### RTSValue
 

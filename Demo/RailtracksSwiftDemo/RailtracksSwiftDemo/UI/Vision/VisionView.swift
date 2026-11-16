@@ -18,9 +18,17 @@ struct VisionView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Pick a photo, then Run to get a summary from Gemini.")
+            Text("Pick a photo and a model, then Run to get a summary.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Picker("Model", selection: $viewModel.model) {
+                ForEach(VisionViewModel.Model.allCases) { model in
+                    Text(model.rawValue).tag(model)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(viewModel.isRunning)
 
             PhotosPicker(selection: $pickerItem, matching: .images) {
                 Text("Pick a Photo")
@@ -69,7 +77,7 @@ struct VisionView: View {
             }
         }
         .sheet(isPresented: $viewModel.isShowingKeyPrompt) {
-            APIKeySetupView(provider: .gemini, isUpdate: false) {
+            APIKeySetupView(provider: viewModel.model.keyProvider ?? .gemini, isUpdate: false) {
                 viewModel.isShowingKeyPrompt = false
                 viewModel.startPrompt()
             }

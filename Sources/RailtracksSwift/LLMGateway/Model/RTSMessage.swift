@@ -132,6 +132,10 @@ extension RTSMessage {
     /// run-report schema (`{modality: "image", type, info}`); the base64 bytes are dropped at the
     /// trace boundary and never stored here.
     public struct ImageContent: Sendable, Codable {
+        /// An image sent inline, as bytes rather than a URL: `data_uri` with a redacted `info`.
+        /// Every provider path sends images this way, so this is what every message records.
+        static let redactedInline = ImageContent(type: "data_uri", info: "...")
+        
         /// Source kind: `"local"`, `"url"`, or `"data_uri"`.
         public let type: String
         /// Source reference: a file path / URL, or `"..."` for redacted in-memory data.
@@ -239,7 +243,7 @@ private extension Message.ImageContent {
     var toRTSImageContent: RTSMessage.ImageContent {
         // base64 is dropped at the trace boundary; images are embedded as data URIs at send time,
         // so at the message level they are always `data_uri` with a redacted `info`.
-        RTSMessage.ImageContent(type: "data_uri", info: "...")
+        RTSMessage.ImageContent.redactedInline
     }
 }
 

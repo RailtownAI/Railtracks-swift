@@ -7,6 +7,7 @@
 
 import Foundation
 import FoundationModels
+import Synchronization
 
 /// Wraps `LanguageModelSession` and exposes the subset of its API that
 /// `RTSLLMSession` needs, mirroring the role `ChatSession` plays for
@@ -24,7 +25,7 @@ struct AppleAIResponse {
 }
 
 @available(macOS 26, iOS 26, *)
-final class AppleAISession: @unchecked Sendable {
+final class AppleAISession: Sendable {
     /// Builds a `LanguageModelSession` from optional instructions and the bridged tools.
     ///
     /// The one thing that differs between `.appleAI` (the system model) and `.foundationModel`
@@ -35,22 +36,40 @@ final class AppleAISession: @unchecked Sendable {
         _ tools: [any Tool]
     ) -> LanguageModelSession
 
-    private var session: LanguageModelSession
+    /// What changes after `init`: the current session and the messages recorded so far.
+    /// `setInstruction` replaces both at once, so they share one lock.
+    private struct State {
+        var session: LanguageModelSession
+        var messages: [RTSMessage] = []
+    }
+
+    private let state: Mutex<State>
     private let sessionTools: [any Tool]
     private let outputSchema: GenerationSchema?
     private let makeSession: MakeSession
-    private var _messages: [RTSMessage] = []
-    private let lock = NSLock()
+    /// Whether the model takes image input. Read once at build, because a `LanguageModelSession`
+    /// does not expose its model. A plain `Bool`, so this OS 26 class can hold it.
+    private let supportsVision: Bool
+    /// The agent's name, for log messages.
+    private let agentName: String
+    /// The provider's description, naming the model in errors and log messages.
+    private let modelDescription: String
 
     private init(
         tools: [any Tool],
         outputSchema: GenerationSchema?,
-        makeSession: @escaping MakeSession
+        makeSession: @escaping MakeSession,
+        supportsVision: Bool,
+        agentName: String,
+        modelDescription: String
     ) {
         self.sessionTools = tools
         self.outputSchema = outputSchema
         self.makeSession = makeSession
-        self.session = makeSession(nil, tools)
+        self.supportsVision = supportsVision
+        self.agentName = agentName
+        self.modelDescription = modelDescription
+        self.state = Mutex(State(session: makeSession(nil, tools)))
     }
 
     /// Applies a system instruction by recreating the session and capturing
@@ -58,14 +77,131 @@ final class AppleAISession: @unchecked Sendable {
     func setInstruction(_ instruction: String) {
         let newSession = makeSession(instruction, sessionTools)
         let newMessages = newSession.transcript.compactMap { $0.toRTSMessage() }
-        lock.withLock {
-            session = newSession
-            _messages = newMessages
+        state.withLock { state in
+            state.session = newSession
+            state.messages = newMessages
         }
     }
 
-    func send(_ prompt: String) async throws -> AppleAIResponse {
-        let currentSession = lock.withLock { session }
+    /// Sends `prompt`, with `images` attached after its text where the platform and model allow.
+    ///
+    /// Without images the `String` overloads of `respond` are used, exactly as before image support.
+    /// Below OS 27 images are dropped with a warning; on a model without vision they fail with
+    /// `RTSError.invalidInvocation`, and undecodable ones with `RTSError.decodingFailed`, both before
+    /// anything is sent. Those two failures still record the prompt, images included, as a failed
+    /// `respond` does. See `RTSAppleAIImageDelivery`.
+    func send(_ prompt: String, images: [RTSImage] = []) async throws -> AppleAIResponse {
+        let unsentPrompt = RTSMessage.Content.sentPrompt(prompt, attachedImageCount: images.count)
+        let delivery = try recordingOnFailure(unsentPrompt) {
+            try RTSAppleAIImageDelivery.decide(
+                imageCount: images.count,
+                platformSupportsImages: RTSAppleAIImageDelivery.platformSupportsImages,
+                modelSupportsVision: supportsVision,
+                modelDescription: modelDescription
+            )
+        }
+        switch delivery {
+        case .textOnly:
+            break
+        case .dropped:
+            // OS26-FLOOR: below OS 27 Foundation Models has no image input.
+            log.warning(
+                """
+                ⚠️ [\(agentName)] \(modelDescription): image input needs macOS 27 / iOS 27; \
+                ignoring \(images.count) image input(s).
+                """
+            )
+        case .attached:
+            // XCODE26-SDK: `Attachment` and `respond(to: Prompt)` with one need the OS 27 SDK
+            // (Xcode 27, Swift 6.4). `.attached` is only decided when both are present.
+            #if compiler(>=6.4)
+            if #available(macOS 27, iOS 27, *) {
+                let attachments = try recordingOnFailure(unsentPrompt) {
+                    try images.enumerated().map { index, image in
+                        try image.foundationModelsAttachment(index: index)
+                    }
+                }
+                let promptWithImages = Prompt {
+                    prompt
+                    attachments
+                }
+                return try await respond(
+                    recordingAs: .sentPrompt(prompt, attachedImageCount: attachments.count),
+                    text: { session in
+                        try await session.respond(to: promptWithImages)
+                    },
+                    structured: { session, schema in
+                        try await session.respond(to: promptWithImages, schema: schema)
+                    }
+                )
+            }
+            #endif
+        }
+        return try await respond(
+            recordingAs: .sentPrompt(prompt, attachedImageCount: 0),
+            text: { session in
+                try await session.respond(to: prompt)
+            },
+            structured: { session, schema in
+                try await session.respond(to: prompt, schema: schema)
+            }
+        )
+    }
+
+    /// Runs `prepare`. If it throws, records `unsentPrompt` as the user message, then rethrows.
+    ///
+    /// For the steps of a send that can fail before `respond`: the vision check and the image
+    /// decode. Recording the prompt makes them report like a failed `respond`, whose prompt
+    /// `recordFailedSend` records. Without it, whether the failure reached `llm.failure` would
+    /// depend on whether the agent's system message was already in the log, since `llm.failure`
+    /// is only reported for a session that recorded a message.
+    private func recordingOnFailure<Value>(
+        _ unsentPrompt: RTSMessage.Content,
+        _ prepare: () throws -> Value
+    ) throws -> Value {
+        do {
+            return try prepare()
+        } catch {
+            let message = RTSMessage(
+                id: UUID(),
+                role: .user,
+                content: unsentPrompt,
+                timestamp: Date(),
+                metadata: nil,
+                runID: nil
+            )
+            state.withLock { state in
+                state.messages.append(message)
+            }
+            throw error
+        }
+    }
+
+    /// The plain `respond` on a session, with the prompt the caller chose.
+    private typealias RespondText = (
+        LanguageModelSession
+    ) async throws -> LanguageModelSession.Response<String>
+
+    /// The structured-output `respond` on a session, with the prompt the caller chose.
+    private typealias RespondStructured = (
+        LanguageModelSession,
+        GenerationSchema
+    ) async throws -> LanguageModelSession.Response<GeneratedContent>
+
+    /// Runs one `respond` on the current session and records what it left behind: the new transcript
+    /// entries on success, or what was sent on failure.
+    ///
+    /// The two closures are the plain and the structured-output `respond`, so the prompt they send
+    /// (text only, or text with attachments) is chosen by the caller. `recordingAs` is that prompt
+    /// as a message's content, recorded when a failed `respond` rolls back the transcript.
+    private func respond(
+        recordingAs sentPrompt: RTSMessage.Content,
+        text respondText: RespondText,
+        structured respondStructured: RespondStructured
+    ) async throws -> AppleAIResponse {
+        let currentSession = state.withLock { state in
+            state.session
+        }
         let beforeCount = currentSession.transcript.count
         let usageBefore = Self.sessionTokenTotals(of: currentSession)
         let startedAt = Date()
@@ -73,7 +209,7 @@ final class AppleAISession: @unchecked Sendable {
         let metrics: AppleAIResponse
         do {
             if let schema = outputSchema {
-                let response = try await currentSession.respond(to: prompt, schema: schema)
+                let response = try await respondStructured(currentSession, schema)
                 responseText = response.content.jsonString
                 metrics = responseMetrics(
                     from: response,
@@ -85,7 +221,7 @@ final class AppleAISession: @unchecked Sendable {
                     )
                 )
             } else {
-                let response = try await currentSession.respond(to: prompt)
+                let response = try await respondText(currentSession)
                 responseText = response.content
                 metrics = responseMetrics(
                     from: response,
@@ -99,7 +235,7 @@ final class AppleAISession: @unchecked Sendable {
             }
         } catch {
             recordFailedSend(
-                prompt: prompt,
+                prompt: sentPrompt,
                 startedAt: startedAt,
                 session: currentSession,
                 transcriptCountBefore: beforeCount,
@@ -115,8 +251,8 @@ final class AppleAISession: @unchecked Sendable {
         log.debug(
             "🍎 send: \(rawCount) new transcript entries, \(newMessages.count) converted to RTSMessage"
         )
-        lock.withLock {
-            _messages.append(contentsOf: newMessages)
+        state.withLock { state in
+            state.messages.append(contentsOf: newMessages)
         }
         return metrics
     }
@@ -134,7 +270,7 @@ final class AppleAISession: @unchecked Sendable {
     /// The session's usage does keep the failed call's tokens. Python's `llm.failure` has no
     /// token fields, so they are only logged.
     private func recordFailedSend(
-        prompt: String,
+        prompt: RTSMessage.Content,
         startedAt: Date,
         session: LanguageModelSession,
         transcriptCountBefore: Int,
@@ -154,7 +290,7 @@ final class AppleAISession: @unchecked Sendable {
             let sentPrompt = RTSMessage(
                 id: UUID(),
                 role: .user,
-                content: .text(prompt),
+                content: prompt,
                 timestamp: startedAt,
                 metadata: nil,
                 runID: nil
@@ -166,8 +302,8 @@ final class AppleAISession: @unchecked Sendable {
             let used = TokenTotals(input: after.input - before.input, output: after.output - before.output)
             log.debug("🍎 the failed respond used \(used); not reported, llm.failure has no token fields")
         }
-        lock.withLock {
-            _messages.append(contentsOf: recorded)
+        state.withLock { state in
+            state.messages.append(contentsOf: recorded)
         }
     }
 
@@ -296,7 +432,9 @@ final class AppleAISession: @unchecked Sendable {
     }
 
     func messages() -> [RTSMessage] {
-        lock.withLock { _messages }
+        state.withLock { state in
+            state.messages
+        }
     }
 
     /// Builds an `AppleAISession` from `agentNode.tools`, wrapping each tool in its
@@ -305,13 +443,15 @@ final class AppleAISession: @unchecked Sendable {
     /// Returns non-conforming tools separately so the caller can warn about them.
     ///
     /// `sessionFactory` is `nil` for the on-device system model; `.foundationModel` passes one
-    /// built from its `LanguageModel`.
+    /// built from its `LanguageModel`. `supportsVision` is that model's `.vision` capability, read
+    /// by the caller because the session cannot report its model.
     static func build(
         fromAgentTools tools: [any RTSToolNode],
         invoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode,
         makeSubSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
-        sessionFactory: MakeSession? = nil
+        sessionFactory: MakeSession? = nil,
+        supportsVision: Bool
     ) throws -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
         var unsupportedTools: [any RTSToolNode] = []
@@ -369,9 +509,25 @@ final class AppleAISession: @unchecked Sendable {
             outputSchema: schema,
             makeSession: sessionFactory ?? { instructions, tools in
                 makeSystemSession(instruction: instructions, tools: tools)
-            }
+            },
+            supportsVision: supportsVision,
+            agentName: createdBy.agentName,
+            modelDescription: createdBy.llmProvider.description
         )
         return (session, unsupportedTools)
+    }
+
+    /// Whether the on-device system model takes image input. `false` below OS 27, where nothing
+    /// can be attached.
+    static var systemModelSupportsVision: Bool {
+        // XCODE26-SDK: `capabilities` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+        #if compiler(>=6.4)
+        // OS26-FLOOR: `SystemLanguageModel.capabilities` is OS 27 API.
+        if #available(macOS 27, iOS 27, *) {
+            return RTSAppleAIImageDelivery.supportsVision(SystemLanguageModel.default.capabilities)
+        }
+        #endif
+        return false
     }
 
     /// A session on the on-device system model.
@@ -409,7 +565,7 @@ extension Transcript.Entry {
             return RTSMessage(
                 id: UUID(),
                 role: .user,
-                content: .text(joinedText(of: prompt.segments)),
+                content: promptContent(of: prompt.segments),
                 timestamp: timestamp,
                 metadata: nil,
                 runID: nil
@@ -502,9 +658,69 @@ func joinedText(of segments: [Transcript.Segment]) -> String {
             case .structure(let structuredSegment):
                 return structuredSegment.content.jsonString
             default:
-                // `.attachment` (OS 27): an image has no text form.
+                // `.attachment` (OS 27): an image has no text form. A prompt's attachments are
+                // recorded as image parts by `promptContent(of:)`.
                 return nil
             }
         }
         .joined(separator: " ")
+}
+
+/// A prompt entry's content: plain text, as before image support, unless it holds an attachment,
+/// in which case it is `.parts` in segment order, each image a redacted inline descriptor.
+@available(macOS 26, iOS 26, *)
+func promptContent(of segments: [Transcript.Segment]) -> RTSMessage.Content {
+    // XCODE26-SDK: `.attachment` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+    #if compiler(>=6.4)
+    // OS26-FLOOR: attachment segments are OS 27 API, and below it a prompt never holds one.
+    if #available(macOS 27, iOS 27, *), let parts = attachmentParts(of: segments) {
+        return .parts(parts)
+    }
+    #endif
+    return .text(joinedText(of: segments))
+}
+
+// XCODE26-SDK: as above.
+#if compiler(>=6.4)
+/// The segments as message parts, or `nil` when none is an attachment.
+///
+/// Only the segment's case is read, never its pixels, so no image data can reach the trace. Images
+/// are sent inline, so each is the same `data_uri` descriptor the Conduit path records.
+@available(macOS 27, iOS 27, *)
+private func attachmentParts(of segments: [Transcript.Segment]) -> [RTSMessage.ContentPart]? {
+    var parts: [RTSMessage.ContentPart] = []
+    var hasAttachment = false
+    for segment in segments {
+        switch segment {
+        case .text(let textSegment):
+            parts.append(.text(textSegment.content))
+        case .structure(let structuredSegment):
+            parts.append(.text(structuredSegment.content.jsonString))
+        case .attachment:
+            hasAttachment = true
+            parts.append(.image(.redactedInline))
+        default:
+            continue
+        }
+    }
+    return hasAttachment ? parts : nil
+}
+#endif
+
+extension RTSMessage.Content {
+    /// What a send put in its prompt: the text, then one redacted inline image part per attached
+    /// image. Plain text when nothing was attached, matching what the transcript records.
+    ///
+    /// Recorded when a failed `respond` rolls back the transcript, so the failure's `llm.*` events
+    /// still show that images were sent.
+    static func sentPrompt(_ text: String, attachedImageCount: Int) -> RTSMessage.Content {
+        guard attachedImageCount > 0 else {
+            return .text(text)
+        }
+        let images = Array(
+            repeating: RTSMessage.ContentPart.image(.redactedInline),
+            count: attachedImageCount
+        )
+        return .parts([.text(text)] + images)
+    }
 }
