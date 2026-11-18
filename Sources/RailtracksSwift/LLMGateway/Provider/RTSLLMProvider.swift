@@ -176,7 +176,7 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     /// catch it: grant it to the team, enable it on the App ID, and add it to the entitlements file.
     ///
     /// No cost to the developer: each user has a daily limit, counted against their iCloud account
-    /// and raised by iCloud+. See `docs/private-cloud-compute.md`.
+    /// and raised by iCloud+.
     case privateCloudCompute(options: RTSPrivateCloudComputeOptions = .init())
     /// Any FoundationModels `LanguageModel` — e.g. Claude via `ClaudeForFoundationModels` —
     /// run through `LanguageModelSession`. Requires macOS 27 / iOS 27 at run time.

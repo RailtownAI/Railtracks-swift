@@ -4,7 +4,7 @@
 //
 //  `.privateCloudCompute`: Apple's server model behind the Foundation Models API. Nothing here
 //  needs the PCC entitlement or makes a network call — identity, pricing, events and concurrency
-//  are pure, and building a session only constructs it. See docs/private-cloud-compute.md.
+//  are pure, and building a session only constructs it.
 //
 
 import Testing

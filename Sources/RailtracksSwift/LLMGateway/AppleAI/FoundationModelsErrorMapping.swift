@@ -13,8 +13,7 @@ import FoundationModels
 ///
 /// Two today, both Private Cloud Compute: the user's daily limit (`quotaLimitReached`, with the
 /// reset date) and the app's missing entitlement (`missingEntitlement`). Anything else has no
-/// `RTSError` counterpart, and the caller rethrows it as it is. See
-/// `docs/private-cloud-compute.md`.
+/// `RTSError` counterpart, and the caller rethrows it as it is.
 enum FoundationModelsErrorMapping {
 
     static let privateCloudComputeEntitlement = "com.apple.developer.private-cloud-compute"
