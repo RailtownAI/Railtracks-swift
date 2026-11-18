@@ -29,10 +29,9 @@ final class RTSSignpostWriter: Sendable {
         let runScope: UUID?
         /// The calling invocation's id, or `nil` at the flow root.
         var parentNodeID: String?
+        /// Also the id of the trace's edge into the node, which its edge Tool I/O rows are named
+        /// after, as the collector names the edge.
         var runID: RTSRunID?
-        /// The id of the edge into the node, which its Tool I/O rows are named after: the run id
-        /// for the root, which is the trace's root edge id, and a fresh one otherwise.
-        var edgeID: UUID?
         /// `node.invocation`'s `kwargs`, then each input guard transform in turn: the input the
         /// node's body received.
         var input: RTSInput = [:]
@@ -150,7 +149,6 @@ final class RTSSignpostWriter: Sendable {
             }
             node.parentNodeID = parentNodeID
             node.runID = runID
-            node.edgeID = parentNodeID == nil ? runID : UUID()
             node.input = invocation.kwargs
             state.nodes[nodeID] = node
             if parentNodeID == nil {
@@ -276,7 +274,7 @@ final class RTSSignpostWriter: Sendable {
             log.warning("⚠️🚧 node.destruction for \(creation.name) with no executing signal before it")
         }
 
-        guard let edgeID = finished.node.edgeID, let run = finished.run else {
+        guard let run = finished.run else {
             log.warning("⚠️🚧 node.destruction for \(creation.name) outside a run the writer saw begin")
             return
         }
@@ -289,7 +287,8 @@ final class RTSSignpostWriter: Sendable {
         )
         emitEdgeIO(
             point,
-            edgeID: edgeID,
+            // The trace's edge into the node is named after its run id.
+            edgeID: runID,
             input: finished.node.input,
             output: output,
             failed: destruction.failure != nil,

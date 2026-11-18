@@ -157,6 +157,12 @@ private final class RecordingPointSignposts: RTSSignpostEmitting, Sendable {
 
     private let records = Mutex<[String]>([])
     private let graphNodes = Mutex<[GraphNode]>([])
+    private let edgeRowIDs = Mutex<Set<String>>([])
+
+    /// The edge ids the edge Tool I/O rows are named after: each row's message id starts with one.
+    var edgeIDs: Set<String> {
+        edgeRowIDs.withLock { $0 }
+    }
     private let treeNodeCount = Mutex(0)
 
     func emitNodeStart(
@@ -263,6 +269,10 @@ private final class RecordingPointSignposts: RTSSignpostEmitting, Sendable {
         hasInputGuardrail: Bool,
         hasOutputGuardrail: Bool
     ) {
+        if source == "edge" {
+            let edgeID = String(messageID.prefix(UUID().uuidString.count))
+            edgeRowIDs.withLock { _ = $0.insert(edgeID) }
+        }
         record(
             "io \(toolName) \(displayRole) node=\(nodeID) message=\(messageID) source=\(source)"
                 + " direction=\(direction) role=\(role) model=\(model) provider=\(provider)"
@@ -874,6 +884,43 @@ extension RailtracksSwiftTestSuite {
                 .appendingPathComponent("trace-golden-signposts.txt")
             try lines.write(to: saved, atomically: true, encoding: .utf8)
             Issue.record("signposts differ from their golden; actual saved to \(saved.path)")
+        }
+
+        /// The edge Tool I/O rows are named after the trace's own edge ids, so a row can be found
+        /// in the trace: the root's edge, and every edge below it.
+        @Test("edge Tool I/O rows carry the trace's edge ids")
+        func edgeRowsMatchTraceEdges() async throws {
+            let lookup = echoTool("Lookup")
+            let researcher = RTSAgent(
+                llmProvider: toolCallingProvider,
+                name: "Researcher",
+                tools: [lookup]
+            )
+            let planner = ScriptedOrchestrator(nodeName: "Planner") { _, context in
+                let draft = try await context.call(researcher, prompt: "Research trains")
+                return ["summary": .string(draft)]
+            }
+            let script = ScriptedReply(
+                toolCalls: [ScriptedToolCall(tool: lookup, input: ["query": .string("trains")])],
+                reply: "trains run on rails"
+            )
+            let signposts = RecordingPointSignposts()
+            let flow = RTSFlow(title: "Golden Edge Rows", signpostEmitter: signposts)
+
+            _ = try await flow.run(
+                planner,
+                input: ["topic": .string("trains")],
+                makeSession: scriptedSessions(["Researcher": script])
+            )
+            try await signposts.settled()
+
+            let trace = try await writtenTrace(of: flow)
+            let graph = try JSONDecoder().decode(RTSFlowGraph.self, from: trace)
+            let run = try #require(graph.runs.first)
+            let traceEdgeIDs = Set(run.edges.map(\.identifier))
+            // Planner, Researcher and Lookup: one edge each.
+            #expect(traceEdgeIDs.count == 3)
+            #expect(signposts.edgeIDs == traceEdgeIDs)
         }
 
         /// A failed session build exits before the root exists. The next run on the flow still

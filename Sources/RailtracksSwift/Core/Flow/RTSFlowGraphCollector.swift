@@ -29,8 +29,9 @@ actor RTSFlowGraphCollector {
         /// Reserved when `node.creation` arrives, so the step order is the order nodes were created.
         let creationStepIndex: Int
         var parentNodeID: UUID?
+        /// Also the id of the edge into the node, as Python names an edge after its call's request
+        /// id; the root's is the trace's `run_id`. The signpost writer names Tool I/O rows the same.
         var runID: RTSRunID?
-        var edgeID: UUID?
         /// Where the edge's creation record sits in `edgeEvents`, so an input guard transform can
         /// update its input directly.
         var edgeCreationIndex: Int?
@@ -221,11 +222,10 @@ actor RTSFlowGraphCollector {
             timestamp: node.creation.timestamp,
             event: stampEvent
         )
-        // The root edge's id is the root's run id, which is the trace's `run_id`.
-        let edgeID = parentNodeID == nil ? runID : UUID()
+        // The edge into the node is named after its run id; the root's is the trace's `run_id`.
+        let edgeID = runID
         node.parentNodeID = parentNodeID
         node.runID = runID
-        node.edgeID = edgeID
         node.creationStamp = creationStamp
         node.input = invocation.kwargs
         // `processEdgeEvent` appends the creation record below without suspending first, so it
@@ -306,7 +306,6 @@ actor RTSFlowGraphCollector {
         guard case .node(let nodeIDText) = destruction.parent,
               let nodeID = UUID(uuidString: nodeIDText),
               let node = pendingNodes.removeValue(forKey: nodeID),
-              let edgeID = node.edgeID,
               let runID = node.runID else {
             log.warning("⚠️🎁 node.destruction for a node the collector never saw invoked")
             return
@@ -327,7 +326,8 @@ actor RTSFlowGraphCollector {
 
         await processEdgeEvent(
             RTSEdgeEvent(
-                id: edgeID,
+                // The edge into the node is named after its run id.
+                id: runID,
                 runID: nil,
                 stamp: completionStamp,
                 nodeType: node.creation.nodeType,
