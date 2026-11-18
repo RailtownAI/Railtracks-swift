@@ -580,7 +580,7 @@ struct PrivateCloudComputeQuotaMappingTests {
         }
         let agent = RTSAgent(llmProvider: .privateCloudCompute(), name: "PCC Entitlement Probe")
         let gateway = RTSLLMGateway(apiKeys: [:])
-        let invoker = RTSNodeInvoker(sessionID: UUID())
+        let invoker = RTSNodeInvoker()
         let session = try gateway.session(invoker: invoker, agentNode: agent)
 
         do {
