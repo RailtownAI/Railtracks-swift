@@ -6,6 +6,7 @@
 import Combine
 import Testing
 import Foundation
+import Synchronization
 @testable import RailtracksSwift
 
 /// Records the interval calls `RTSSignpostWriter` makes; point events are ignored.
@@ -236,6 +237,39 @@ extension RailtracksSwiftTestSuite {
             }
         }
 
+        /// A flow run from inside another flow's node is its own root: it doesn't inherit the
+        /// calling node as its parent, so its run completes and its nodes get their points.
+        @Test("a flow run inside another flow's node is its own root")
+        func nestedFlowRunIsItsOwnRoot() async throws {
+            let innerEmitter = RecordingSignpostEmitter()
+            let innerFlow = RTSFlow(title: "SignpostInnerFlow", signpostEmitter: innerEmitter)
+            let innerChild = StubOrchestrator(nodeName: "InnerChild") { _, _ in
+                ["result": .string("inner child")]
+            }
+            let innerRoot = StubOrchestrator(nodeName: "InnerRoot") { _, context in
+                try await context.call(innerChild, input: [:])
+            }
+            let gateway = RTSLLMGateway(apiKeys: [:])
+            let outer = StubOrchestrator(nodeName: "Outer") { _, _ in
+                try await innerFlow.run(innerRoot, input: [:], gateway: gateway)
+            }
+            let outerFlow = RTSFlow(title: "SignpostOuterFlow", emitsSignposts: false)
+
+            // Without the fix the inner run waits forever for a root, and that wait ignores
+            // cancellation, so a time limit can't end it: the test fails at the deadline instead.
+            let output = try await resultWithin(.seconds(10)) {
+                try await outerFlow.run(outer, input: [:], gateway: gateway)
+            }
+
+            #expect(output == ["result": .string("inner child")])
+            let root = try #require(innerEmitter.start(named: "InnerRoot"))
+            let child = try #require(innerEmitter.start(named: "InnerChild"))
+            #expect(root.parentNodeID == nil)
+            #expect(child.parentNodeID == root.nodeID)
+            #expect(innerEmitter.graphNodeNames == ["InnerRoot", "InnerChild"])
+            expectEveryStartEnded(innerEmitter)
+        }
+
         @Test("a tool called from an agent reports the agent as its parent")
         func agentCallsTool() async throws {
             let emitter = RecordingSignpostEmitter()
@@ -363,6 +397,29 @@ extension RailtracksSwiftTestSuite {
                 message: { [] },                agentName: "Agent"
             )
         }
+
+        /// `operation`'s result, or a thrown ``DeadlinePassed`` if it hasn't finished by `deadline`.
+        /// The operation runs in an unstructured task, so one that never ends is left behind
+        /// rather than holding the test.
+        private func resultWithin<Value: Sendable>(
+            _ deadline: Duration,
+            _ operation: @escaping @Sendable () async throws -> Value
+        ) async throws -> Value {
+            let outcome = Mutex<CheckedContinuation<Value, Error>?>(nil)
+            return try await withCheckedThrowingContinuation { continuation in
+                outcome.withLock { $0 = continuation }
+                Task {
+                    let result = await Result { try await operation() }
+                    outcome.withLock { $0.take() }?.resume(with: result)
+                }
+                Task {
+                    try? await Task.sleep(for: deadline)
+                    outcome.withLock { $0.take() }?.resume(throwing: DeadlinePassed())
+                }
+            }
+        }
+
+        private struct DeadlinePassed: Error {}
 
         private func expectEveryStartEnded(_ emitter: RecordingSignpostEmitter) {
             let starts = emitter.starts

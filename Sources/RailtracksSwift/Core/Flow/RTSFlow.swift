@@ -384,8 +384,12 @@ public class RTSFlow: @unchecked Sendable {
         do {
             // Every event of this run is emitted inside this binding; see `currentRunScope`.
             let output = try await RTSEventEmitter.$currentRunScope.withValue(runScope) { [input] in
-                try await withRunStops(settings, stop: nodeInvoker.runStop) {
-                    try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+                // A run started from inside another flow's node is its own root, not that
+                // node's child: inheriting it as a parent, the run would never see its root.
+                try await RTSNodeInvoker.$currentInvocationID.withValue(nil) {
+                    try await withRunStops(settings, stop: nodeInvoker.runStop) {
+                        try await nodeInvoker.invokeAgent(agent, input: input, session: session)
+                    }
                 }
             }
             guard case let .string(result) = output[agent.outputKeyResult] else {
@@ -449,8 +453,11 @@ public class RTSFlow: @unchecked Sendable {
         do {
             // Every event of this run is emitted inside this binding; see `currentRunScope`.
             let output = try await RTSEventEmitter.$currentRunScope.withValue(runScope) {
-                try await withRunStops(settings, stop: nodeInvoker.runStop) {
-                    try await nodeInvoker.invokeFunction(node, input: input, context: context)
+                // Its own root, as in `run(agent:…)`.
+                try await RTSNodeInvoker.$currentInvocationID.withValue(nil) {
+                    try await withRunStops(settings, stop: nodeInvoker.runStop) {
+                        try await nodeInvoker.invokeFunction(node, input: input, context: context)
+                    }
                 }
             }
             outcome = .success(output)
