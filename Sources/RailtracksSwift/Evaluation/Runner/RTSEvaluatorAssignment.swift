@@ -6,7 +6,7 @@
 import Foundation
 
 /// Assigns one evaluator to a scope of agents, for `RTSEvaluation.evaluate(data:assignments:)` — so
-/// different evaluators can run over different agents. See docs/evaluator-agent-targeting.md.
+/// different evaluators can run over different agents.
 ///
 /// Targeting is by agent *name* (matching `RTSAgentDataPoint.agentName`), and:
 /// - `agents == nil` runs the evaluator on **every** agent present in the data.

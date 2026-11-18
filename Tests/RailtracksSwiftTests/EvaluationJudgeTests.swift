@@ -108,6 +108,23 @@ extension RailtracksSwiftTestSuite {
             }
         }
 
+        // MARK: - Judge flow
+
+        /// One flow per judge call (metrics × datapoints × agents) would flood Instruments, so the
+        /// judge's flow never writes signposts, whether or not it saves its trace.
+        @Test("judge flow writes no signposts", arguments: [true, false])
+        func judgeFlowWritesNoSignposts(savesTrace: Bool) {
+            let flow = RTSJudgeEvaluator.judgeFlow(savesTrace: savesTrace)
+
+            #expect(!flow.writesSignposts)
+            #expect(flow.savesTrace == savesTrace)
+        }
+
+        @Test("a default flow writes signposts, so the judge's flag is what turns them off")
+        func defaultFlowWritesSignposts() {
+            #expect(RTSFlow(title: "Default").writesSignposts)
+        }
+
         // MARK: - Aggregation
 
         @Test("judge: one categorical aggregate per metric with correct counts + extremes")

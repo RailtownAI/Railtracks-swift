@@ -450,6 +450,6 @@ extension RailtracksSwiftTestSuite {
         }
 
         // The trace is now built from these events, so `emitsEvents: false` writes no trace:
-        // `TraceGoldenTests.noTraceWithoutEvents`. See docs/trace-from-events.md.
+        // `TraceGoldenTests.noTraceWithoutEvents`.
     }
 }

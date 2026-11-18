@@ -57,6 +57,11 @@ public init(
   be plain `Sendable` instead of `@unchecked Sendable`. The package's minimum, macOS 15 / iOS 18, is
   `Mutex`'s. Use `NSLock` only for a strong reason, such as a lock that guards an operation rather
   than a value, and say so in a comment. Older `NSLock` uses are being moved over, not copied.
+- **Only reference files that are in the repo.** Doc comments, code comments, test headers,
+  `AGENTS.md` and the README must not point to local notes or other untracked files (for
+  example a design doc under `docs/` that isn't committed). A reader without that file hits a
+  dead end. Write the point inline instead, or drop the pointer if the surrounding text
+  already makes it.
 - **Modifier order.** When any declaration carries multiple modifiers — properties, computed
   properties, subscripts, methods, or types — order them by category:
   1. **Access control** — `open`, `public`, `internal`, `fileprivate`, `private`
@@ -102,9 +107,9 @@ RailtracksSwift is a Swift 6 library for orchestrating LLM agent pipelines. It w
 │  Core                                                       │
 │                                                             │
 │  ┌──────────────────┐   ┌────────────────────────────────┐ │
-│  │  RTSNodeInvoker  │   │    RTSFlowGraphCollector       │ │
-│  │  run nodes & emit│   │    builds trace & signposts    │ │
-│  │  events          │   │    from observability events   │ │
+│  │  RTSNodeInvoker  │   │ RTSFlowGraphCollector: trace   │ │
+│  │  run nodes & emit│   │ RTSSignpostWriter: signposts   │ │
+│  │  events          │   │ both from observability events │ │
 │  └──────────────────┘   └──────────────┬───────────────┬─┘ │
 │  ┌──────────────────┐                  │               │   │
 │  │ RTSEventEmitter  │           JSON file         Instruments
@@ -156,13 +161,29 @@ records at `node.invocation`, finish records at `node.destruction`, `guard_detai
 `middleware.guard.*` events and messages from `llm.*`, and numbers the steps as nodes are created and
 destroyed. When the root's `node.destruction` arrives it writes the JSON file to the app's Documents
 directory and signals completion, which `RTSFlow.run` awaits before returning. A run builds one only
-when its flow emits events and saves its trace. See `docs/trace-from-events.md`.
+when its flow emits events and saves its trace.
+
+`RTSSignpostWriter` (one per flow, built and subscribed in `RTSFlow.init`) builds the Instruments
+signposts from the same internal stream, independently of the trace, and passes them to the flow's
+`RTSSignpostEmitting` (by default `RTSSignpostEmitter`, through RailtracksInstrumentationKit). It
+keeps a table per node, filled from `node.creation` and `node.invocation`. Each node's parent,
+`runID`, input (after guard transforms) and messages come from an `RTSNodeFold`, the same value
+type the collector's table embeds, so the trace and Instruments read a node the same way; a change
+to how either reads a node's events goes there. From the table it emits:
+- the graph point at `node.invocation`;
+- the Node Runs interval's begin at the executing signal;
+- at `node.destruction`, the interval's end first, then the edge I/O rows, then the tree point and
+  message I/O rows from a detached task.
+
+`os_signpost` stamps an interval when begin or end is called, so the bars run slightly late, by the
+delivery delay: measured p99 duration error is under 1 ms. Nothing in `RTSNodeInvoker` or the
+collector calls the emitter.
 
 ### Key design decisions
 
-**`runID` as the tracing thread** — Every node invocation receives a unique `runID`. The messages its LLM calls produce are stamped with it, which is how the invoker picks that invocation's messages out of its session for the `llm.*` events, and `node.invocation` carries it as the Swift-only `run_id`. The root's is the trace's `run_id` and its root edge ID.
+**`runID` as the tracing thread** — Every node invocation receives a unique `runID`. The messages its LLM calls produce are stamped with it, which is how the invoker picks that invocation's messages out of its session for the `llm.*` events, and `node.invocation` carries it as the Swift-only `run_id`. It is also the id of the edge into the node, in the trace and in the signposts' Tool I/O rows, as Python names an edge after its call's request id. The root's is the trace's `run_id`.
 
-**Per-invocation node ids** — A node's *graph* identifier is minted per invocation (`invocationID` in `RTSNodeInvoker.invokeCore`), not per node instance, so a tool called N times yields N distinct node records and edges (matching the Python engine). Each invocation binds its `invocationID` on the `RTSNodeInvoker.currentInvocationID` `@TaskLocal` around its execution, so a child invocation reads it back as its edge `source` — propagating the parent link down through provider tool-calling code (Conduit's tool `TaskGroup`, Apple's `LanguageModelSession`) with no parameter threading. The instance `id` (`RTSNode.id`) is no longer used for tracing identity. See `docs/duplicate-node-id.md`.
+**Per-invocation node ids** — A node's *graph* identifier is minted per invocation (`invocationID` in `RTSNodeInvoker.invokeCore`), not per node instance, so a tool called N times yields N distinct node records and edges (matching the Python engine). Each invocation binds its `invocationID` on the `RTSNodeInvoker.currentInvocationID` `@TaskLocal` around its execution, so a child invocation reads it back as its edge `source` — propagating the parent link down through provider tool-calling code (Conduit's tool `TaskGroup`, Apple's `LanguageModelSession`) with no parameter threading. `RTSFlow.run` binds it to `nil` around its root, so a flow run from inside another flow's node is its own root, not that node's child; inheriting a parent, its collector would never see a root and its run would hang. The instance `id` (`RTSNode.id`) is no longer used for tracing identity.
 
 **Events emitted unconditionally** — `RTSNodeInvoker` always emits a node's `node.destruction` — success or failure, with the failure details on failure — and re-throws the error after. This ensures the JSON trace is complete even for failed runs.
 
@@ -206,14 +227,15 @@ Per-agent input/output guardrails live in `Guardrails/` (abstraction + runner) a
 | Goal | What to implement |
 |---|---|
 | New LLM provider | New `RTSLLMSession.build` variant in `LLMGateway/` + bridge if tools needed |
-| Third-party FoundationModels `LanguageModel` (e.g. Claude) | Nothing in the library — the app wraps it in `RTSFoundationLanguageModel` and uses `.foundationModel`. The library must **not** depend on a vendor package (it would force the package floor to OS 27). See `docs/foundation-models-provider.md` |
+| Third-party FoundationModels `LanguageModel` (e.g. Claude) | Nothing in the library — the app wraps it in `RTSFoundationLanguageModel` and uses `.foundationModel`. The library must **not** depend on a vendor package (it would force the package floor to OS 27). |
 | New tool | Conform to `RTSToolNode`; set `isRequired = true` if schema failure should be fatal |
 | Structured output | Set `outputSchema` on the agent; conversion failure is always fatal by design |
 | New guardrail | Conform to `RTSAgentInputGuardrail` / `RTSAgentOutputGuardrail` (or use the closure conformers); attach via `RTSAgent(inputGuardrails:outputGuardrails:)`. Prebuilt ones live in `Guardrails/Builtin/` |
-| New RAG vector store | Conform to `RTSRAGVectorStore`, including `documents(under:scope:)` — the orphan sweep's listing; match scope exactly. See `docs/rag-orphan-sweep.md` |
+| New RAG vector store | Conform to `RTSRAGVectorStore`, including `documents(under:scope:)` — the orphan sweep's listing; match scope exactly. |
 | New RAG loader | Return an `RTSRAGDocumentStream`; pass `root:` (the path it was given) to opt in to the orphan sweep |
 | Consume observability events | Subscribe to `RTSFlow.eventPublisher` — it's multicast, so add as many subscribers as you like. The one exception is a second `RTSEventWriter`: it would append to the same `<session id>.jsonl` as the flow's built-in writer. To own the file yourself, pass `savesEvents: false`; to observe it, read `flow.eventWriter` |
-| Show a new event family in the flow-graph trace | Emit it through `RTSEventEmitter` inside the run, then translate it in `RTSFlowGraphCollector.process(_:)` into the node and edge records. Anything the trace needs that the wire format lacks goes on the event as an internal property, outside `encodePayload()`. See `docs/trace-from-events.md` |
+| Show a new event family in the flow-graph trace | Emit it through `RTSEventEmitter` inside the run, then translate it in `RTSFlowGraphCollector.process(_:)` into the node and edge records. Anything the trace needs that the wire format lacks goes on the event as an internal property, outside `encodePayload()`. |
+| Show a new event family in Instruments | Emit it through `RTSEventEmitter` inside the run, then handle it in `RTSSignpostWriter.write(_:)`, which calls `RTSSignpostEmitting`. |
 
 ### Observability events
 
@@ -244,7 +266,7 @@ success). Swift has no stack trace, so an `RTSError`'s call site stands in: `thr
 <file>:<line> in <function>` and one frame, or `""` and `[]` for other errors. `fatal` is always
 `false`. `invokeCore` builds one `RTSEventFailureDetails` from the node's final error and passes it
 to both events, so they agree. The trace's failed-edge `traceback` is the same text, read from
-`node.destruction`'s details. See `docs/node-failure-fields.md`.
+`node.destruction`'s details.
 
 **The emitter has two outputs.** The public stream, `eventPublisher`, carries the encoded
 envelopes, read by `RTSEventWriter` and apps. The internal stream,
@@ -267,20 +289,20 @@ keeps only its own run's events. What the trace needs beyond the wire is carried
 `.queued`, the executing signal into `.executing`, and `node.destruction` into the finished state.
 The destruction's internal `terminationReason` gives `.cancelled`, and its `exception_message`
 gives `.failed`'s text. It sees every run on the flow and needs no run-scope filter, since node ids
-are per invocation. See `docs/node-status-from-events.md`.
+are per invocation.
 
 **`emitsEvents` gates only the public stream.** The internal stream is fed whatever it says, so
 statuses never depend on it. With it off there are no envelopes and no event log, and `llm.*` is
 not rebuilt (that costs a pricing lookup per message), so a run builds no trace collector either,
 whatever `savesTrace` says. `savesTrace` decides whether a run builds a collector at all (none
-means no trace file, no collector signposts, and `outputFileURLPublisher` never emits). A known,
+means no trace file, and `outputFileURLPublisher` never emits). Signposts don't depend on it:
+`emitsSignposts` decides whether the flow builds a signpost writer, and with `emitsEvents` off there
+are none either way. `RTSJudgeEvaluator`'s per-call flows pass `emitsSignposts: false`. A known,
 accepted cost: with events off, `emit(_:)` still forwards *every* event to the internal stream,
 though without a collector only the mapper's three node events are read. If the per-event hop ever
 matters (`RTSJudgeEvaluator` runs many short flows), forward only those three when `!isEnabled`. A new
-event family that the trace or the statuses should show needs a translation in the collector or
-the mapper, not a new invoker subject.
-
-Design rationale, the Python mapping, and the verification runs live in `docs/observability-events.md`.
+event family that the trace, the statuses or Instruments should show needs a translation in the
+collector, the mapper or the signpost writer, not a new invoker subject.
 
 ### RAG / retrieval (`RailtracksSwiftRAG`)
 
@@ -327,14 +349,12 @@ default, `nil` for unbounded), checks `hasAvailableAssets` every 2 s while waiti
 `RTSRAGError.embeddingModelNotReady` when the timeout passes, leaving the download running. Later
 calls, from any embedder for that asset, join the same request (`RTSRAGAssetRequest`) for its first
 30 s, then ask again. `loadIfAvailable()` never downloads, and
-`assetsAvailable(revision:language:)` checks without loading. See `docs/apple-embedding-prepare.md`.
+`assetsAvailable(revision:language:)` checks without loading.
 
 Chunk size is capped in **characters** (`RTSRAGLimits.defaultMaxChunkCharacters`), not tokens. A
 chunker enforces that by construction, so oversized input is impossible rather than detected —
 which is what lets the port ship without a token counter, since nothing in Swift can count OpenAI
 tokens accurately (Conduit's `countTokens` is `text.count / 4`).
-
-Design, the Python mapping, and the two deliberate departures from it live in `docs/rag-port.md`.
 
 #### Spotlight path
 
@@ -357,8 +377,6 @@ is unchanged — `SpotlightSearchTool`, the one OS 27 API, was considered and no
   silently.
 - **Demo:** run it on `RailtracksSwiftDemoOS27`. Spotlight refuses the main target's bundle id with
   `CSIndexErrorDomain -1003`, persistently and for no stated reason.
-
-Design, the chunk-to-item mapping, and the findings from real runs live in `docs/spotlight-rag.md`.
 
 #### Orphan sweep
 
@@ -387,18 +405,14 @@ passage retrieved twice) and a shrunk file kept its vanished pages or rows.
   renamed folder, is outside it — the app removes those with `removeSource(at:)`, on either runtime,
   which works on paths that no longer exist.
 
-The rule, its use cases, and a possible injectable sweeper live in `docs/rag-orphan-sweep.md`.
-
 ### Concurrency model
 
 The codebase targets Swift 6 strict concurrency. `RTSFlowGraphCollector` is an actor. `RTSNodeInvoker` is a `final class` and plain `Sendable`: it publishes nothing itself, only through `RTSEventEmitter`. `RTSNodeStatusMapper` is `Sendable` through a `Mutex`. `RTSLLMSession` is `Sendable` via closure capture. A Combine sink never awaits an actor itself: the collector's yields into an `AsyncStream` drained by one consumer task, which keeps delivery order.
 
-**Publishing must never run subscriber code on an invocation's thread.** `PassthroughSubject.send` delivers sinks synchronously on the caller's thread, so anything a subscriber does would land on the agent's critical path. So the invoker never sends to a subject: `RTSEventEmitter` hands each event to a serial `DispatchQueue` that performs the sends, to both of its streams (no lock — the queue is the serialization). A subscriber to the internal stream runs on that queue, which the collector, the status mapper and the event writer share, so it must do only bounded work: the collector's sink only filters by run scope and yields, and the mapper only updates its table and forwards a status. `RTSFlow.nodeStatusPublisher` is `receive(on:)`-isolated, so a slow app sink can't hold that queue up. Always a **serial** queue, never a `Task` per event: unordered dispatch is the race documented in `docs/duplicate-node-id.md`. The cost is asynchronous delivery, so `RTSFlow.run` joins the backlog on every exit path and `RTSFlow.flushEvents()` exposes the same barrier.
+**Publishing must never run subscriber code on an invocation's thread.** `PassthroughSubject.send` delivers sinks synchronously on the caller's thread, so anything a subscriber does would land on the agent's critical path. So the invoker never sends to a subject: `RTSEventEmitter` hands each event to a serial `DispatchQueue` that performs the sends, to both of its streams (no lock — the queue is the serialization). A subscriber to the internal stream runs on that queue, which the signpost writer, the collector, the status mapper and the event writer share, so it must do only bounded work: the collector's sink only filters by run scope and yields, the mapper only updates its table and forwards a status, and the signpost writer updates its table and calls the emitter, sending its costliest points from a detached task. The signpost writer subscribes first, because an interval is stamped when the writer gets to the event. App subscribers never run on it: `RTSFlow.nodeStatusPublisher` and `RTSFlow.eventPublisher` are each `receive(on:)`-isolated onto a serial queue of their own, so a slow app sink holds up only that publisher's other subscribers, never the trace, the statuses or the signposts. That isolation is per publisher, not per subscriber. The built-in `RTSEventWriter` subscribes to the emitter directly and stays on the delivery queue, which its buffering sink allows. Always a **serial** queue, never a `Task` per event: a `Task` per event processes events out of order, so the root's finish could be handled before a late child's, and the trace was written with that child missing. The cost is asynchronous delivery, so `RTSFlow.run` joins the backlog on every exit path and `RTSFlow.flushEvents()` exposes the same barrier, draining the delivery queue and then `eventPublisher`'s.
 
 **Cancellation.** A run is stopped by cancelling the `Task` that awaits `RTSFlow.run`, or from inside: by the flow's `timeout`, or by a node failing under `endOnError` (`invokeCore` calls `RTSRunStop.nodeFailed`). With either set, `RTSFlow.withRunStops` runs the root in a task group next to a listener that waits on the run's `RTSRunStop` and cancels the work once a stop is requested (plus a timer for the timeout), then waits for the work to unwind. These rules keep that safe — keep them when touching the run path:
 - **Errors are normalized.** Anything thrown while the task is cancelled becomes `RTSError.runTerminated(reason:)` (`RTSRunCancellation.normalized`): in `invokeCore`, once the node's outcome is final (before `runStop.nodeFailed`), so a guardrail that throws because of a stop reports the stop; in `invokeCore`'s catch around the body as well, because `llm.failure` reads that error first; and in `RTSFlow.run`'s catch. A guardrail's own `guard_details` step and `middleware.*` events keep the raw error. The reason is `.cancelled` unless the run stopped itself: the timeout and a failing node record `.timeout` / `.endOnError` on the run's `RTSRunStop` (held by its per-run `RTSNodeInvoker`) **before** the listener cancels the work, and normalization and the node-boundary check read it back. A stop from inside the run must follow the same order: record, then cancel. A `runTerminated` error never triggers `endOnError`, so the nodes a stop cuts short can't start another. An app's own `CancellationError` thrown while the task is *not* cancelled passes through, and an existing `runTerminated` is kept (first stop wins).
 - **Nodes are checked, not skipped.** `invokeCore` checks `Task.isCancelled` after publishing the node's creation; a cancelled node still gets its finish events, but neither its guardrails nor its body runs. It checks again before output guardrails: a body that swallowed a stop and returned fails with the stop rather than running them, so unchecked output (text a redacting guardrail never saw) can't pass as a success. Never return before the node is created: the collector only finalizes on the root's `node.destruction`, so a root that skipped it would hang `awaitCompletion()` forever.
 - **Finalization is shielded.** An `AsyncStream` loop ends as soon as its task is cancelled, so `RTSFlowGraphCollector.awaitCompletion()` drains `completionStream` in an unstructured task; otherwise a cancelled run returns before its trace is written. Any new wait on the run's exit path needs the same treatment (continuations, like `flushEvents()`'s, are already unaffected). The other way round, an exit taken before the root node exists (today only a failed session build) must call `collector?.cancel()`: no root `node.destruction` will come, and an unfinished collector stays subscribed to the flow's emitter.
 - **The reason travels as a value.** `invokeCore`'s `node.destruction` carries the internal `terminationReason`, which `RTSNodeStatusMapper.finishedState(of:)` maps to `RTSNodeStatus.State.cancelled` (for any stop: a cancel, a timeout or an end-on-error stop; the node that failed keeps its own error and is `.failed`). `session.completed`'s `fatal` and `termination_reason` come from the run's error through `RTSRunCancellation.terminationReason(of:)`. Never parse the error string to recover a reason.
-
-See `docs/flow-timeout.md`.

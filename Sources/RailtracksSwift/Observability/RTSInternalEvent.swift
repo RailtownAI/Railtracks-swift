@@ -12,7 +12,7 @@ import Foundation
 /// An event with a Python wire form is an ``RTSObservabilityEvent``, and also goes on the public
 /// stream. One with no wire form is its own case here: it doesn't conform to
 /// ``RTSObservabilityEvent``, so it can never become an envelope, and only reaches the internal
-/// stream. See docs/node-status-from-events.md.
+/// stream.
 enum RTSInternalEvent: Sendable {
     /// An event that also goes on the public stream, when the emitter is enabled.
     case observability(any RTSObservabilityEvent)

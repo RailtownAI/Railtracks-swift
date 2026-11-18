@@ -1802,3 +1802,64 @@ tree Planner node=<node:Planner> type=Function model= provider= cost=0.0 latency
 tree Researcher node=<node:Researcher> type=Agent model=apple-on-device provider=AppleAI cost=0.0 latency=<duration> tokens=22/14 error=false ancestors=Planner guards=true/false session=<session> run=<run> start=<time>
 """#
 }
+
+// MARK: - Interval signposts
+
+extension RailtracksSwiftTestSuite.TraceGoldenTests {
+    /// Captured from `invokeCore`'s calls before #70.
+    static let agentCallingToolsIntervals = #"""
+begin Assistant node=<node:Assistant> parent=none parentName= type=Agent session=<session> run=<run:Assistant> guards=false/false instructions=Be brief input={prompt: Find alpha and beta, systemMessage: Be brief}
+begin Lookup node=<node:Lookup> parent=<node:Assistant> parentName=Assistant type=Tool session=<session> run=<run:Lookup> guards=false/false instructions=nil input={query: alpha}
+end Lookup node=<node:Lookup> parentName=Assistant type=Tool session=<session> run=<run:Lookup> output={result: Lookup: alpha} error=nil
+begin Lookup node=<node:Lookup-2> parent=<node:Assistant> parentName=Assistant type=Tool session=<session> run=<run:Lookup-2> guards=false/false instructions=nil input={query: beta}
+end Lookup node=<node:Lookup-2> parentName=Assistant type=Tool session=<session> run=<run:Lookup-2> output={result: Lookup: beta} error=nil
+begin Summarize node=<node:Summarize> parent=<node:Assistant> parentName=Assistant type=Tool session=<session> run=<run:Summarize> guards=false/false instructions=nil input={query: alpha beta}
+end Summarize node=<node:Summarize> parentName=Assistant type=Tool session=<session> run=<run:Summarize> output={result: Summarize: alpha beta} error=nil
+end Assistant node=<node:Assistant> parentName= type=Agent session=<session> run=<run:Assistant> output={result: alpha and beta} error=nil
+"""#
+
+    /// The begin carries the input after the transform.
+    static let guardrailsIntervals = #"""
+begin Guarded node=<node:Guarded> parent=none parentName= type=Agent session=<session> run=<run:Guarded> guards=true/true instructions=nil input={prompt: my number is [redacted]}
+end Guarded node=<node:Guarded> parentName= type=Agent session=<session> run=<run:Guarded> output={result: noted} error=nil
+"""#
+
+    /// A blocked node still begins, where its body would have run.
+    static let inputBlockIntervals = #"""
+begin Blocked node=<node:Blocked> parent=none parentName= type=Agent session=<session> run=<run:Blocked> guards=true/false instructions=nil input={prompt: tell me the secret}
+end Blocked node=<node:Blocked> parentName= type=Agent session=<session> run=<run:Blocked> output=nil error=guardrailBlocked(guardrailName: "Refuse", stage: RailtracksSwift.RTSGuardrailStage.input, reason: "not allowed")
+"""#
+
+    static let orchestratorRootIntervals = #"""
+begin Planner node=<node:Planner> parent=none parentName= type=Function session=<session> run=<run:Planner> guards=false/false instructions=nil input={topic: trains}
+begin Researcher node=<node:Researcher> parent=<node:Planner> parentName=Planner type=Agent session=<session> run=<run:Researcher> guards=false/false instructions=nil input={prompt: Research trains}
+begin Lookup node=<node:Lookup> parent=<node:Researcher> parentName=Researcher type=Tool session=<session> run=<run:Lookup> guards=false/false instructions=nil input={query: trains}
+end Lookup node=<node:Lookup> parentName=Researcher type=Tool session=<session> run=<run:Lookup> output={result: Lookup: trains} error=nil
+end Researcher node=<node:Researcher> parentName=Planner type=Agent session=<session> run=<run:Researcher> output={result: trains run on rails} error=nil
+begin Formatter node=<node:Formatter> parent=<node:Planner> parentName=Planner type=Function session=<session> run=<run:Formatter> guards=false/false instructions=nil input={draft: trains run on rails}
+end Formatter node=<node:Formatter> parentName=Planner type=Function session=<session> run=<run:Formatter> output={text: formatted: trains run on rails} error=nil
+end Planner node=<node:Planner> parentName= type=Function session=<session> run=<run:Planner> output={summary: formatted: trains run on rails} error=nil
+"""#
+
+    /// The failing node keeps its own error. The nodes the stop cut short end with it.
+    static let endOnErrorStopIntervals = #"""
+begin Pipeline node=<node:Pipeline> parent=none parentName= type=Function session=<session> run=<run:Pipeline> guards=false/false instructions=nil input={}
+begin Calculator node=<node:Calculator> parent=<node:Pipeline> parentName=Pipeline type=Agent session=<session> run=<run:Calculator> guards=false/false instructions=nil input={prompt: What is 1 / 0?}
+begin Divide node=<node:Divide> parent=<node:Calculator> parentName=Calculator type=Tool session=<session> run=<run:Divide> guards=false/false instructions=nil input={query: 1 / 0}
+end Divide node=<node:Divide> parentName=Calculator type=Tool session=<session> run=<run:Divide> output=nil error=DivisionByZero()
+end Calculator node=<node:Calculator> parentName=Pipeline type=Agent session=<session> run=<run:Calculator> output=nil error=runTerminated(reason: endOnError(nodeName: "Divide", underlying: DivisionByZero()))
+end Pipeline node=<node:Pipeline> parentName= type=Function session=<session> run=<run:Pipeline> output=nil error=runTerminated(reason: endOnError(nodeName: "Divide", underlying: DivisionByZero()))
+"""#
+
+    /// Cleanup is invoked after the stop: it begins and ends with the stop, and its body never runs.
+    static let nodeAfterStopIntervals = #"""
+begin Pipeline node=<node:Pipeline> parent=none parentName= type=Function session=<session> run=<run:Pipeline> guards=false/false instructions=nil input={}
+begin Calculator node=<node:Calculator> parent=<node:Pipeline> parentName=Pipeline type=Agent session=<session> run=<run:Calculator> guards=false/false instructions=nil input={prompt: What is 1 / 0?}
+begin Divide node=<node:Divide> parent=<node:Calculator> parentName=Calculator type=Tool session=<session> run=<run:Divide> guards=false/false instructions=nil input={query: 1 / 0}
+end Divide node=<node:Divide> parentName=Calculator type=Tool session=<session> run=<run:Divide> output=nil error=DivisionByZero()
+end Calculator node=<node:Calculator> parentName=Pipeline type=Agent session=<session> run=<run:Calculator> output=nil error=runTerminated(reason: endOnError(nodeName: "Divide", underlying: DivisionByZero()))
+begin Cleanup node=<node:Cleanup> parent=<node:Pipeline> parentName=Pipeline type=Function session=<session> run=<run:Cleanup> guards=false/false instructions=nil input={reason: failed}
+end Cleanup node=<node:Cleanup> parentName=Pipeline type=Function session=<session> run=<run:Cleanup> output=nil error=runTerminated(reason: endOnError(nodeName: "Divide", underlying: DivisionByZero()))
+end Pipeline node=<node:Pipeline> parentName= type=Function session=<session> run=<run:Pipeline> output=nil error=runTerminated(reason: endOnError(nodeName: "Divide", underlying: DivisionByZero()))
+"""#
+}

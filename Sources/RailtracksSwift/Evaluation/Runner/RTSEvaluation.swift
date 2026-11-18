@@ -47,9 +47,8 @@ public enum RTSEvaluation {
     }
 
     /// Evaluate `data` with per-evaluator agent targeting, producing one `RTSEvaluationReport` per
-    /// agent that has at least one evaluator. See docs/evaluator-agent-targeting.md and
-    /// `RTSEvaluatorAssignment` for the targeting semantics (by name; `nil` = all; union; dedup;
-    /// untargeted agents skipped).
+    /// agent that has at least one evaluator. See `RTSEvaluatorAssignment` for the targeting
+    /// semantics (by name; `nil` = all; union; dedup; untargeted agents skipped).
     ///
     /// - Parameters:
     ///   - data: ingested agent data points (see `RTSEvaluationIngest`).

@@ -23,8 +23,6 @@ import Synchronization
 /// retry. A caller that stops waiting leaves the request running, so a later caller joins it — what
 /// makes "let me wait it out" work after a timeout. A request that never answers stays registered
 /// until the process exits, which is the price of not stacking new ones.
-///
-/// See `docs/apple-embedding-prepare.md`.
 internal final class RTSRAGAssetRequest: Sendable {
 
     typealias Outcome = NLContextualEmbedding.AssetsResult

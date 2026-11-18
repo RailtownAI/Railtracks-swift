@@ -10,7 +10,7 @@ import Foundation
 /// A file or folder, and the rule for which stored document sources lie under it.
 ///
 /// Used twice: as the extent of an orphan sweep — what one ingest run covers — and as the target
-/// of `removeSource(at:)`. See `docs/rag-orphan-sweep.md`.
+/// of `removeSource(at:)`.
 ///
 /// ## The rule
 ///

@@ -5,7 +5,7 @@
 //  The FoundationModels path reads transcript entries, structured output and `@Generable` tool
 //  schemas through Apple's public API. These tests pin what each conversion produces — the values
 //  were first captured from the Mirror-based code they replaced, so any difference below is a
-//  deliberate one, called out where it occurs. See docs/foundation-models-provider.md.
+//  deliberate one, called out where it occurs.
 //
 
 import Testing
@@ -294,7 +294,7 @@ struct FoundationModelProviderTests {
             systemMessage: "You must use the addition tool for any addition."
         )
         let gateway = RTSLLMGateway(apiKeys: [:])
-        let invoker = RTSNodeInvoker(sessionID: UUID())
+        let invoker = RTSNodeInvoker()
         let session = try gateway.session(invoker: invoker, agentNode: agent)
 
         _ = try await session.run("What is 2 + 3? Reply with just the number.", runID: UUID())

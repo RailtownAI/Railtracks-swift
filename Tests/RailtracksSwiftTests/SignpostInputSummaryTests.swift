@@ -72,7 +72,18 @@ extension RailtracksSwiftTestSuite {
             }
             let summary = RTSSignpostEmitter.inputSummary(input, nodeType: .tool)
             #expect(summary.hasSuffix("…"))
-            #expect(summary.utf8.count < RTSSignpostEmitter.inputSummaryLimit + 200)
+            // The limit, plus the "…".
+            #expect(summary.count == RTSSignpostEmitter.inputSummaryLimit + 1)
+        }
+
+        /// The limit counts Characters, like the cut: non-ASCII text under it in Characters is kept
+        /// whole, however many bytes it takes.
+        @Test("the limit counts Characters, not bytes")
+        func limitCountsCharacters() {
+            // 3,000 Characters, about 12 KB: under the limit in Characters, over it in bytes.
+            let value = String(repeating: "😀", count: 3_000)
+            let summary = RTSSignpostEmitter.inputSummary(["text": .string(value)], nodeType: .tool)
+            #expect(summary == "text: \(value)")
         }
     }
 }

@@ -849,7 +849,7 @@ extension RailtracksSwiftTestSuite {
                 name: "Guarded",
                 outputGuardrails: [redact]
             )
-            let invoker = RTSNodeInvoker(sessionID: UUID())
+            let invoker = RTSNodeInvoker()
             let session = stubSession(after: .milliseconds(200))
 
             let call = Task {
@@ -880,7 +880,7 @@ extension RailtracksSwiftTestSuite {
                 inputGuardrails: [block]
             )
             let stop = RTSRunStop(endsOnError: true)
-            let invoker = RTSNodeInvoker(sessionID: UUID(), runStop: stop)
+            let invoker = RTSNodeInvoker(runStop: stop)
 
             _ = try? await invoker.invokeAgent(
                 agent,
@@ -942,7 +942,7 @@ extension RailtracksSwiftTestSuite {
                 inputGuardrails: [slowCheck]
             )
             let recorder = InvokerEventRecorder()
-            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
+            let invoker = RTSNodeInvoker(eventEmitter: recorder.emitter)
 
             let thrown = await cancelWhileGuardrailRuns(
                 agent,
@@ -979,7 +979,7 @@ extension RailtracksSwiftTestSuite {
                 inputGuardrails: [slowCheck]
             )
             let stop = RTSRunStop(endsOnError: true)
-            let invoker = RTSNodeInvoker(sessionID: UUID(), runStop: stop)
+            let invoker = RTSNodeInvoker(runStop: stop)
 
             let thrown = await cancelWhileGuardrailRuns(
                 agent,
@@ -1013,7 +1013,7 @@ extension RailtracksSwiftTestSuite {
                 outputGuardrails: [slowCheck]
             )
             let recorder = InvokerEventRecorder()
-            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
+            let invoker = RTSNodeInvoker(eventEmitter: recorder.emitter)
 
             let thrown = await cancelWhileGuardrailRuns(
                 agent,
@@ -1049,7 +1049,6 @@ extension RailtracksSwiftTestSuite {
             let stop = RTSRunStop()
             let recorder = InvokerEventRecorder()
             let invoker = RTSNodeInvoker(
-                sessionID: UUID(),
                 eventEmitter: recorder.emitter,
                 runStop: stop
             )
@@ -1086,7 +1085,7 @@ extension RailtracksSwiftTestSuite {
                 inputGuardrails: [failingCheck]
             )
             let recorder = InvokerEventRecorder()
-            let invoker = RTSNodeInvoker(sessionID: UUID(), eventEmitter: recorder.emitter)
+            let invoker = RTSNodeInvoker(eventEmitter: recorder.emitter)
 
             var thrown: Error?
             do {

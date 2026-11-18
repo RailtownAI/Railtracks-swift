@@ -25,7 +25,7 @@ public struct RTSNodeCreationEvent: RTSObservabilityEvent {
     public let name: String
     public let nodeType: RTSFlowNodeType
 
-    // Not part of the payload: what the trace collector's signposts need about the node, set by
+    // Not part of the payload: what the signposts need about the node, set by
     // `RTSNodeInvoker.invokeCore`. Python's `NodeCreation` has no such fields.
 
     /// Whether the node is an agent with input guardrails.
@@ -286,12 +286,16 @@ public struct RTSNodeDestructionEvent: RTSParentedEvent {
     /// Set when the node failed: the same details as its `node.failure`. `nil` on success.
     public let failure: RTSEventFailureDetails?
 
-    // Not part of the payload: set by `RTSNodeInvoker.invokeCore` for the node statuses.
+    // Not part of the payload: set by `RTSNodeInvoker.invokeCore` for the node statuses and the
+    // signposts.
 
     /// How the run stopped, when a stop ended this node: a cancel, a timeout, or an end-on-error
     /// stop that cut it short. `nil` when the node succeeded or failed on its own. Carried as a
     /// value so a reader never parses it back out of the error text.
     let terminationReason: RTSRunTerminationReason?
+    /// The node's final error itself, which ``failure`` describes. `nil` on success. Handed to
+    /// `RTSSignpostEmitting.emitNodeEnd`, which is public and takes the error, not its details.
+    let error: (any Error)?
 
     /// `"failure"` when ``failure`` is set, `"success"` otherwise: Python's `status`.
     public var status: String {
@@ -325,6 +329,7 @@ public struct RTSNodeDestructionEvent: RTSParentedEvent {
         durationSeconds: TimeInterval,
         failure: RTSEventFailureDetails?,
         terminationReason: RTSRunTerminationReason?,
+        error: (any Error)? = nil,
         timestamp: Date = RTSEventTimestamp.now()
     ) {
         self.parent = parent
@@ -333,6 +338,7 @@ public struct RTSNodeDestructionEvent: RTSParentedEvent {
         self.durationSeconds = durationSeconds
         self.failure = failure
         self.terminationReason = terminationReason
+        self.error = error
         self.timestamp = timestamp
     }
 

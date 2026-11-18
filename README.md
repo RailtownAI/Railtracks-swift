@@ -697,8 +697,9 @@ let cancellable = flow.eventPublisher.sink { event in
 ```
 
 Pass `RTSFlow(title:emitsEvents: false)` to turn the stream off; payloads are then never built,
-so a flow with no consumer pays no encoding cost. The flow then writes no JSON trace either, since
-the trace is built from these events. `nodeStatusPublisher` is unaffected.
+so a flow with no consumer pays no encoding cost. The flow then writes no JSON trace and emits no
+Instruments signposts either, since both are built from these events. `nodeStatusPublisher` is
+unaffected.
 
 **Observation cannot slow a run down.** Events are delivered on a private serial queue, not on
 the thread running your agents, so a slow subscriber can never stall node execution — add
@@ -757,7 +758,8 @@ persists an event log:
 ```swift
 RTSFlow(title: "Support", savesEvents: false)               // trace, no event log
 RTSFlow(title: "Support", savesTrace: false, savesEvents: true)  // event log, no trace
-RTSFlow(title: "Support", emitsEvents: false)               // no stream, so no trace either; statuses still work
+RTSFlow(title: "Support", emitsSignposts: false)            // events and trace, nothing in Instruments
+RTSFlow(title: "Support", emitsEvents: false)               // no stream, so no trace or signposts either; statuses still work
 ```
 
 To handle events yourself — your own file format, an upload, a live view — subscribe to

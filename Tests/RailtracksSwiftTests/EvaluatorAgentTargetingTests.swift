@@ -2,8 +2,7 @@
 //  EvaluatorAgentTargetingTests.swift
 //  RailtracksSwiftTests
 //
-//  Per-evaluator agent targeting: RTSEvaluation.evaluate(data:assignments:). See
-//  docs/evaluator-agent-targeting.md.
+//  Per-evaluator agent targeting: RTSEvaluation.evaluate(data:assignments:).
 //
 
 import Testing

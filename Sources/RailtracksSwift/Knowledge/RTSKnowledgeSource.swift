@@ -80,7 +80,7 @@ public struct RTSKnowledgeHit: Sendable {
 ///
 /// The inversion is deliberate. A tool here that imported a retrieval module would make every
 /// agent-only consumer compile it, and would spend the independence that makes that module cheap to
-/// extract. See `docs/knowledge-tool.md`.
+/// extract.
 public protocol RTSKnowledgeSource: Sendable {
     func retrieve(_ query: RTSKnowledgeQuery) async throws -> [RTSKnowledgeHit]
 }

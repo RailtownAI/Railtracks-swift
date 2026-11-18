@@ -13,9 +13,9 @@ import RailtracksSwiftRAG
 
 /// Ingests PDFs into the app's Spotlight index and searches them back with `CSUserQuery`.
 ///
-/// Phase B of `docs/spotlight-rag.md`: the first run of the Spotlight path inside an app, against
-/// the **default** index. Loader and chunker are fixed — `RTSRAGPDFLoader` per page and
-/// `RTSRAGSentenceChunker` — because the screen exists to exercise Spotlight, not the loaders.
+/// The first run of the Spotlight path inside an app, against the **default** index. Loader and
+/// chunker are fixed — `RTSRAGPDFLoader` per page and `RTSRAGSentenceChunker` — because the
+/// screen exists to exercise Spotlight, not the loaders.
 ///
 /// Two ways to read it back, side by side: **raw search**, `RTSRAGSpotlightSearcher` with no model
 /// in between, so a hit proves the donation itself; and **an agent** (phase C) whose only knowledge

@@ -37,8 +37,7 @@ public struct RTSRAGDocumentStream: AsyncSequence, Sendable {
     /// what an orphan sweep may clear: stored documents under it that the run did not see.
     ///
     /// `nil`, the default, means the stream claims to cover nothing, and no sweep follows it. That
-    /// keeps a custom loader safe until it states a root deliberately. See
-    /// `docs/rag-orphan-sweep.md`.
+    /// keeps a custom loader safe until it states a root deliberately.
     public let root: URL?
     /// What the stream read but did not emit — sources that failed, documents a transform removed.
     /// Both protect stored documents from a sweep. Shared with every iterator and every stream

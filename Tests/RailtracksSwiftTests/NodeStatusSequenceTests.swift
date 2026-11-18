@@ -5,7 +5,7 @@
 //  Pins every status `nodeStatusPublisher` delivers for a run, in order, so a change to how the
 //  statuses are produced can prove apps see the same sequence. Each test runs a real `RTSFlow`,
 //  with agents on scripted sessions (`ScriptedFlowSupport.swift`), and compares the rendered
-//  sequence with a golden. See docs/node-status-from-events.md.
+//  sequence with a golden.
 //
 
 import Combine

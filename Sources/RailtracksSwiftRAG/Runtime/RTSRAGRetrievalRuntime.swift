@@ -96,7 +96,7 @@ public final class RTSRAGRetrievalRuntime: @unchecked Sendable {
     /// **Then sweeps orphans.** Once the loader has been read to the end, stored documents under
     /// its root — in this `scope` — that the run did not see are removed: a file that moved away,
     /// a page or row that is gone. Documents a sanitizer dropped, and sources that failed to load,
-    /// are kept. A run that throws or is cancelled sweeps nothing. See `docs/rag-orphan-sweep.md`.
+    /// are kept. A run that throws or is cancelled sweeps nothing.
     ///
     /// - Parameter sweepsOrphans: `false` skips the sweep for this run.
     /// - Throws: ``RTSRAGError/ingestAlreadyRunning`` if this runtime is already ingesting; or,

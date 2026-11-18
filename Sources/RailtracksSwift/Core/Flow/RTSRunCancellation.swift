@@ -12,7 +12,7 @@ import Foundation
 /// Models' errors, `CancellationError`), so a caller would otherwise see a different error per
 /// provider. Everything thrown while the task is cancelled becomes one shape:
 /// `RTSError.runTerminated(reason:)`, `.cancelled` unless the run recorded another reason on its
-/// `RTSRunStop` (a timeout). See `docs/flow-timeout.md`.
+/// `RTSRunStop` (a timeout).
 enum RTSRunCancellation {
 
     /// `error` as the run should report it: `.runTerminated` when the current task has been
