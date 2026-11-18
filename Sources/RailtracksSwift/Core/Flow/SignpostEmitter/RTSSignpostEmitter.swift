@@ -224,7 +224,8 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             summary += "\(key): \((input[key] ?? .null).signpostText)"
             // Checked after each pair, so one huge value is cut too: the kit collapses the
             // whitespace of everything it's given before capping it, on the event delivery queue.
-            if summary.utf8.count > inputSummaryLimit {
+            // In Characters, like every cut here.
+            if summary.count > inputSummaryLimit {
                 return String(summary.prefix(inputSummaryLimit)) + "…"
             }
         }
