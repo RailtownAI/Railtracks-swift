@@ -25,18 +25,10 @@ import Synchronization
 final class RTSSignpostWriter: Sendable {
     /// What the writer knows about a node between its `node.creation` and `node.destruction`.
     private struct Node {
-        let creation: RTSNodeCreationEvent
+        /// Shared with the trace's collector, so both read the node the same way. Its `runID`
+        /// names the edge Tool I/O rows, as the collector names the edge.
+        var fold: RTSNodeFold
         let runScope: UUID?
-        /// The calling invocation's id, or `nil` at the flow root.
-        var parentNodeID: String?
-        /// Also the id of the trace's edge into the node, which its edge Tool I/O rows are named
-        /// after, as the collector names the edge.
-        var runID: RTSRunID?
-        /// `node.invocation`'s `kwargs`, then each input guard transform in turn: the input the
-        /// node's body received.
-        var input: RTSInput = [:]
-        /// The call's messages, from its latest `llm.response` or `llm.failure`.
-        var messages: [RTSMessage] = []
         var hasBegun = false
     }
 
@@ -86,71 +78,41 @@ final class RTSSignpostWriter: Sendable {
             case let creation as RTSNodeCreationEvent:
                 state.withLock { state in
                     state.nodes[creation.nodeID] = Node(
-                        creation: creation,
+                        fold: RTSNodeFold(creation: creation),
                         runScope: observed.runScope
                     )
                 }
             case let invocation as RTSNodeInvocationEvent:
                 invoke(invocation)
-            case let response as RTSGuardInputResponseEvent:
-                guard case .nodeAndMiddleware(let nodeID, _) = response.spatialParent,
-                      let transformed = response.decision.transformedDictionary else {
-                    return
-                }
-                updateNode(nodeID) { node in
-                    node.input = transformed
-                }
-            case let response as RTSLLMResponseEvent:
-                // Each response's input is every message before its output, so the latest one
-                // holds the whole call so far.
-                guard case .node(let nodeID?) = response.spatialParent else {
-                    return
-                }
-                updateNode(nodeID) { node in
-                    node.messages = response.messageInput + (response.output.map { [$0] } ?? [])
-                }
-            case let failure as RTSLLMFailureEvent:
-                // A failure's input is everything the call had accumulated when it threw.
-                guard case .node(let nodeID?) = failure.spatialParent else {
-                    return
-                }
-                updateNode(nodeID) { node in
-                    node.messages = failure.messageInput
-                }
             case let destruction as RTSNodeDestructionEvent:
                 finish(destruction)
             default:
-                break
+                guard let nodeID = RTSNodeFold.nodeID(of: event) else {
+                    return
+                }
+                state.withLock { state in
+                    state.nodes[nodeID]?.fold.apply(event)
+                }
             }
-        }
-    }
-
-    private func updateNode(_ nodeID: String, _ update: (inout Node) -> Void) {
-        state.withLock { state in
-            guard var node = state.nodes[nodeID] else {
-                return
-            }
-            update(&node)
-            state.nodes[nodeID] = node
         }
     }
 
     // MARK: - Invocation: the graph point
 
     private func invoke(_ invocation: RTSNodeInvocationEvent) {
-        guard case .node(let nodeID) = invocation.parent,
-              case .node(let parentNodeID) = invocation.spatialParent,
-              let runID = invocation.runID else {
+        guard let nodeID = RTSNodeFold.nodeID(of: invocation) else {
             return
         }
         let invoked = state.withLock { state -> (node: Node, parent: Node?, run: Run)? in
             guard var node = state.nodes[nodeID] else {
                 return nil
             }
-            node.parentNodeID = parentNodeID
-            node.runID = runID
-            node.input = invocation.kwargs
+            node.fold.apply(invocation)
             state.nodes[nodeID] = node
+            guard let runID = node.fold.runID else {
+                return nil
+            }
+            let parentNodeID = node.fold.parentNodeID
             if parentNodeID == nil {
                 state.runs[node.runScope] = Run(rootRunID: runID)
             }
@@ -160,23 +122,25 @@ final class RTSSignpostWriter: Sendable {
             return (node, parentNodeID.flatMap { state.nodes[$0] }, run)
         }
         guard let invoked else {
-            log.warning("⚠️🚧 node.invocation with no node.creation or run before it")
+            log.warning("⚠️🚧 node.invocation with no node.creation, run id or run before it")
             return
         }
+        let creation = invoked.node.fold.creation
+        let parentCreation = invoked.parent?.fold.creation
         signpostEmitter.emitGraphNode(
             nodeID: nodeID,
-            parentID: parentNodeID ?? "",
+            parentID: invoked.node.fold.parentNodeID ?? "",
             sessionID: sessionID.uuidString,
             runID: invoked.run.rootRunID.uuidString,
-            nodeType: invoked.node.creation.nodeType,
-            parentType: invoked.parent?.creation.nodeType,
+            nodeType: creation.nodeType,
+            parentType: parentCreation?.nodeType,
             error: false,
             parentError: false,
             cost: 0,
             model: "",
-            parentName: invoked.parent?.creation.name ?? "",
-            name: invoked.node.creation.name,
-            startTime: invoked.node.creation.timestamp.timeIntervalSince1970
+            parentName: parentCreation?.name ?? "",
+            name: creation.name,
+            startTime: creation.timestamp.timeIntervalSince1970
         )
     }
 
@@ -184,34 +148,35 @@ final class RTSSignpostWriter: Sendable {
 
     private func begin(_ nodeID: String) {
         let begun = state.withLock { state -> (node: Node, parentName: String)? in
-            guard var node = state.nodes[nodeID], node.runID != nil else {
+            guard var node = state.nodes[nodeID], node.fold.runID != nil else {
                 return nil
             }
             node.hasBegun = true
             state.nodes[nodeID] = node
-            let parentName = node.parentNodeID.flatMap { state.nodes[$0] }?.creation.name ?? ""
-            return (node, parentName)
+            let parent = node.fold.parentNodeID.flatMap { state.nodes[$0] }
+            return (node, parent?.fold.creation.name ?? "")
         }
         guard let begun,
               let invocationID = UUID(uuidString: nodeID),
-              let runID = begun.node.runID else {
+              let runID = begun.node.fold.runID else {
             log.warning("⚠️🚧 executing signal for a node the writer never saw invoked")
             return
         }
-        let creation = begun.node.creation
+        let creation = begun.node.fold.creation
+        let input = begun.node.fold.input
         signpostEmitter.emitNodeStart(
             nodeID: invocationID,
-            parentNodeID: begun.node.parentNodeID.flatMap(UUID.init(uuidString:)),
+            parentNodeID: begun.node.fold.parentNodeID.flatMap(UUID.init(uuidString:)),
             nodeName: creation.name,
             nodeType: creation.nodeType,
             sessionID: sessionID,
             parentName: begun.parentName,
             runID: runID,
-            input: begun.node.input,
+            input: input,
             // The input is the agent's whole `inputs` once its guardrails ran, so this is the
             // system message `invoke` sets.
             instructions: creation.nodeType == .agent
-                ? RTSAgentInput.systemMessage(in: begun.node.input)
+                ? RTSAgentInput.systemMessage(in: input)
                 : nil,
             hasInputGuardrail: creation.hasInputGuardrail,
             hasOutputGuardrail: creation.hasOutputGuardrail
@@ -221,7 +186,7 @@ final class RTSSignpostWriter: Sendable {
     // MARK: - Destruction: the interval ends, then the points
 
     private func finish(_ destruction: RTSNodeDestructionEvent) {
-        guard case .node(let nodeID) = destruction.parent else {
+        guard let nodeID = RTSNodeFold.nodeID(of: destruction) else {
             return
         }
         let finished = state.withLock { state -> Finished? in
@@ -230,42 +195,37 @@ final class RTSSignpostWriter: Sendable {
             }
             // Children finish before their parent, so the whole chain is still in the table.
             var ancestors: [String] = []
-            var ancestorID = node.parentNodeID
+            var ancestorID = node.fold.parentNodeID
             while let currentID = ancestorID, let ancestor = state.nodes[currentID] {
-                ancestors.insert(ancestor.creation.name, at: 0)
-                ancestorID = ancestor.parentNodeID
+                ancestors.insert(ancestor.fold.creation.name, at: 0)
+                ancestorID = ancestor.fold.parentNodeID
             }
             let run = state.runs[node.runScope]
             return Finished(
                 nodeID: nodeID,
                 node: node,
-                parent: node.parentNodeID.flatMap { state.nodes[$0] },
+                parent: node.fold.parentNodeID.flatMap { state.nodes[$0] },
                 ancestors: ancestors,
                 run: run
             )
         }
         guard let finished,
               let invocationID = UUID(uuidString: nodeID),
-              let runID = finished.node.runID else {
+              let runID = finished.node.fold.runID else {
             log.warning("⚠️🚧 node.destruction for a node the writer never saw invoked")
             return
         }
-        let output: RTSOutput?
-        if destruction.failure == nil, case .object(let response)? = destruction.response {
-            output = response
-        } else {
-            output = nil
-        }
+        let output = RTSNodeFold.output(of: destruction)
 
         // Ended whatever else is missing: an interval left open holds its Instruments row.
-        let creation = finished.node.creation
+        let creation = finished.node.fold.creation
         if finished.node.hasBegun {
             signpostEmitter.emitNodeEnd(
                 nodeID: invocationID,
                 nodeName: creation.name,
                 nodeType: creation.nodeType,
                 sessionID: sessionID,
-                parentName: finished.parent?.creation.name ?? "",
+                parentName: finished.parent?.fold.creation.name ?? "",
                 runID: runID,
                 output: output,
                 error: destruction.error
@@ -289,21 +249,21 @@ final class RTSSignpostWriter: Sendable {
             point,
             // The trace's edge into the node is named after its run id.
             edgeID: runID,
-            input: finished.node.input,
+            input: finished.node.fold.input,
             output: output,
             failed: destruction.failure != nil,
             runScope: finished.node.runScope
         )
         emitTreeAndMessages(
             point,
-            messages: finished.node.messages,
+            messages: finished.node.fold.messages,
             latency: destruction.timestamp.timeIntervalSince(creation.timestamp),
             failed: destruction.failure != nil,
             ancestors: finished.ancestors,
             runScope: finished.node.runScope
         )
         // The root finishes last, so its run's numbering is done.
-        if finished.node.parentNodeID == nil {
+        if finished.node.fold.parentNodeID == nil {
             state.withLock { state in
                 _ = state.runs.removeValue(forKey: finished.node.runScope)
             }

@@ -25,23 +25,20 @@ actor RTSFlowGraphCollector {
 
     /// What the collector knows about a node between its `node.creation` and `node.destruction`.
     private struct PendingNode {
-        let creation: RTSNodeCreationEvent
+        /// Shared with the signpost writer, so both read the node the same way. Its `input` is
+        /// what the edge records, and its `runID` names the edge.
+        var fold: RTSNodeFold
         /// Reserved when `node.creation` arrives, so the step order is the order nodes were created.
         let creationStepIndex: Int
-        var parentNodeID: UUID?
-        /// Also the id of the edge into the node, as Python names an edge after its call's request
-        /// id; the root's is the trace's `run_id`. The signpost writer names Tool I/O rows the same.
-        var runID: RTSRunID?
         /// Where the edge's creation record sits in `edgeEvents`, so an input guard transform can
         /// update its input directly.
         var edgeCreationIndex: Int?
         var creationStamp: RTSStamp?
-        /// `node.invocation`'s `kwargs`, then each input guard transform in turn: the input the
-        /// node's body received, which is what the edge records.
-        var input: RTSInput = [:]
         var guardTraces: [RTSGuardrailTrace] = []
-        /// The call's messages, from its latest `llm.response` or `llm.failure`.
-        var messages: [RTSMessage] = []
+
+        var parentNodeID: UUID? {
+            fold.parentNodeID.flatMap(UUID.init(uuidString:))
+        }
     }
 
     var sessionID: UUID
@@ -147,14 +144,14 @@ actor RTSFlowGraphCollector {
             processInputGuardResponse(response)
         case let failure as RTSGuardInputFailureEvent:
             recordGuardFailure(
-                spatialParent: failure.spatialParent,
+                failure,
                 railName: failure.railName,
                 stage: .input,
                 exceptionName: failure.exceptionName,
                 exceptionMessage: failure.exceptionMessage
             )
         case let response as RTSGuardOutputResponseEvent:
-            updatePendingNode(guardedBy: response.spatialParent) { node in
+            updatePendingNode(of: response) { node in
                 node.guardTraces.append(
                     RTSGuardrailTrace(
                         railName: response.railName,
@@ -165,27 +162,19 @@ actor RTSFlowGraphCollector {
             }
         case let failure as RTSGuardOutputFailureEvent:
             recordGuardFailure(
-                spatialParent: failure.spatialParent,
+                failure,
                 railName: failure.railName,
                 stage: .output,
                 exceptionName: failure.exceptionName,
                 exceptionMessage: failure.exceptionMessage
             )
-        case let response as RTSLLMResponseEvent:
-            // Each response's input is every message before its output, so the latest one holds
-            // the whole call so far.
-            updatePendingNode(calledBy: response.spatialParent) { node in
-                node.messages = response.messageInput + (response.output.map { [$0] } ?? [])
-            }
-        case let failure as RTSLLMFailureEvent:
-            // A failure's input is everything the call had accumulated when it threw.
-            updatePendingNode(calledBy: failure.spatialParent) { node in
-                node.messages = failure.messageInput
-            }
         case let destruction as RTSNodeDestructionEvent:
             await processDestruction(destruction)
         default:
-            break
+            // The `llm.*` events: the fold keeps the call's messages.
+            updatePendingNode(of: event) { node in
+                node.fold.apply(event)
+            }
         }
     }
 
@@ -194,41 +183,41 @@ actor RTSFlowGraphCollector {
             log.warning("⚠️🎁 node.creation with an unreadable node id: \(creation.nodeID)")
             return
         }
-        pendingNodes[nodeID] = PendingNode(creation: creation, creationStepIndex: takeStepIndex())
+        pendingNodes[nodeID] = PendingNode(
+            fold: RTSNodeFold(creation: creation),
+            creationStepIndex: takeStepIndex()
+        )
     }
 
     /// The node's creation records: its parent and run are known from here. The edge's input is
     /// pre-transform for now, and replaced as input guards transform it.
     private func processInvocation(_ invocation: RTSNodeInvocationEvent) async {
-        guard case .node(let nodeIDText) = invocation.parent,
-              let nodeID = UUID(uuidString: nodeIDText),
-              var node = pendingNodes[nodeID],
-              let runID = invocation.runID else {
-            log.warning("⚠️🎁 node.invocation with no node.creation before it, or no run id")
+        guard let nodeID = RTSNodeFold.nodeID(of: invocation).flatMap(UUID.init(uuidString:)),
+              var node = pendingNodes[nodeID] else {
+            log.warning("⚠️🎁 node.invocation with no node.creation before it")
             return
         }
-        guard case .node(let parentIDText) = invocation.spatialParent else {
+        node.fold.apply(invocation)
+        // The edge into the node is named after its run id; the root's is the trace's `run_id`.
+        guard let runID = node.fold.runID else {
+            log.warning("⚠️🎁 node.invocation with no run id")
             return
         }
-        let parentNodeID = parentIDText.flatMap(UUID.init(uuidString:))
-        let name = node.creation.name
+        let parentNodeID = node.parentNodeID
+        let creation = node.fold.creation
         let stampEvent: RTSStamp.Event
         if let parentNodeID {
-            stampEvent = .create(pendingNodes[parentNodeID]?.creation.name ?? "", name)
+            let parentName = pendingNodes[parentNodeID]?.fold.creation.name ?? ""
+            stampEvent = .create(parentName, creation.name)
         } else {
-            stampEvent = .startCreate(name)
+            stampEvent = .startCreate(creation.name)
         }
         let creationStamp = RTSStamp(
             stepIndex: node.creationStepIndex,
-            timestamp: node.creation.timestamp,
+            timestamp: creation.timestamp,
             event: stampEvent
         )
-        // The edge into the node is named after its run id; the root's is the trace's `run_id`.
-        let edgeID = runID
-        node.parentNodeID = parentNodeID
-        node.runID = runID
         node.creationStamp = creationStamp
-        node.input = invocation.kwargs
         // `processEdgeEvent` appends the creation record below without suspending first, so it
         // lands here.
         node.edgeCreationIndex = edgeEvents.count
@@ -238,30 +227,30 @@ actor RTSFlowGraphCollector {
             RTSNodeEvent(
                 nodeID: nodeID,
                 parentNodeID: parentNodeID,
-                name: name,
-                nodeType: node.creation.nodeType,
+                name: creation.name,
+                nodeType: creation.nodeType,
                 stamp: creationStamp,
-                provider: node.creation.provider,
-                model: node.creation.model
+                provider: creation.provider,
+                model: creation.model
             )
         )
         await processEdgeEvent(
             RTSEdgeEvent(
-                id: edgeID,
+                id: runID,
                 runID: runID,
                 stamp: creationStamp,
-                nodeType: node.creation.nodeType,
+                nodeType: creation.nodeType,
                 sourceNodeID: parentNodeID,
                 targetNodeID: nodeID,
-                sourceName: parentNodeID.flatMap { pendingNodes[$0]?.creation.name },
-                targetName: name,
-                input: invocation.kwargs
+                sourceName: parentNodeID.flatMap { pendingNodes[$0]?.fold.creation.name },
+                targetName: creation.name,
+                input: node.fold.input
             )
         )
     }
 
     private func processInputGuardResponse(_ response: RTSGuardInputResponseEvent) {
-        updatePendingNode(guardedBy: response.spatialParent) { node in
+        updatePendingNode(of: response) { node in
             node.guardTraces.append(
                 RTSGuardrailTrace(
                     railName: response.railName,
@@ -269,28 +258,25 @@ actor RTSFlowGraphCollector {
                     decision: response.decision
                 )
             )
-            if let transformed = response.decision.transformedDictionary {
-                node.input = transformed
-            }
+            node.fold.apply(response)
         }
         // The edge records what the body received, so its creation record follows the transform.
-        guard case .nodeAndMiddleware(let nodeIDText, _) = response.spatialParent,
-              let nodeID = UUID(uuidString: nodeIDText),
+        guard let nodeID = RTSNodeFold.nodeID(of: response).flatMap(UUID.init(uuidString:)),
               let node = pendingNodes[nodeID],
               let index = node.edgeCreationIndex else {
             return
         }
-        edgeEvents[index].input = node.input
+        edgeEvents[index].input = node.fold.input
     }
 
     private func recordGuardFailure(
-        spatialParent: RTSEventSpatialParent,
+        _ event: any RTSObservabilityEvent,
         railName: String,
         stage: RTSGuardrailStage,
         exceptionName: String,
         exceptionMessage: String
     ) {
-        updatePendingNode(guardedBy: spatialParent) { node in
+        updatePendingNode(of: event) { node in
             node.guardTraces.append(
                 .error(
                     railName: railName,
@@ -304,25 +290,19 @@ actor RTSFlowGraphCollector {
 
     /// The node's finish records, edge first, as `invokeCore` published them.
     private func processDestruction(_ destruction: RTSNodeDestructionEvent) async {
-        guard case .node(let nodeIDText) = destruction.parent,
-              let nodeID = UUID(uuidString: nodeIDText),
+        guard let nodeID = RTSNodeFold.nodeID(of: destruction).flatMap(UUID.init(uuidString:)),
               let node = pendingNodes.removeValue(forKey: nodeID),
-              let runID = node.runID else {
+              let runID = node.fold.runID else {
             log.warning("⚠️🎁 node.destruction for a node the collector never saw invoked")
             return
         }
-        let name = node.creation.name
+        let creation = node.fold.creation
         let completionStamp = RTSStamp(
             stepIndex: takeStepIndex(),
             timestamp: destruction.timestamp,
-            event: .finishExecution(name)
+            event: .finishExecution(creation.name)
         )
-        let output: RTSOutput?
-        if destruction.failure == nil, case .object(let response)? = destruction.response {
-            output = response
-        } else {
-            output = nil
-        }
+        let output = RTSNodeFold.output(of: destruction)
         let error = destruction.failure?.exceptionMessage
 
         await processEdgeEvent(
@@ -331,12 +311,12 @@ actor RTSFlowGraphCollector {
                 id: runID,
                 runID: nil,
                 stamp: completionStamp,
-                nodeType: node.creation.nodeType,
+                nodeType: creation.nodeType,
                 sourceNodeID: node.parentNodeID,
                 targetNodeID: nodeID,
-                sourceName: node.parentNodeID.flatMap { pendingNodes[$0]?.creation.name },
-                targetName: name,
-                input: node.input,
+                sourceName: node.parentNodeID.flatMap { pendingNodes[$0]?.fold.creation.name },
+                targetName: creation.name,
+                input: node.fold.input,
                 output: output,
                 error: error,
                 failure: destruction.failure.map { RTSEdgeFailure($0) }
@@ -346,15 +326,15 @@ actor RTSFlowGraphCollector {
             RTSNodeEvent(
                 nodeID: nodeID,
                 parentNodeID: node.parentNodeID,
-                name: name,
-                nodeType: node.creation.nodeType,
+                name: creation.name,
+                nodeType: creation.nodeType,
                 stamp: completionStamp,
-                input: node.input,
+                input: node.fold.input,
                 output: output,
                 error: error,
                 runID: runID,
                 runtime: destruction.durationSeconds,
-                messages: node.messages,
+                messages: node.fold.messages,
                 guardTraces: node.guardTraces
             )
         )
@@ -366,30 +346,13 @@ actor RTSFlowGraphCollector {
         return stepIndex
     }
 
-    /// Updates the node a guardrail event belongs to: its spatial parent names the node.
+    /// Updates the node `event` belongs to, if the collector holds it.
     private func updatePendingNode(
-        guardedBy spatialParent: RTSEventSpatialParent,
+        of event: any RTSObservabilityEvent,
         _ update: (inout PendingNode) -> Void
     ) {
-        guard case .nodeAndMiddleware(let nodeIDText, _) = spatialParent else {
-            return
-        }
-        updatePendingNode(nodeIDText, update)
-    }
-
-    /// Updates the agent an `llm.*` event belongs to: its spatial parent names the agent.
-    private func updatePendingNode(
-        calledBy spatialParent: RTSEventSpatialParent,
-        _ update: (inout PendingNode) -> Void
-    ) {
-        guard case .node(let nodeIDText?) = spatialParent else {
-            return
-        }
-        updatePendingNode(nodeIDText, update)
-    }
-
-    private func updatePendingNode(_ nodeIDText: String, _ update: (inout PendingNode) -> Void) {
-        guard let nodeID = UUID(uuidString: nodeIDText), var node = pendingNodes[nodeID] else {
+        guard let nodeID = RTSNodeFold.nodeID(of: event).flatMap(UUID.init(uuidString:)),
+              var node = pendingNodes[nodeID] else {
             return
         }
         update(&node)

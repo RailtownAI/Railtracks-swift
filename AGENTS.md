@@ -166,7 +166,10 @@ when its flow emits events and saves its trace.
 `RTSSignpostWriter` (one per flow, built and subscribed in `RTSFlow.init`) builds the Instruments
 signposts from the same internal stream, independently of the trace, and passes them to the flow's
 `RTSSignpostEmitting` (by default `RTSSignpostEmitter`, through RailtracksInstrumentationKit). It
-keeps a table per node, filled from `node.creation` and `node.invocation`:
+keeps a table per node, filled from `node.creation` and `node.invocation`. Each node's parent,
+`runID`, input (after guard transforms) and messages come from an `RTSNodeFold`, the same value
+type the collector's table embeds, so the trace and Instruments read a node the same way; a change
+to how either reads a node's events goes there. From the table it emits:
 - the graph point at `node.invocation`;
 - the Node Runs interval's begin at the executing signal;
 - at `node.destruction`, the interval's end first, then the edge I/O rows, then the tree point and
