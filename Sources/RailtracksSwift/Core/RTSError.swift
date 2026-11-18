@@ -55,7 +55,7 @@ public enum RTSError: Error {
         context: RTSErrorContext
     )
     /// The run was stopped before it finished, and `reason` says how: cancelled, timed out, or
-    /// ended by a node failure under `endOnError`. See `docs/flow-timeout.md`.
+    /// ended by a node failure under `endOnError`.
     case runTerminated(reason: RTSRunTerminationReason, context: RTSErrorContext)
 }
 

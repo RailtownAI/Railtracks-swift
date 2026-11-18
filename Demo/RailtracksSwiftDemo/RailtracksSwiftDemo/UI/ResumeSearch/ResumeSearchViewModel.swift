@@ -15,7 +15,7 @@ import Logging
 ///
 /// **This is the only place the RAG → knowledge-tool mapping is compiled.** `RailtracksSwift`
 /// deliberately does not depend on `RailtracksSwiftRAG`, so no test target can see both modules and
-/// the mapping in `docs/knowledge-tool.md` cannot be type-checked there. The demo imports both.
+/// the mapping cannot be type-checked there. The demo imports both.
 ///
 /// Self-contained on purpose: it opens a store directory the user picks and owns everything from
 /// there, so nothing here is coupled to the RAG tab's state.

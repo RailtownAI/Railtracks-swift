@@ -12,7 +12,7 @@ import Synchronization
 /// run's work like a user cancel does, so a node seeing cancellation can't tell them apart. Whoever
 /// stops the run records the reason here first, and normalization reads it back: anything thrown
 /// while cancelled becomes `runTerminated(reason: reason ?? .cancelled)`. One per run, held by that
-/// run's `RTSNodeInvoker`. See `docs/flow-timeout.md`.
+/// run's `RTSNodeInvoker`.
 final class RTSRunStop: Sendable {
     private typealias Listener = CheckedContinuation<Void, Never>
 

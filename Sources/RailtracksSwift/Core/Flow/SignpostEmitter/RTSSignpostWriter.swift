@@ -21,7 +21,7 @@ import Synchronization
 /// `begin` or `end` is called, so a hop would make every interval late. Its work there is bounded:
 /// a table update and the signpost calls. The tree and message points need a pricing lookup for
 /// their cost, so they go out from a detached task; they carry their start time as a field, so
-/// arriving later doesn't move them. See docs/signposts-from-events.md.
+/// arriving later doesn't move them.
 final class RTSSignpostWriter: Sendable {
     /// What the writer knows about a node between its `node.creation` and `node.destruction`.
     private struct Node {

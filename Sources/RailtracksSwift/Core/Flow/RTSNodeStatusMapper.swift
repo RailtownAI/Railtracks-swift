@@ -15,8 +15,6 @@ import Synchronization
 /// - `node.invocation` adds its parent and run ID, and is `.queued`.
 /// - The executing signal is `.executing`.
 /// - `node.destruction` is `.completed`, `.failed` or `.cancelled`, and forgets the node.
-///
-/// See docs/node-status-from-events.md.
 final class RTSNodeStatusMapper: Sendable {
     /// What the statuses need about a node, between its `node.creation` and `node.destruction`.
     private struct Node {

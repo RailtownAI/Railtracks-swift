@@ -16,8 +16,8 @@ import Foundation
 // | ``RTSRunID``        | the *message-tracing* key         | sessions, messages, events       |
 //
 // Both are minted per call in `RTSNodeInvoker.invokeCore`, and deliberately kept separate:
-// `runID` already doubles as the root edge's id, so overloading it with graph identity was
-// rejected when per-invocation node ids were introduced (see `docs/duplicate-node-id.md`).
+// `runID` already doubles as the id of the edge into the node, so overloading it with graph
+// identity as well was rejected when per-invocation node ids were introduced.
 //
 // These are aliases, not wrappers, so the compiler will not stop one being passed where the
 // other belongs. They document intent; they do not enforce it.

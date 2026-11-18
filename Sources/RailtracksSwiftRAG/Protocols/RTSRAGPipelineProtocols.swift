@@ -157,9 +157,8 @@ public protocol RTSRAGVectorStore: Sendable {
 
     /// Every stored document whose source lies under `root`, in exactly `scope`, with its source.
     ///
-    /// What the orphan sweep and `removeSource(at:)` delete from — see
-    /// `docs/rag-orphan-sweep.md`. The source is the entries' `RTSRAGChunk.MetadataKey.sourcePath`;
-    /// a document stored without one is under no root.
+    /// What the orphan sweep and `removeSource(at:)` delete from. The source is the entries'
+    /// `RTSRAGChunk.MetadataKey.sourcePath`; a document stored without one is under no root.
     ///
     /// - Important: `scope` must match **exactly** — a `nil` scope lists only unscoped entries.
     ///   That is deliberately stricter than ``search(_:)``, where `nil` means every scope: this

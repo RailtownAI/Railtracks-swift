@@ -4,7 +4,7 @@
 //
 //  The emitter's internal typed tap, which the trace collector reads: the same events as the
 //  public stream, in the same order, each with the run that emitted it, plus the internal
-//  properties the trace and the signposts need. See docs/trace-from-events.md.
+//  properties the trace and the signposts need.
 //
 
 import Combine

@@ -10,8 +10,7 @@ import Foundation
 /// Which stored documents an ingest run leaves orphaned — the rule both runtimes apply.
 ///
 /// Pure, so the rule is tested once and cannot drift between the vector-store and Spotlight paths;
-/// each runtime only lists what its store holds and deletes what this returns. The rule and its
-/// reasoning are in `docs/rag-orphan-sweep.md`.
+/// each runtime only lists what its store holds and deletes what this returns.
 enum RTSRAGOrphanSweep {
 
     /// One document to remove.

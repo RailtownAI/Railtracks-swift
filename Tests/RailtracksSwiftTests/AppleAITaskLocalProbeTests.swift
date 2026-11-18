@@ -17,7 +17,6 @@
 //  tool reads it from INSIDE the framework's tool invocation.
 //
 //  Runs only on macOS 26 with the on-device model available; otherwise it no-ops (prints a skip).
-//  See docs/duplicate-node-id.md.
 //
 
 import Testing

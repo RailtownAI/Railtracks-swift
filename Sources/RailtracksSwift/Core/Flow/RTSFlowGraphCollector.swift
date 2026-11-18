@@ -14,7 +14,7 @@ import Combine
 /// It reads the emitter's typed tap (`RTSEventEmitter.observedEventPublisher`), keeps only its own
 /// run's events (`runScope`), and translates them into the node and edge records `RTSFlowGraph.make`
 /// turns into the trace: a creation record for each when the node's `node.invocation` arrives, and
-/// a finish record for each at its `node.destruction`. See docs/trace-from-events.md.
+/// a finish record for each at its `node.destruction`.
 actor RTSFlowGraphCollector {
     private enum CollectionState {
         case collecting
@@ -65,8 +65,9 @@ actor RTSFlowGraphCollector {
     // Finalization is driven by the root's completion (see processNode/EdgeEvent), NOT these counters.
     // But because events are now processed in publish order, both counters MUST be zero by the time we
     // finalize. They are a self-check: a non-zero value at finalization means event ordering was
-    // violated and the trace may be incomplete, so `finishCollection` logs a warning. See
-    // docs/duplicate-node-id.md.
+    // violated and the trace may be incomplete, so `finishCollection` logs a warning. That was the
+    // old bug: with a `Task` per event, the root's finish could be processed before a late child's,
+    // and the trace was written with that child missing.
     private var nodeInProcessCounter = 0
     private var edgeInProcessCounter = 0
 

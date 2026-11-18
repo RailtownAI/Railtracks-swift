@@ -24,7 +24,8 @@ public final class RTSNodeInvoker: Sendable {
     /// The invocation id of the node currently executing on this task. A child invocation reads it
     /// as its parent (the edge `source`). It is bound around `execute` so it flows down the async
     /// call tree — including Conduit's tool `TaskGroup` and Apple's `LanguageModelSession.respond`,
-    /// both verified to inherit task-locals. `nil` at the flow root. See docs/duplicate-node-id.md.
+    /// both verified to inherit task-locals. `nil` at the flow root, which `RTSFlow.run` binds even
+    /// when it is called from inside another flow's node.
     @TaskLocal static var currentInvocationID: RTSInvocationID?
 
     /// Publishes the structured observability event stream. Optional so tests can build an

@@ -39,7 +39,7 @@ public enum RTSRAGIngestEvent: Sendable {
     case loadFailed(RTSRAGError)
     /// Removed from the store: an orphan the run's root covered but the run did not see — a file
     /// moved away, or a page or row that is no longer there — or a document an explicit
-    /// `removeSource(at:)` named. See `docs/rag-orphan-sweep.md`.
+    /// `removeSource(at:)` named.
     case documentSwept(id: RTSRAGDocumentID, source: String?)
 }
 
@@ -71,8 +71,9 @@ public enum RTSRAGWithholdReason: Sendable {
 /// write, a network call.
 ///
 /// So `emit` hands the event to a serial queue and returns. Serial, never a `Task` per event:
-/// unordered dispatch is the race `docs/duplicate-node-id.md` documents, and an event stream whose
-/// order does not match emission order is worse than none for reading a pipeline.
+/// unordered dispatch was a race in the flow-graph trace (a root's finish processed before a late
+/// child's, leaving the child out), and an event stream whose order does not match emission order
+/// is worse than none for reading a pipeline.
 ///
 /// The cost is asynchronous delivery — an event may arrive after the call that produced it has
 /// returned. ``drain()`` exists so a test can wait for the backlog rather than sleep.

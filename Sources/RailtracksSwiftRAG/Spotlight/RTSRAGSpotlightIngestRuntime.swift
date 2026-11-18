@@ -57,7 +57,7 @@ public final class RTSRAGSpotlightIngestRuntime: @unchecked Sendable {
     /// The sweep follows the same rule as ``RTSRAGRetrievalRuntime``'s: once the loader has been
     /// read to the end, donated documents under its root that the run did not see are removed,
     /// keeping any a sanitizer dropped or whose source failed to load. The feeder's namespace is
-    /// the scope. See `docs/rag-orphan-sweep.md`.
+    /// the scope.
     ///
     /// - Parameter sweepsOrphans: `false` skips the sweep for this run.
     /// - Throws: ``RTSRAGError/ingestAlreadyRunning`` if this runtime is already ingesting, or when

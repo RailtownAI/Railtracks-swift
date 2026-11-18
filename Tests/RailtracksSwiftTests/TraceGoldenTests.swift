@@ -5,7 +5,7 @@
 //  Pins the whole flow-graph trace a run writes — every key, every record, every step — so a
 //  change to how the trace is collected can prove the file is unchanged. Each test runs a real
 //  `RTSFlow`, with agents on scripted sessions (`ScriptedFlowSupport.swift`), normalizes what it
-//  wrote and compares it with a golden. See docs/trace-from-events.md.
+//  wrote and compares it with a golden.
 //
 
 import Foundation

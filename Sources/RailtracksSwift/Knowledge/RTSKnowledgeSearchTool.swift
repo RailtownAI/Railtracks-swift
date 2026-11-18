@@ -39,7 +39,7 @@ import FoundationModels
 /// A vector store returns its top matches whether or not any of them are good — there is no
 /// relevance floor in a nearest-neighbour search, so a store with enough entries answers every
 /// question with something. ``minimumScore`` is what makes "nothing relevant" expressible, and it
-/// defaults to `nil` because the right value depends on the embedder. See `docs/knowledge-tool.md`.
+/// defaults to `nil` because the right value depends on the embedder.
 public struct RTSKnowledgeSearchTool: RTSToolNode {
 
     public let id = UUID()
