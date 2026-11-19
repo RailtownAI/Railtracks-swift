@@ -88,6 +88,12 @@ let package = Package(
                 // `package:` is SPM's URL-derived identity (repo name), not the module name.
                 .product(name: "RailtownLogger", package: "railtown-swift-logger"),
                 "RTSMacro"
+            ],
+            swiftSettings: [
+                // A file sees only the members of modules it imports itself (SE-0444). Without it,
+                // Conduit's extensions leak into files that import only FoundationModels, and
+                // Swift 6.3 resolves `@Generable`'s generated types to Conduit's, which fails.
+                .enableUpcomingFeature("MemberImportVisibility"),
             ]
         ),
         .target(
