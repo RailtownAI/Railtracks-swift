@@ -120,7 +120,7 @@ struct AppleAIImageTraceTests {
         let image = RTSImage(data: data, mimeType: "image/png")
         let agent = RTSAgent(llmProvider: .appleAI, name: "Image Trace Probe")
         let gateway = RTSLLMGateway(apiKeys: [:])
-        let invoker = RTSNodeInvoker(sessionID: UUID())
+        let invoker = RTSNodeInvoker()
         let session = try gateway.session(invoker: invoker, agentNode: agent)
 
         _ = try await session.run("What colour is this image? One word.", images: [image], runID: UUID())

@@ -62,6 +62,17 @@ public init(
   example a design doc under `docs/` that isn't committed). A reader without that file hits a
   dead end. Write the point inline instead, or drop the pointer if the surrounding text
   already makes it.
+- **Import every module whose members a file uses.** The `RailtracksSwift` target enables
+  `MemberImportVisibility` (SE-0444), so a file sees only the members of modules it imports
+  itself, not ones another file in the module imported. Without it, Conduit's extensions leaked
+  into files that import only FoundationModels, and Swift 6.3 (Xcode 26) resolved `@Generable`'s
+  generated types to Conduit's and failed to build. A "not available due to missing import of
+  defining module" error means the file needs that `import`, not a workaround.
+- **Log through `log`.** `log` is an `RTSLog`, the library's own wrapper around swift-log's
+  `Logger`, so a file can call `log.debug(...)` and the other levels without importing `Logging`.
+  Don't create another `Logger` or import `Logging` to log. If a level or parameter is missing,
+  add it to `RTSLog` (keep the message an `@autoclosure` and pass `#fileID`, `#function` and
+  `#line` through, so lines still point at the caller).
 - **Modifier order.** When any declaration carries multiple modifiers — properties, computed
   properties, subscripts, methods, or types — order them by category:
   1. **Access control** — `open`, `public`, `internal`, `fileprivate`, `private`

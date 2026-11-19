@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import Logging
 
 public protocol RTSAgentNode: RTSNode {
     var id: UUID { get }
