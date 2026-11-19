@@ -121,6 +121,13 @@ enum FoundationModelsErrorMapping {
     }
 
     /// The PCC quota now: not reached, with no reset date, below OS 27.
+    ///
+    /// - Note: reads `quotaUsage` from a new `PrivateCloudComputeLanguageModel`, not the session's
+    ///   own. The model is `Observable`, so a new one may not have the latest quota yet, while the
+    ///   one that just failed would: a daily limit could then read as not reached and be reported
+    ///   as a plain rate limit. Apple does not document how `quotaUsage` updates, so this is
+    ///   unverified. Checking it needs an account that has hit its daily PCC limit; if a new model
+    ///   lags, read the session's model instead.
     static func privateCloudComputeQuota() -> QuotaState {
         // XCODE26-SDK and OS26-FLOOR: as in `rtsError(for:provider:currentQuota:)`.
         #if compiler(>=6.4)
