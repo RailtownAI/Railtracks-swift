@@ -112,7 +112,7 @@ struct AppleAIImageDeliveryTests {
         let image = RTSImage(data: data, mimeType: "image/png")
         let agent = RTSAgent(llmProvider: .appleAI, name: "Image Probe")
         let gateway = RTSLLMGateway(apiKeys: [:])
-        let invoker = RTSNodeInvoker(sessionID: UUID())
+        let invoker = RTSNodeInvoker()
         let session = try gateway.session(invoker: invoker, agentNode: agent)
         let prompt = "What colour is this image? Answer in one word."
 
@@ -172,7 +172,7 @@ struct AppleAIImageDeliveryTests {
         let agent = RTSAgent(llmProvider: .appleAI, name: "Image Failure Probe")
         let (session, _) = try AppleAISession.build(
             fromAgentTools: [],
-            invoker: RTSNodeInvoker(sessionID: UUID()),
+            invoker: RTSNodeInvoker(),
             createdBy: agent,
             makeSubSession: { _ in
                 throw RTSError.providerUnavailable("no sub-agents in this test")

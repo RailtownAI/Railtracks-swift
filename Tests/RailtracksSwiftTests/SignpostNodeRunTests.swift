@@ -405,17 +405,39 @@ extension RailtracksSwiftTestSuite {
             _ deadline: Duration,
             _ operation: @escaping @Sendable () async throws -> Value
         ) async throws -> Value {
-            let outcome = Mutex<CheckedContinuation<Value, Error>?>(nil)
+            let outcome = PendingOutcome<Value>()
             return try await withCheckedThrowingContinuation { continuation in
-                outcome.withLock { $0 = continuation }
+                outcome.store(continuation)
                 Task {
-                    let result = await Result { try await operation() }
-                    outcome.withLock { $0.take() }?.resume(with: result)
+                    // Not `await Result { … }`: that async initializer is Swift 6.4 only.
+                    let result: Result<Value, Error>
+                    do {
+                        result = .success(try await operation())
+                    } catch {
+                        result = .failure(error)
+                    }
+                    outcome.resume(with: result)
                 }
                 Task {
                     try? await Task.sleep(for: deadline)
-                    outcome.withLock { $0.take() }?.resume(throwing: DeadlinePassed())
+                    outcome.resume(with: .failure(DeadlinePassed()))
                 }
+            }
+        }
+
+        /// The continuation `resultWithin` waits on, resumed by whichever of its two tasks finishes
+        /// first. A class around the `Mutex` so both tasks can capture it: Swift 6.3 refuses to
+        /// send a closure that captures a local non-copyable `Mutex`.
+        private final class PendingOutcome<Value: Sendable>: Sendable {
+            private let continuation = Mutex<CheckedContinuation<Value, Error>?>(nil)
+
+            func store(_ continuation: CheckedContinuation<Value, Error>) {
+                self.continuation.withLock { $0 = continuation }
+            }
+
+            /// Resumes the continuation the first time; later calls do nothing.
+            func resume(with result: Result<Value, Error>) {
+                continuation.withLock { $0.take() }?.resume(with: result)
             }
         }
 
