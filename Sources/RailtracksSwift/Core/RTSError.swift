@@ -57,6 +57,24 @@ public enum RTSError: Error {
     /// The run was stopped before it finished, and `reason` says how: cancelled, timed out, or
     /// ended by a node failure under `endOnError`.
     case runTerminated(reason: RTSRunTerminationReason, context: RTSErrorContext)
+    /// The provider's usage limit was reached — for Private Cloud Compute, the user's daily
+    /// limit, counted against their iCloud account and raised by iCloud+.
+    ///
+    /// `resetDate` is when requests work again, when the provider says; an app can show it, or
+    /// disable the action until then rather than retrying.
+    case quotaLimitReached(provider: String, resetDate: Date?, context: RTSErrorContext)
+    /// The app lacks an entitlement the provider requires — for Private Cloud Compute,
+    /// `com.apple.developer.private-cloud-compute`.
+    ///
+    /// Raised only when a request fails: Private Cloud Compute reports itself available without
+    /// the entitlement, so no availability check can catch this first.
+    ///
+    /// **A signed app never gets this error.** There, Apple's framework stops the app with a fatal
+    /// error ("Missing entitlement: …") before the library can map anything; the thrown form is
+    /// what unsigned processes, such as `swift test`, see. Treat the entitlement as a setup
+    /// requirement: granted to the team, enabled on the App ID, and present in the app's
+    /// entitlements file before any agent uses ``RTSLLMProvider/privateCloudCompute(options:)``.
+    case missingEntitlement(name: String, context: RTSErrorContext)
 }
 
 /// How a run was stopped before it finished. Carried by ``RTSError/runTerminated(reason:context:)``.
@@ -211,6 +229,27 @@ extension RTSError {
         let context = RTSErrorContext(file: file, line: line, function: function)
         return .runTerminated(reason: reason, context: context)
     }
+
+    public static func quotaLimitReached(
+        provider: String,
+        resetDate: Date?,
+        file: String = #fileID,
+        line: UInt = #line,
+        function: String = #function
+    ) -> RTSError {
+        let context = RTSErrorContext(file: file, line: line, function: function)
+        return .quotaLimitReached(provider: provider, resetDate: resetDate, context: context)
+    }
+
+    public static func missingEntitlement(
+        name: String,
+        file: String = #fileID,
+        line: UInt = #line,
+        function: String = #function
+    ) -> RTSError {
+        let context = RTSErrorContext(file: file, line: line, function: function)
+        return .missingEntitlement(name: name, context: context)
+    }
 }
 
 // MARK: - Context access
@@ -229,7 +268,9 @@ extension RTSError {
              .missingAPIKey(_, let context),
              .providerUnavailable(_, let context),
              .guardrailBlocked(_, _, _, let context),
-             .runTerminated(_, let context):
+             .runTerminated(_, let context),
+             .quotaLimitReached(_, _, let context),
+             .missingEntitlement(_, let context):
             return context
         }
     }
@@ -271,6 +312,14 @@ extension RTSError: CustomStringConvertible {
                 + "stage: \(stageText), reason: \(String(reflecting: reason)))"
         case .runTerminated(let reason, _):
             return "runTerminated(reason: \(reason))"
+        case .quotaLimitReached(let provider, let resetDate, _):
+            // ISO 8601 in UTC, so the trace carries an unambiguous time rather than `Date`'s
+            // reflected form.
+            let resetText = resetDate.map { String(reflecting: $0.ISO8601Format()) } ?? "nil"
+            return "quotaLimitReached(provider: \(String(reflecting: provider)), "
+                + "resetDate: \(resetText))"
+        case .missingEntitlement(let name, _):
+            return "missingEntitlement(name: \(String(reflecting: name)))"
         }
     }
 }

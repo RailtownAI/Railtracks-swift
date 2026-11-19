@@ -108,7 +108,9 @@ public struct RTSConcurrencyLimits: Sendable {
     /// serial. So `.appleAI: 1` is the correct value, not merely a safety default. (OpenAI's 15 is real
     /// parallelism — independent remote workers.) Anthropic and Gemini get a conservative **4**: their
     /// per-key burst limits trip well below OpenAI's, and Conduit already retries 429s, so a lower cap
-    /// preserves useful parallelism while avoiding rate-limit storms.
+    /// preserves useful parallelism while avoiding rate-limit storms. Private Cloud Compute also
+    /// gets **4**: it is server-side, so unlike on-device it can run calls in parallel, but Apple
+    /// publishes no rate guidance, so the figure is a guess matching the other remote providers.
     ///
     /// Exposed to the app via `RTSEvaluation.evaluate(..., limits:)` (and directly via `configure(_:)`),
     /// so an app can tune per-provider caps (e.g. `.openAI: 13`).
@@ -116,7 +118,7 @@ public struct RTSConcurrencyLimits: Sendable {
     /// limiter already created this process — reconfiguration mid-process would need the registry to
     /// replace live limiters.
     public static let `default` = RTSConcurrencyLimits(
-        perProvider: [.openAI: 15, .anthropic: 4, .gemini: 4, .appleAI: 1],
+        perProvider: [.openAI: 15, .anthropic: 4, .gemini: 4, .appleAI: 1, .privateCloudCompute: 4],
         unbounded: [],
         fallback: 15
     )

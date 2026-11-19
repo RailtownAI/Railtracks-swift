@@ -88,20 +88,14 @@ extension RTSLLMRoundTrip {
     /// The priced cost of one assistant message, or `nil` when it cannot be priced.
     ///
     /// The defaults here are load-bearing and match what the flow-graph parser used before
-    /// this was factored out: an absent provider reads as `""` for the local check, while an
+    /// this was factored out: an absent provider reads as `""` for the billed check, while an
     /// absent model is looked up as `"unknown"` — which simply misses the pricing map.
     private static func cost(for message: RTSMessage) async -> RTSTokenCost? {
-        let providerName = message.metadata?.providerName ?? ""
-        guard !RTSLLMProvider.isLocal(providerName: providerName) else {
-            return nil
-        }
-        let usage = RTSTokenUsage(
-            promptTokens: message.metadata?.inputTokenCount ?? 0,
-            completionTokens: message.metadata?.tokenCount ?? 0
-        )
-        return try? await RTSCostCalculator.shared.calculateCost(
+        await RTSCostCalculator.shared.cost(
             model: message.metadata?.model ?? "unknown",
-            usage: usage
+            providerName: message.metadata?.providerName ?? "",
+            inputTokens: message.metadata?.inputTokenCount ?? 0,
+            outputTokens: message.metadata?.tokenCount ?? 0
         )
     }
 }

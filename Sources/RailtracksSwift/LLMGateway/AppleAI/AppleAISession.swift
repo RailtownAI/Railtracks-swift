@@ -8,6 +8,7 @@
 import Foundation
 import FoundationModels
 import Synchronization
+import UniformTypeIdentifiers
 
 /// Wraps `LanguageModelSession` and exposes the subset of its API that
 /// `RTSLLMSession` needs, mirroring the role `ChatSession` plays for
@@ -54,6 +55,9 @@ final class AppleAISession: Sendable {
     private let agentName: String
     /// The provider's description, naming the model in errors and log messages.
     private let modelDescription: String
+    /// Private Cloud Compute's reasoning level, held as the library's own type: `ContextOptions`
+    /// is OS 27 API, which this OS 26 class cannot store. `nil` for every other model.
+    private let reasoningLevel: RTSPrivateCloudComputeReasoningLevel?
 
     private init(
         tools: [any Tool],
@@ -61,10 +65,12 @@ final class AppleAISession: Sendable {
         makeSession: @escaping MakeSession,
         supportsVision: Bool,
         agentName: String,
-        modelDescription: String
+        modelDescription: String,
+        reasoningLevel: RTSPrivateCloudComputeReasoningLevel?
     ) {
         self.sessionTools = tools
         self.outputSchema = outputSchema
+        self.reasoningLevel = reasoningLevel
         self.makeSession = makeSession
         self.supportsVision = supportsVision
         self.agentName = agentName
@@ -128,10 +134,10 @@ final class AppleAISession: Sendable {
                 return try await respond(
                     recordingAs: .sentPrompt(prompt, attachedImageCount: attachments.count),
                     text: { session in
-                        try await session.respond(to: promptWithImages)
+                        try await respond(session, to: promptWithImages)
                     },
                     structured: { session, schema in
-                        try await session.respond(to: promptWithImages, schema: schema)
+                        try await respond(session, to: promptWithImages, schema: schema)
                     }
                 )
             }
@@ -140,10 +146,10 @@ final class AppleAISession: Sendable {
         return try await respond(
             recordingAs: .sentPrompt(prompt, attachedImageCount: 0),
             text: { session in
-                try await session.respond(to: prompt)
+                try await respond(session, to: prompt)
             },
             structured: { session, schema in
-                try await session.respond(to: prompt, schema: schema)
+                try await respond(session, to: prompt, schema: schema)
             }
         )
     }
@@ -307,6 +313,102 @@ final class AppleAISession: Sendable {
         }
     }
 
+    /// `respond(to:schema:)`, with the reasoning level's context options when there is one.
+    private func respond(
+        _ session: LanguageModelSession,
+        to prompt: String,
+        schema: GenerationSchema
+    ) async throws -> LanguageModelSession.Response<GeneratedContent> {
+        // XCODE26-SDK: `ContextOptions` exists only in the OS 27 SDK (Xcode 27, Swift 6.4).
+        #if compiler(>=6.4)
+        // OS26-FLOOR: `ContextOptions` is OS 27 API; no reasoning level can be set below it.
+        if #available(macOS 27, iOS 27, *),
+           let contextOptions = Self.contextOptions(for: reasoningLevel, hasSchema: true) {
+            return try await session.respond(
+                to: prompt,
+                schema: schema,
+                contextOptions: contextOptions
+            )
+        }
+        #endif
+        return try await session.respond(to: prompt, schema: schema)
+    }
+
+    /// `respond(to:)`, with the reasoning level's context options when there is one.
+    private func respond(
+        _ session: LanguageModelSession,
+        to prompt: String
+    ) async throws -> LanguageModelSession.Response<String> {
+        // XCODE26-SDK and OS26-FLOOR: as in `respond(_:to:schema:)`.
+        #if compiler(>=6.4)
+        if #available(macOS 27, iOS 27, *),
+           let contextOptions = Self.contextOptions(for: reasoningLevel, hasSchema: false) {
+            return try await session.respond(to: prompt, contextOptions: contextOptions)
+        }
+        #endif
+        return try await session.respond(to: prompt)
+    }
+
+    // XCODE26-SDK: as above.
+    #if compiler(>=6.4)
+    /// `respond(to:schema:)` for a prompt with attachments, with the reasoning level's context
+    /// options when there is one. OS 27 only, as attachments are.
+    @available(macOS 27, iOS 27, *)
+    private func respond(
+        _ session: LanguageModelSession,
+        to prompt: Prompt,
+        schema: GenerationSchema
+    ) async throws -> LanguageModelSession.Response<GeneratedContent> {
+        if let contextOptions = Self.contextOptions(for: reasoningLevel, hasSchema: true) {
+            return try await session.respond(
+                to: prompt,
+                schema: schema,
+                contextOptions: contextOptions
+            )
+        }
+        return try await session.respond(to: prompt, schema: schema)
+    }
+
+    /// `respond(to:)` for a prompt with attachments, with the reasoning level's context options
+    /// when there is one. OS 27 only, as attachments are.
+    @available(macOS 27, iOS 27, *)
+    private func respond(
+        _ session: LanguageModelSession,
+        to prompt: Prompt
+    ) async throws -> LanguageModelSession.Response<String> {
+        if let contextOptions = Self.contextOptions(for: reasoningLevel, hasSchema: false) {
+            return try await session.respond(to: prompt, contextOptions: contextOptions)
+        }
+        return try await session.respond(to: prompt)
+    }
+
+    /// The context options carrying `reasoningLevel`, or `nil` when there is no level, so the call
+    /// keeps Apple's own default options untouched.
+    ///
+    /// With a schema, `includeSchemaInPrompt` stays `true`: that is Apple's default for
+    /// `respond(to:schema:)`, and passing any `ContextOptions` replaces the default wholesale, so a
+    /// bare `ContextOptions(reasoningLevel:)` would silently stop the schema being sent.
+    @available(macOS 27, iOS 27, *)
+    static func contextOptions(
+        for reasoningLevel: RTSPrivateCloudComputeReasoningLevel?,
+        hasSchema: Bool
+    ) -> ContextOptions? {
+        guard let reasoningLevel else {
+            return nil
+        }
+        let level: ContextOptions.ReasoningLevel
+        switch reasoningLevel {
+        case .light:
+            level = .light
+        case .moderate:
+            level = .moderate
+        case .deep:
+            level = .deep
+        }
+        return ContextOptions(includeSchemaInPrompt: hasSchema ? true : nil, reasoningLevel: level)
+    }
+    #endif
+
     /// Input and output token totals, in a type this OS 26 class can hold —
     /// `LanguageModelSession.Usage` is OS 27 only.
     struct TokenTotals: CustomStringConvertible {
@@ -443,15 +545,17 @@ final class AppleAISession: Sendable {
     /// Returns non-conforming tools separately so the caller can warn about them.
     ///
     /// `sessionFactory` is `nil` for the on-device system model; `.foundationModel` passes one
-    /// built from its `LanguageModel`. `supportsVision` is that model's `.vision` capability, read
-    /// by the caller because the session cannot report its model.
+    /// built from its `LanguageModel`, and `.privateCloudCompute` one built on Apple's server
+    /// model, along with its `reasoningLevel`. `supportsVision` is the model's `.vision`
+    /// capability, read by the caller because the session cannot report its model.
     static func build(
         fromAgentTools tools: [any RTSToolNode],
         invoker: RTSNodeInvoker,
         createdBy: any RTSAgentNode,
         makeSubSession: @escaping @Sendable (any RTSAgentNode) throws -> RTSLLMSession,
         sessionFactory: MakeSession? = nil,
-        supportsVision: Bool
+        supportsVision: Bool,
+        reasoningLevel: RTSPrivateCloudComputeReasoningLevel? = nil
     ) throws -> (session: AppleAISession, unsupported: [any RTSToolNode]) {
         var appleTools: [any Tool] = []
         var unsupportedTools: [any RTSToolNode] = []
@@ -512,7 +616,8 @@ final class AppleAISession: Sendable {
             },
             supportsVision: supportsVision,
             agentName: createdBy.agentName,
-            modelDescription: createdBy.llmProvider.description
+            modelDescription: createdBy.llmProvider.description,
+            reasoningLevel: reasoningLevel
         )
         return (session, unsupportedTools)
     }
@@ -529,6 +634,28 @@ final class AppleAISession: Sendable {
         #endif
         return false
     }
+
+    // XCODE26-SDK: `PrivateCloudComputeLanguageModel` exists only in the OS 27 SDK (Xcode 27,
+    // Swift 6.4).
+    #if compiler(>=6.4)
+    /// A factory building each session on Apple's server model, for `.privateCloudCompute`, and
+    /// whether that model takes image input.
+    ///
+    /// One model for the agent session's lifetime: `setInstruction` rebuilds the
+    /// `LanguageModelSession` on the same model rather than creating another, and the vision
+    /// check reads that same model's capabilities.
+    @available(macOS 27, iOS 27, *)
+    static func privateCloudComputeSessionFactory() -> (
+        makeSession: MakeSession,
+        supportsVision: Bool
+    ) {
+        let model = PrivateCloudComputeLanguageModel()
+        let makeSession: MakeSession = { instructions, tools in
+            LanguageModelSession(model: model, tools: tools, instructions: instructions)
+        }
+        return (makeSession, RTSAppleAIImageDelivery.supportsVision(model.capabilities))
+    }
+    #endif
 
     /// A session on the on-device system model.
     private static func makeSystemSession(instruction: String?, tools: [any Tool]) -> LanguageModelSession {
@@ -612,6 +739,20 @@ extension Transcript.Entry {
             // Logged as a size only: the text restates the conversation, and the console must not
             // become a way around what the trace keeps out (see the AppleAI PII guardrail).
             log.debug("🍎 reasoning entry skipped: \(joinedText(of: reasoning.segments).count) characters")
+            return nil
+        #endif
+        // XCODE27_3-SDK: `.data` exists only in SDKs whose FoundationModels is 2.2 or later (Xcode
+        // 27.3); the compiler version cannot tell those SDKs apart. Built with an older SDK, the
+        // entry falls to `@unknown default` below, which also skips it.
+        #if canImport(FoundationModels, _version: 2.2)
+        case .data(let dataEntry):
+            // macOS / iOS 27.2: binary content in the transcript, such as a file. Not a message, as
+            // with reasoning: it has no text for the trace, and as an assistant message it would
+            // add a phantom round trip. Logged as its type and size only, never its bytes.
+            if #available(macOS 27.2, iOS 27.2, *) {
+                let type = dataEntry.contentType.identifier
+                log.debug("🍎 data entry skipped: \(type), \(dataEntry.content.count) bytes")
+            }
             return nil
         #endif
         @unknown default:

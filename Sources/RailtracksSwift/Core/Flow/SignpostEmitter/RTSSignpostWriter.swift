@@ -384,9 +384,9 @@ final class RTSSignpostWriter: Sendable {
         }
 
         Task.detached { [self] in
-            let nodeCost = await Self.cost(
+            let nodeCost = await Self.displayedCost(
                 model: model,
-                provider: provider,
+                providerName: provider,
                 inputTokens: inputTokens,
                 outputTokens: outputTokens
             )
@@ -409,9 +409,9 @@ final class RTSSignpostWriter: Sendable {
                 hasOutputGuardrail: point.creation.hasOutputGuardrail
             )
             for row in rows {
-                let rowCost = await Self.cost(
+                let rowCost = await Self.displayedCost(
                     model: row.model,
-                    provider: row.provider,
+                    providerName: row.provider,
                     inputTokens: row.inputTokens,
                     outputTokens: row.outputTokens
                 )
@@ -472,21 +472,23 @@ final class RTSSignpostWriter: Sendable {
         )
     }
 
-    /// USD cost from token usage via `RTSCostCalculator`, the way the trace's `llm_details` gets
-    /// it. 0 for local providers (AppleAI), when no tokens were used, or when the model has no
-    /// pricing entry or the pricing map is unavailable.
-    static func cost(
+    /// The cost Instruments shows: `RTSCostCalculator`'s price, or 0 when it has none. A row with
+    /// no tokens, such as every input row, is 0 without a lookup.
+    private static func displayedCost(
         model: String,
-        provider: String,
+        providerName: String,
         inputTokens: Int,
         outputTokens: Int
     ) async -> Double {
-        guard !RTSLLMProvider.isLocal(providerName: provider),
-              inputTokens > 0 || outputTokens > 0 else {
+        guard inputTokens > 0 || outputTokens > 0 else {
             return 0
         }
-        let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
-        let cost = try? await RTSCostCalculator.shared.calculateCost(model: model, usage: usage)
+        let cost = await RTSCostCalculator.shared.cost(
+            model: model,
+            providerName: providerName,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens
+        )
         return cost?.totalCost ?? 0
     }
 }
