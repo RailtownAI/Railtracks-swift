@@ -15,6 +15,7 @@ import Combine
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
+import UniformTypeIdentifiers
 
 #if canImport(FoundationModels)
 
@@ -165,6 +166,24 @@ struct AppleAITranscriptMappingTests {
         )
 
         #expect(reasoning.toRTSMessage() == nil)
+    }
+    #endif
+
+    // `Transcript.DataEntry` exists only in SDKs whose FoundationModels is 2.2 or later (Xcode 27.3,
+    // macOS / iOS 27.2 at run time); the compiler version cannot tell those SDKs apart.
+    #if canImport(FoundationModels, _version: 2.2)
+    /// A data entry is not a message: it has no text for the trace, and as an assistant message it
+    /// would count as an extra round trip in `llm_details`.
+    @Test("A data entry is not turned into a message")
+    func dataEntryIsSkipped() {
+        guard #available(macOS 27.2, iOS 27.2, *) else {
+            return
+        }
+        let data = Transcript.Entry.data(
+            Transcript.DataEntry(contentType: .png, content: Data([0x89, 0x50, 0x4E, 0x47]))
+        )
+
+        #expect(data.toRTSMessage() == nil)
     }
     #endif
 

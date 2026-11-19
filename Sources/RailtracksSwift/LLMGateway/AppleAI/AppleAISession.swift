@@ -740,6 +740,20 @@ extension Transcript.Entry {
             log.debug("🍎 reasoning entry skipped: \(joinedText(of: reasoning.segments).count) characters")
             return nil
         #endif
+        // XCODE27_3-SDK: `.data` exists only in SDKs whose FoundationModels is 2.2 or later (Xcode
+        // 27.3); the compiler version cannot tell those SDKs apart. Built with an older SDK, the
+        // entry falls to `@unknown default` below, which also skips it.
+        #if canImport(FoundationModels, _version: 2.2)
+        case .data(let dataEntry):
+            // macOS / iOS 27.2: binary content in the transcript, such as a file. Not a message, as
+            // with reasoning: it has no text for the trace, and as an assistant message it would
+            // add a phantom round trip. Logged as its type and size only, never its bytes.
+            if #available(macOS 27.2, iOS 27.2, *) {
+                let type = dataEntry.contentType.identifier
+                log.debug("🍎 data entry skipped: \(type), \(dataEntry.content.count) bytes")
+            }
+            return nil
+        #endif
         @unknown default:
             log.debug("🍎 toRTSMessage: unhandled Transcript.Entry case: \(self)")
             return nil
