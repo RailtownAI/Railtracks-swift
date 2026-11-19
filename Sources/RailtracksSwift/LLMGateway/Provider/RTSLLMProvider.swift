@@ -255,7 +255,7 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         case .appleAI:
             return "on-device"
         case .privateCloudCompute:
-            return "private-cloud-compute"
+            return "apple-private-cloud-compute"
         case .foundationModel(let languageModel):
             return languageModel.modelID
         }

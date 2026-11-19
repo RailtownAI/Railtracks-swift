@@ -89,6 +89,20 @@ public final class RTSLLMSession: Sendable {
 // MARK: - static Builder
 
 extension RTSLLMSession {
+    /// The model name a Foundation Models session stamps on its messages, which the `llm.*`
+    /// events, the trace and the signposts report.
+    ///
+    /// The model id, as `llm.creation` reports it, so a run names its model one way throughout
+    /// and a PCC model reads the same whether built as `.privateCloudCompute` or wrapped in
+    /// `.foundationModel`. The one exception is `.appleAI`, which has always recorded its
+    /// provider name; kept so existing traces do not change.
+    static func recordedModelName(for provider: RTSLLMProvider) -> String {
+        if case .appleAI = provider {
+            return provider.providerName
+        }
+        return provider.modelID
+    }
+
     @available(macOS 26, iOS 26, *)
     static func build(
         appleAI: AppleAISession,
@@ -97,14 +111,7 @@ extension RTSLLMSession {
         let agentName = agentNode.agentName
         let provider = agentNode.llmProvider
         let providerName = provider.providerName
-        // `.appleAI` has always recorded its provider name as the model; kept so existing traces
-        // do not change. `.foundationModel` records its real model id, which is the pricing key.
-        let modelName: String
-        if case .foundationModel = provider {
-            modelName = provider.modelID
-        } else {
-            modelName = providerName
-        }
+        let modelName = recordedModelName(for: provider)
         let runIDMap = RunIDMap()
         // `message:` hands out the stamped copies `recordNewMessages` stores: the `llm.*` events are
         // built from `messages()`, and the raw transcript messages carry no model, tokens or latency.

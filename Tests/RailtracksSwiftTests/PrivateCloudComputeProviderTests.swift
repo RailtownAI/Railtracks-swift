@@ -25,8 +25,22 @@ struct PrivateCloudComputeProviderTests {
 
         #expect(provider.kind == .privateCloudCompute)
         #expect(provider.providerName == "AppleAIPrivateCloudCompute")
-        #expect(provider.modelID == "private-cloud-compute")
+        #expect(provider.modelID == "apple-private-cloud-compute")
         #expect(provider.description == "AppleAI-PrivateCloudCompute")
+    }
+
+    @Test("Its messages record its model id as the model, as llm.creation does")
+    func recordsModelID() {
+        let provider = RTSLLMProvider.privateCloudCompute()
+
+        #expect(RTSLLMSession.recordedModelName(for: provider) == "apple-private-cloud-compute")
+        #expect(RTSLLMSession.recordedModelName(for: provider) == provider.modelID)
+    }
+
+    @Test("On-device AppleAI still records its provider name as the model")
+    func appleAIKeepsProviderName() {
+        // Kept so existing `.appleAI` traces do not change.
+        #expect(RTSLLMSession.recordedModelName(for: .appleAI) == "AppleAI")
     }
 
     @Test("allCases holds one Private Cloud Compute entry")
@@ -283,6 +297,24 @@ struct PrivateCloudComputeSessionTests {
 
         #expect(AppleAISession.contextOptions(for: nil, hasSchema: false) == nil)
         #expect(AppleAISession.contextOptions(for: nil, hasSchema: true) == nil)
+    }
+
+    @Test("A PCC model wrapped in .foundationModel records the model id the app gave it")
+    func wrappedPrivateCloudComputeRecordsItsModelID() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        let wrapped = RTSFoundationLanguageModel(
+            PrivateCloudComputeLanguageModel(),
+            kind: .privateCloudCompute,
+            modelID: "apple-private-cloud-compute"
+        )
+
+        // The same name as `.privateCloudCompute`, when the app passes the same model id.
+        #expect(
+            RTSLLMSession.recordedModelName(for: .foundationModel(wrapped))
+                == RTSLLMSession.recordedModelName(for: .privateCloudCompute())
+        )
     }
 
     @Test("The gateway builds a session without a network call")
@@ -546,7 +578,7 @@ struct PrivateCloudComputeQuotaMappingTests {
         let wrapped = RTSFoundationLanguageModel(
             PrivateCloudComputeLanguageModel(),
             kind: .privateCloudCompute,
-            modelID: "private-cloud-compute"
+            modelID: "apple-private-cloud-compute"
         )
         let innermost = NSError(domain: "ModelManagerServices.ModelManagerError", code: 1046)
         let failure = NSError(
