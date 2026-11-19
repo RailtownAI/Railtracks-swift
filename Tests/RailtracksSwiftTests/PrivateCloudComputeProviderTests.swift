@@ -60,26 +60,26 @@ struct PrivateCloudComputeProviderTests {
         #expect(RTSLLMProvider.isBilled(providerName: ""))
     }
 
-    @Test("Its signpost cost is zero even with tokens")
-    func signpostCostIsZero() async {
-        let cost = await RTSSignpostWriter.cost(
+    @Test("It has no cost even with tokens")
+    func costIsNone() async {
+        let cost = await RTSCostCalculator.shared.cost(
             model: "gpt-4o",
-            provider: "AppleAIPrivateCloudCompute",
+            providerName: "AppleAIPrivateCloudCompute",
             inputTokens: 1_000,
             outputTokens: 1_000
         )
 
-        let billedCost = await RTSSignpostWriter.cost(
+        let billedCost = await RTSCostCalculator.shared.cost(
             model: "gpt-4o",
-            provider: "OpenAI",
+            providerName: "OpenAI",
             inputTokens: 1_000,
             outputTokens: 1_000
         )
 
         // The same priced model and tokens cost something on a billed provider, so only the billed
-        // check can make PCC's zero.
-        #expect(billedCost > 0)
-        #expect(cost == 0)
+        // check can make PCC's cost nil.
+        #expect((billedCost?.totalCost ?? 0) > 0)
+        #expect(cost == nil)
     }
 
     // MARK: - Events and concurrency

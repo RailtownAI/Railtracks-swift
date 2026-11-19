@@ -217,6 +217,26 @@ public actor RTSCostCalculator {
         return computeCost(entry: entry, usage: usage)
     }
 
+    /// The cost of one LLM call as the library reports it: `nil` when the provider is not billed
+    /// (AppleAI and Private Cloud Compute), when the model is not in the pricing map, or when the
+    /// map is unavailable.
+    ///
+    /// The one place the billed check and the pricing meet, so the `llm.*` events and the
+    /// signposts price a call the same way. `providerName` is `RTSLLMProvider.providerName`; an
+    /// unknown name counts as billed and is looked up.
+    func cost(
+        model: String,
+        providerName: String,
+        inputTokens: Int,
+        outputTokens: Int
+    ) async -> RTSTokenCost? {
+        guard RTSLLMProvider.isBilled(providerName: providerName) else {
+            return nil
+        }
+        let usage = RTSTokenUsage(promptTokens: inputTokens, completionTokens: outputTokens)
+        return try? await calculateCost(model: model, usage: usage)
+    }
+
     /// Warms the in-memory pricing map (loading from remote, falling back to the disk
     /// cache) so the first real `calculateCost` doesn't pay the fetch latency. Respects
     /// the TTL cache — a no-op once the map is loaded and fresh — and never throws, so it
