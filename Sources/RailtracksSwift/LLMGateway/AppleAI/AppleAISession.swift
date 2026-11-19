@@ -8,6 +8,7 @@
 import Foundation
 import FoundationModels
 import Synchronization
+import UniformTypeIdentifiers
 
 /// Wraps `LanguageModelSession` and exposes the subset of its API that
 /// `RTSLLMSession` needs, mirroring the role `ChatSession` plays for
