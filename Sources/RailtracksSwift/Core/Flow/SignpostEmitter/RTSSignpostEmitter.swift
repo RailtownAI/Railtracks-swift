@@ -33,6 +33,8 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
         runID: RTSRunID,
         input: RTSInput,
         instructions: String?,
+        provider: String,
+        model: String,
         hasInputGuardrail: Bool = false,
         hasOutputGuardrail: Bool = false
     ) {
@@ -48,6 +50,8 @@ final class RTSSignpostEmitter: RTSSignpostEmitting, @unchecked Sendable {
             sessionId: sessionID.uuidString,
             runId: sessionID.uuidString,
             parentName: parentName,
+            provider: provider,
+            model: model,
             input: Self.inputSummary(input, nodeType: nodeType),
             // Cut like the input summary, for the same reason; the kit caps at the same length.
             instructions: String((instructions ?? "").prefix(Self.inputSummaryLimit))

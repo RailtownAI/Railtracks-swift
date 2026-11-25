@@ -178,6 +178,8 @@ final class RTSSignpostWriter: Sendable {
             instructions: creation.nodeType == .agent
                 ? RTSAgentInput.systemMessage(in: input)
                 : nil,
+            provider: creation.provider,
+            model: creation.model,
             hasInputGuardrail: creation.hasInputGuardrail,
             hasOutputGuardrail: creation.hasOutputGuardrail
         )
