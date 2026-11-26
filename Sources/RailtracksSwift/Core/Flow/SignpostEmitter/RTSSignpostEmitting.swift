@@ -36,6 +36,10 @@ public protocol RTSSignpostEmitting: Sendable {
     ///   - instructions: For an agent, the system message it runs with (its `systemMessage`
     ///     input, after any input guardrails), or `nil` when it has none. Always `nil` for tools
     ///     and functions.
+    ///   - provider: For an agent, its LLM provider's name, such as `"OpenAI"`. Empty for tools
+    ///     and functions.
+    ///   - model: For an agent, its LLM's model ID, such as `"gpt-4o-mini"`. Empty for tools and
+    ///     functions.
     func emitNodeStart(
         nodeID: UUID,
         parentNodeID: UUID?,
@@ -46,6 +50,8 @@ public protocol RTSSignpostEmitting: Sendable {
         runID: RTSRunID,
         input: RTSInput,
         instructions: String?,
+        provider: String,
+        model: String,
         hasInputGuardrail: Bool,
         hasOutputGuardrail: Bool
     )

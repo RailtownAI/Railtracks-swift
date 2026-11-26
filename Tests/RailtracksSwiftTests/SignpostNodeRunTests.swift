@@ -19,6 +19,8 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
         let runID: RTSRunID
         let input: RTSInput
         let instructions: String?
+        let provider: String
+        let model: String
     }
 
     struct End: Equatable {
@@ -52,6 +54,8 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
         runID: RTSRunID,
         input: RTSInput,
         instructions: String?,
+        provider: String,
+        model: String,
         hasInputGuardrail: Bool,
         hasOutputGuardrail: Bool
     ) {
@@ -62,7 +66,9 @@ private final class RecordingSignpostEmitter: RTSSignpostEmitting, @unchecked Se
             nodeType: nodeType,
             runID: runID,
             input: input,
-            instructions: instructions
+            instructions: instructions,
+            provider: provider,
+            model: model
         )
         lock.withLock { _starts.append(start) }
     }
@@ -308,6 +314,42 @@ extension RailtracksSwiftTestSuite {
             // The agent's start carries the input it ran with, which the emitter summarizes.
             #expect(agentStart.input == ["prompt": .string("hi")])
             #expect(RTSSignpostEmitter.inputSummary(agentStart.input, nodeType: .agent) == "hi")
+            expectEveryStartEnded(emitter)
+        }
+
+        @Test("an agent's start carries its provider and model; a tool's carries neither")
+        func agentStartCarriesProviderAndModel() async throws {
+            let emitter = RecordingSignpostEmitter()
+            let signposted = SignpostedInvoker(emitter)
+            let invoker = signposted.invoker
+            let agent = RTSAgent(llmProvider: .openAI(modelIDString: "gpt-4o-mini"), name: "Agent")
+            let tool = StubTool(toolName: "Lookup")
+            // Stands in for the LLM, as in `agentCallsTool`: one tool call, then an answer.
+            let session = RTSLLMSession(
+                run: { _, _, _ in
+                    _ = try await invoker.invokeTool(tool, input: [:], createdBy: agent)
+                    return "done"
+                },
+                setSystemPrompt: { _, _ in },
+                message: { [] },
+                agentName: "Agent"
+            )
+
+            _ = try await invoker.invokeAgent(
+                agent,
+                input: ["prompt": .string("hi")],
+                session: session
+            )
+            await signposted.flush()
+
+            let agentStart = try #require(emitter.start(named: "Agent"))
+            let toolStart = try #require(emitter.start(named: "Lookup"))
+            #expect(!agent.llmProvider.providerName.isEmpty)
+            #expect(agentStart.provider == agent.llmProvider.providerName)
+            #expect(agentStart.model == agent.llmProvider.modelID)
+            #expect(agentStart.model == "gpt-4o-mini")
+            #expect(toolStart.provider == "")
+            #expect(toolStart.model == "")
             expectEveryStartEnded(emitter)
         }
 

@@ -175,6 +175,8 @@ private final class RecordingPointSignposts: RTSSignpostEmitting, Sendable {
         runID: RTSRunID,
         input: RTSInput,
         instructions: String?,
+        provider: String,
+        model: String,
         hasInputGuardrail: Bool,
         hasOutputGuardrail: Bool
     ) {
@@ -344,9 +346,10 @@ private final class RecordingPointSignposts: RTSSignpostEmitting, Sendable {
 /// Records the interval signposts (`emitNodeStart` / `emitNodeEnd`) as one line each, in call
 /// order, which is deterministic for these sequential flows. Point signposts are ignored.
 ///
-/// Every field is recorded. Node ids become `<node:Name>` and run ids `<run:Name>`, labelled at the
-/// node's begin, with `-2`, `-3`… for a name seen again. The session id becomes `<session>`, and
-/// a call site's line number `<line>`.
+/// Every field but `provider` and `model` is recorded (`SignpostNodeRunTests` covers those, and
+/// leaving them out keeps the goldens unchanged). Node ids become `<node:Name>` and run ids
+/// `<run:Name>`, labelled at the node's begin, with `-2`, `-3`… for a name seen again. The
+/// session id becomes `<session>`, and a call site's line number `<line>`.
 private final class RecordingIntervalSignposts: RTSSignpostEmitting, Sendable {
     private enum Record {
         case begin(
@@ -371,6 +374,8 @@ private final class RecordingIntervalSignposts: RTSSignpostEmitting, Sendable {
         runID: RTSRunID,
         input: RTSInput,
         instructions: String?,
+        provider: String,
+        model: String,
         hasInputGuardrail: Bool,
         hasOutputGuardrail: Bool
     ) {
