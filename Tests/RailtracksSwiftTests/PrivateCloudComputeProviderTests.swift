@@ -24,7 +24,7 @@ struct PrivateCloudComputeProviderTests {
         let provider = RTSLLMProvider.privateCloudCompute()
 
         #expect(provider.kind == .privateCloudCompute)
-        #expect(provider.providerName == "AppleAIPrivateCloudCompute")
+        #expect(provider.providerName == "AppleAI")
         #expect(provider.modelID == "apple-private-cloud-compute")
         #expect(provider.description == "AppleAI-PrivateCloudCompute")
     }
@@ -37,10 +37,52 @@ struct PrivateCloudComputeProviderTests {
         #expect(RTSLLMSession.recordedModelName(for: provider) == provider.modelID)
     }
 
-    @Test("On-device AppleAI still records its provider name as the model")
-    func appleAIKeepsProviderName() {
-        // Kept so existing `.appleAI` traces do not change.
-        #expect(RTSLLMSession.recordedModelName(for: .appleAI) == "AppleAI")
+    @Test("On-device AppleAI records its model id as the model, like every other provider")
+    func appleAIRecordsModelID() {
+        #expect(RTSLLMSession.recordedModelName(for: .appleAI) == "apple-on-device")
+        #expect(RTSLLMSession.recordedModelName(for: .appleAI) == RTSLLMProvider.appleAI.modelID)
+    }
+
+    @Test("Both Apple models share the provider name and differ by model id")
+    func appleModelsShareProviderName() {
+        let onDevice = RTSLLMProvider.appleAI
+        let privateCloud = RTSLLMProvider.privateCloudCompute()
+
+        #expect(onDevice.providerName == "AppleAI")
+        #expect(onDevice.modelID == "apple-on-device")
+        #expect(privateCloud.providerName == "AppleAI")
+        #expect(privateCloud.modelID == "apple-private-cloud-compute")
+        // The `llm.*` events' model identifier still tells them apart.
+        #expect(RTSLLMEventEmission.modelIdentifier(for: onDevice)
+            != RTSLLMEventEmission.modelIdentifier(for: privateCloud))
+    }
+
+    @Test("Wrapped in .foundationModel, both Apple models report the same strings as their cases")
+    func wrappedAppleModelsReportCaseStrings() {
+        guard #available(macOS 27, iOS 27, *) else {
+            return
+        }
+        // The app's model ids are deliberately different: the library reports its own for the
+        // Apple kinds.
+        let onDevice = RTSLLMProvider.foundationModel(
+            RTSFoundationLanguageModel(SystemLanguageModel.default, kind: .appleAI, modelID: "on-device")
+        )
+        let privateCloud = RTSLLMProvider.foundationModel(
+            RTSFoundationLanguageModel(
+                PrivateCloudComputeLanguageModel(),
+                kind: .privateCloudCompute,
+                modelID: "pcc"
+            )
+        )
+
+        #expect(onDevice.providerName == "AppleAI")
+        #expect(onDevice.modelID == "apple-on-device")
+        #expect(RTSLLMSession.recordedModelName(for: onDevice) == "apple-on-device")
+        #expect(privateCloud.providerName == "AppleAI")
+        #expect(privateCloud.modelID == "apple-private-cloud-compute")
+        #expect(RTSLLMSession.recordedModelName(for: privateCloud) == "apple-private-cloud-compute")
+        #expect(onDevice.isBilled == false)
+        #expect(privateCloud.isBilled == false)
     }
 
     @Test("allCases holds one Private Cloud Compute entry")
@@ -69,6 +111,9 @@ struct PrivateCloudComputeProviderTests {
         #expect(RTSLLMProvider.isBilled(providerName: "Anthropic"))
         #expect(RTSLLMProvider.isBilled(providerName: "Gemini"))
         #expect(RTSLLMProvider.isBilled(providerName: "AppleAI") == false)
+        // Legacy: Private Cloud Compute's provider name in traces written before it reported
+        // "AppleAI".
+        #expect(RTSLLMProvider.isBilled(providerName: "AppleAIPrivateCloudCompute") == false)
         // An unknown or missing name is still looked up in the pricing map, as before.
         #expect(RTSLLMProvider.isBilled(providerName: "something else"))
         #expect(RTSLLMProvider.isBilled(providerName: ""))
@@ -77,6 +122,14 @@ struct PrivateCloudComputeProviderTests {
     @Test("It has no cost even with tokens")
     func costIsNone() async {
         let cost = await RTSCostCalculator.shared.cost(
+            model: "gpt-4o",
+            providerName: "AppleAI",
+            inputTokens: 1_000,
+            outputTokens: 1_000
+        )
+        // Legacy: Private Cloud Compute's provider name in traces written before it reported
+        // "AppleAI".
+        let legacyCost = await RTSCostCalculator.shared.cost(
             model: "gpt-4o",
             providerName: "AppleAIPrivateCloudCompute",
             inputTokens: 1_000,
@@ -94,12 +147,17 @@ struct PrivateCloudComputeProviderTests {
         // check can make PCC's cost nil.
         #expect((billedCost?.totalCost ?? 0) > 0)
         #expect(cost == nil)
+        #expect(legacyCost == nil)
     }
 
     // MARK: - Events and concurrency
 
     @Test("Its event wire value is Apple's")
     func wireValueIsApple() {
+        #expect(RTSEventModelProvider.wireValue(for: RTSLLMProvider.privateCloudCompute().providerName)
+            == "apple")
+        // Legacy: Private Cloud Compute's provider name in traces written before it reported
+        // "AppleAI".
         #expect(RTSEventModelProvider.wireValue(for: "AppleAIPrivateCloudCompute") == "apple")
     }
 
@@ -154,12 +212,12 @@ struct PrivateCloudComputeErrorTests {
     @Test("A quota error's description carries its reset date")
     func quotaDescriptionCarriesDate() {
         let error = RTSError.quotaLimitReached(
-            provider: "AppleAIPrivateCloudCompute",
+            provider: "AppleAI",
             resetDate: Self.resetDate
         )
 
         #expect(error.description == """
-            quotaLimitReached(provider: "AppleAIPrivateCloudCompute", \
+            quotaLimitReached(provider: "AppleAI", \
             resetDate: "2027-01-15T08:00:00Z")
             """)
     }
@@ -167,12 +225,12 @@ struct PrivateCloudComputeErrorTests {
     @Test("A quota error without a date says so")
     func quotaDescriptionWithoutDate() {
         let error = RTSError.quotaLimitReached(
-            provider: "AppleAIPrivateCloudCompute",
+            provider: "AppleAI",
             resetDate: nil
         )
 
         #expect(error.description
-            == #"quotaLimitReached(provider: "AppleAIPrivateCloudCompute", resetDate: nil)"#)
+            == #"quotaLimitReached(provider: "AppleAI", resetDate: nil)"#)
     }
 
     @Test("The missing-entitlement error names the entitlement")
@@ -299,7 +357,7 @@ struct PrivateCloudComputeSessionTests {
         #expect(AppleAISession.contextOptions(for: nil, hasSchema: true) == nil)
     }
 
-    @Test("A PCC model wrapped in .foundationModel records the model id the app gave it")
+    @Test("A PCC model wrapped in .foundationModel records the same model name as .privateCloudCompute")
     func wrappedPrivateCloudComputeRecordsItsModelID() {
         guard #available(macOS 27, iOS 27, *) else {
             return
@@ -310,7 +368,8 @@ struct PrivateCloudComputeSessionTests {
             modelID: "apple-private-cloud-compute"
         )
 
-        // The same name as `.privateCloudCompute`, when the app passes the same model id.
+        // The same name as `.privateCloudCompute`: the library reports its own model id for the
+        // Apple kinds, whatever the app passes.
         #expect(
             RTSLLMSession.recordedModelName(for: .foundationModel(wrapped))
                 == RTSLLMSession.recordedModelName(for: .privateCloudCompute())
@@ -375,7 +434,7 @@ struct PrivateCloudComputeQuotaMappingTests {
         )
 
         let quota = Self.quota(rtsError)
-        #expect(quota?.provider == "AppleAIPrivateCloudCompute")
+        #expect(quota?.provider == "AppleAI")
         #expect(quota?.resetDate == Self.thrownResetDate)
     }
 
@@ -503,7 +562,7 @@ struct PrivateCloudComputeQuotaMappingTests {
             return
         }
         let subAgentError = RTSError.quotaLimitReached(
-            provider: "AppleAIPrivateCloudCompute",
+            provider: "AppleAI",
             resetDate: Self.thrownResetDate
         )
         // How Apple's tool loop hands back a sub-agent failure: wrapped, here twice over, as an

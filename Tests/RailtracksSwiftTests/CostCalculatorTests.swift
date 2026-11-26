@@ -18,6 +18,8 @@ extension RailtracksSwiftTestSuite {
 
         @Test("An unbilled provider has no cost, even for a priced model and tokens")
         func unbilledProviderHasNoCost() async {
+            // "AppleAIPrivateCloudCompute" is legacy: Private Cloud Compute's provider name in
+            // traces written before both Apple models reported "AppleAI".
             for providerName in ["AppleAI", "AppleAIPrivateCloudCompute"] {
                 let cost = await RTSCostCalculator.shared.cost(
                     model: "gpt-4o",

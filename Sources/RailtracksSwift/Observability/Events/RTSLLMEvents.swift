@@ -53,8 +53,9 @@ enum RTSEventModelProvider {
             return "Vertex_AI"
         case "AppleAI":
             return "apple"
-        // Python's enum has no member for Apple's server model; it is still Apple's model.
-        case "AppleAIPrivateCloudCompute":
+        // Legacy: Private Cloud Compute's own provider name, in traces written before it reported
+        // "AppleAI". Python's enum has no member for Apple's server model; it is still Apple's.
+        case RTSLLMProvider.legacyPrivateCloudComputeProviderName:
             return "apple"
         default:
             return "Unknown"

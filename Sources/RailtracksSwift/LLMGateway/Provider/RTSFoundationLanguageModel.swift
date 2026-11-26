@@ -44,6 +44,9 @@ public struct RTSFoundationLanguageModel: Sendable {
     public let kind: RTSLLMProviderKind
     /// The pricing key, e.g. `"claude-sonnet-4-6"` — the same identifier the Conduit case of the
     /// same provider uses, so both paths price identically.
+    ///
+    /// For the two Apple kinds, `RTSLLMProvider.modelID` reports that case's own id instead
+    /// (`"apple-on-device"`, `"apple-private-cloud-compute"`), so this value is not used there.
     public let modelID: String
     /// Always an `any LanguageModel`, set only by the OS 27 initializer.
     let model: any Sendable

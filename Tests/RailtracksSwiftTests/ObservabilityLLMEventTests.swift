@@ -42,6 +42,9 @@ extension RailtracksSwiftTestSuite {
             // the enum column accepts. See `RTSEventModelProvider`.
             #expect(RTSEventModelProvider.wireValue(for: "Gemini") == "Vertex_AI")
             #expect(RTSEventModelProvider.wireValue(for: "AppleAI") == "apple")
+            // Legacy: Private Cloud Compute's provider name in traces written before it reported
+            // "AppleAI".
+            #expect(RTSEventModelProvider.wireValue(for: "AppleAIPrivateCloudCompute") == "apple")
             #expect(RTSEventModelProvider.wireValue(for: "something else") == "Unknown")
         }
 

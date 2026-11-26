@@ -29,6 +29,8 @@ The providers are checked at run time: below their OS, the gateway throws `RTSEr
 | Apple Intelligence on Private Cloud Compute (Apple's server model) | `.privateCloudCompute(options:)` | — |
 | Any third-party FoundationModels `LanguageModel`, e.g. Claude via `ClaudeForFoundationModels` | `.foundationModel(RTSFoundationLanguageModel)` | — |
 
+Both Apple models report the provider `AppleAI` in traces, signposts and errors (the `llm.*` events send it as `apple`), and are told apart by model: `apple-on-device` for `.appleAI` and `apple-private-cloud-compute` for `.privateCloudCompute`, also when either is wrapped in `.foundationModel`.
+
 `RTSGeminiOptions` carries Gemini-only settings, such as `mediaResolution` for image input. Foundation Models has no such setting; see [RTSFoundationLanguageModel](#rtsfoundationlanguagemodel). `RTSPrivateCloudComputeOptions` carries Private Cloud Compute's `reasoningLevel` (`.light`, `.moderate`, `.deep`; unset leaves Apple's default).
 
 Private Cloud Compute costs the developer nothing: each user has a daily limit counted against their iCloud account, higher with iCloud+, so traces record no cost for it. The app needs Apple's managed entitlement, available to developers in the App Store Small Business Program with under 2 million first-time downloads. Set it up before any agent uses `.privateCloudCompute`: Apple reports the model as available without it, and a signed app that lacks it is stopped with a fatal error on its first request, which nothing can catch. A user over their daily limit gets `RTSError.quotaLimitReached`, with the reset date when Apple gives one (see [Error Handling](#error-handling)).
@@ -252,7 +254,7 @@ let agent = RTSAgent(
 let gateway = RTSLLMGateway(apiKeys: [:])   // the model carries its own auth
 ```
 
-`kind` says who serves the model, so pricing, traces and rate limiting treat it as that provider; `modelID` is the pricing key. Tools follow the `.appleAI` rules: conform to `RTSAppleAIToolNode`.
+`kind` says who serves the model, so pricing, traces and rate limiting treat it as that provider; `modelID` is the pricing key. For the two Apple kinds the library reports its own model id (`apple-on-device`, `apple-private-cloud-compute`) and ignores the one passed. Tools follow the `.appleAI` rules: conform to `RTSAppleAIToolNode`.
 
 Image input works on `.appleAI` and `.foundationModel` from macOS/iOS 27: the images are attached after the prompt's text. A model without the `.vision` capability fails with `RTSError.invalidInvocation` before anything is sent. Below OS 27 the images are dropped with a warning and only the text is sent. There is no resolution setting: each model sizes images itself.
 

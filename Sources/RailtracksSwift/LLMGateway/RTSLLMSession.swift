@@ -92,14 +92,11 @@ extension RTSLLMSession {
     /// The model name a Foundation Models session stamps on its messages, which the `llm.*`
     /// events, the trace and the signposts report.
     ///
-    /// The model id, as `llm.creation` reports it, so a run names its model one way throughout
-    /// and a PCC model reads the same whether built as `.privateCloudCompute` or wrapped in
-    /// `.foundationModel`. The one exception is `.appleAI`, which has always recorded its
-    /// provider name; kept so existing traces do not change.
+    /// The model id, as `llm.creation` reports it, for every provider, so a run names its model
+    /// one way throughout and an Apple model reads the same whether built as `.appleAI` /
+    /// `.privateCloudCompute` or wrapped in `.foundationModel`. Both Apple models share a
+    /// provider name, so the model name is what tells them apart.
     static func recordedModelName(for provider: RTSLLMProvider) -> String {
-        if case .appleAI = provider {
-            return provider.providerName
-        }
         return provider.modelID
     }
 

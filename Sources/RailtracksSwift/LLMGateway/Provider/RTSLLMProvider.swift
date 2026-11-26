@@ -190,7 +190,20 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     ///
     /// Reports the wrapped model's `kind` as its own, so it is priced, traced and rate-limited
     /// as that provider. It is therefore absent from `allCases`, which lists one case per kind.
+    /// For the two Apple kinds it also reports that case's ``modelID``, whatever id the app passed,
+    /// so an Apple model is named the same way however it is built.
     case foundationModel(RTSFoundationLanguageModel)
+
+    /// The provider name both Apple models report: the on-device model and Private Cloud Compute
+    /// are told apart by ``modelID``, not by provider.
+    static let appleProviderName = "AppleAI"
+    /// ``modelID`` of the on-device Apple model.
+    static let appleOnDeviceModelID = "apple-on-device"
+    /// ``modelID`` of Apple's Private Cloud Compute model.
+    static let applePrivateCloudComputeModelID = "apple-private-cloud-compute"
+    /// The provider name Private Cloud Compute reported before it shared ``appleProviderName``.
+    /// Traces written before that change still carry it.
+    static let legacyPrivateCloudComputeProviderName = "AppleAIPrivateCloudCompute"
 
     public var description: String {
         switch self {
@@ -217,12 +230,11 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
             return "Anthropic"
         case .gemini:
             return "Gemini"
-        case .appleAI:
-            return "AppleAI"
-        case .privateCloudCompute:
-            return "AppleAIPrivateCloudCompute"
+        case .appleAI, .privateCloudCompute:
+            return Self.appleProviderName
         case .foundationModel(let languageModel):
-            // `allCases` holds exactly one case per kind, so this always finds one.
+            // `allCases` holds exactly one case per kind, so this always finds one. Looked up by
+            // kind, not name, so the two Apple kinds sharing a name does not matter here.
             return Self.allCases.first { $0.kind == languageModel.kind }?.providerName ?? "Unknown"
         }
     }
@@ -253,11 +265,18 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
         case .gemini(let modelIDString, _):
             return modelIDString
         case .appleAI:
-            return "on-device"
+            return Self.appleOnDeviceModelID
         case .privateCloudCompute:
-            return "apple-private-cloud-compute"
+            return Self.applePrivateCloudComputeModelID
         case .foundationModel(let languageModel):
-            return languageModel.modelID
+            switch languageModel.kind {
+            case .appleAI:
+                return Self.appleOnDeviceModelID
+            case .privateCloudCompute:
+                return Self.applePrivateCloudComputeModelID
+            case .openAI, .anthropic, .gemini:
+                return languageModel.modelID
+            }
         }
     }
 
@@ -293,7 +312,15 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     /// Returns whether a provider name string belongs to a billed provider. An unrecognised name
     /// counts as billed, so it is looked up in the pricing map rather than silently priced at zero.
     /// Used by the JSON export layer, which only has the name string from message metadata.
+    ///
+    /// A name no longer identifies one case: both Apple models report ``appleProviderName``, and
+    /// either one answers for it, as both are unbilled.
     static func isBilled(providerName: String) -> Bool {
+        // Legacy: Private Cloud Compute's own name, in traces written before it reported
+        // `appleProviderName`. No case reports it now, so without this it would count as billed.
+        if providerName == legacyPrivateCloudComputeProviderName {
+            return false
+        }
         return allCases.first { $0.providerName == providerName }?.isBilled ?? true
     }
 
