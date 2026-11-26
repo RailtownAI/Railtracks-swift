@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
       "state" : {
-        "branch" : "rsvi-7-node-run-provider",
-        "revision" : "56f38d266c0cd09656f6f1b029038840ae635a5f"
+        "revision" : "3307a63956fd0456724438c26b0d04143caefd26",
+        "version" : "1.2.0"
       }
     },
     {

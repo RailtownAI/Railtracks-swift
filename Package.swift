@@ -55,8 +55,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/RailtownAI/railtracks-swift-instrumentation-kit",
-            // Branch until the kit is tagged; switch to .upToNextMinor(from: "1.2.0") before merge.
-            branch: "rsvi-7-node-run-provider"
+            .upToNextMinor(from: "1.2.0")
         ),
         .package(
             url: "https://github.com/RailtownAI/railtown-swift-logger.git",
