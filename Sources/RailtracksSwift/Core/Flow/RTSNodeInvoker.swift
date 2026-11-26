@@ -28,6 +28,13 @@ public final class RTSNodeInvoker: Sendable {
     /// when it is called from inside another flow's node.
     @TaskLocal static var currentInvocationID: RTSInvocationID?
 
+    /// The node executing on this task, bound with ``currentInvocationID`` around its body, so code
+    /// it runs (a tool's closure, an orchestrator's `run`) can tell where it is. `nil` outside a
+    /// node, and for an invoker built without a flow. Read publicly through
+    /// ``RTSNodeIdentity/current``; internal so that only the invoker can bind it (a public
+    /// task-local would make `$currentNode`, and with it `withValue`, public too).
+    @TaskLocal static var currentNode: RTSNodeIdentity?
+
     /// Publishes the structured observability event stream. Optional so tests can build an
     /// invoker without one; `nil` means node and guardrail events are simply not emitted.
     let eventEmitter: RTSEventEmitter?
@@ -40,14 +47,20 @@ public final class RTSNodeInvoker: Sendable {
     /// an invoker built outside a flow, as tests build them, which is never checked.
     let runScope: UUID?
 
+    /// The flow's session, for ``currentNode``. `nil` for an invoker built outside a flow, which
+    /// binds no current node.
+    let sessionID: UUID?
+
     init(
         eventEmitter: RTSEventEmitter? = nil,
         runStop: RTSRunStop = RTSRunStop(),
-        runScope: UUID? = nil
+        runScope: UUID? = nil,
+        sessionID: UUID? = nil
     ) {
         self.eventEmitter = eventEmitter
         self.runStop = runStop
         self.runScope = runScope
+        self.sessionID = sessionID
     }
 
     /// Whether this task runs outside the scope of the run this invoker belongs to: the task-local
@@ -263,8 +276,17 @@ public final class RTSNodeInvoker: Sendable {
             do {
                 // Bind this node's invocation id for the dynamic extent of `execute`, so any child
                 // node invoked within it reads this as its parent (edge source) via the task-local.
+                let currentNode = sessionID.map { sessionID in
+                    RTSNodeIdentity(
+                        sessionID: sessionID,
+                        runID: runID,
+                        nodeID: invocationID
+                    )
+                }
                 output = try await RTSNodeInvoker.$currentInvocationID.withValue(invocationID) {
-                    try await execute(runID, workingInput)
+                    try await RTSNodeInvoker.$currentNode.withValue(currentNode) {
+                        try await execute(runID, workingInput)
+                    }
                 }
             } catch {
                 // Normalized here, not only where the outcome becomes final below, because

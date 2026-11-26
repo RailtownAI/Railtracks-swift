@@ -675,7 +675,8 @@ public class RTSFlow: @unchecked Sendable {
         let nodeInvoker = RTSNodeInvoker(
             eventEmitter: eventEmitter,
             runStop: RTSRunStop(endsOnError: settings.endOnError),
-            runScope: runScope
+            runScope: runScope,
+            sessionID: id
         )
 
         guard savesTrace, eventEmitter.isEnabled else {
