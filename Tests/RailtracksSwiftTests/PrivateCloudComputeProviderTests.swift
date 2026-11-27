@@ -111,9 +111,6 @@ struct PrivateCloudComputeProviderTests {
         #expect(RTSLLMProvider.isBilled(providerName: "Anthropic"))
         #expect(RTSLLMProvider.isBilled(providerName: "Gemini"))
         #expect(RTSLLMProvider.isBilled(providerName: "AppleAI") == false)
-        // Legacy: Private Cloud Compute's provider name in traces written before it reported
-        // "AppleAI".
-        #expect(RTSLLMProvider.isBilled(providerName: "AppleAIPrivateCloudCompute") == false)
         // An unknown or missing name is still looked up in the pricing map, as before.
         #expect(RTSLLMProvider.isBilled(providerName: "something else"))
         #expect(RTSLLMProvider.isBilled(providerName: ""))
@@ -127,15 +124,6 @@ struct PrivateCloudComputeProviderTests {
             inputTokens: 1_000,
             outputTokens: 1_000
         )
-        // Legacy: Private Cloud Compute's provider name in traces written before it reported
-        // "AppleAI".
-        let legacyCost = await RTSCostCalculator.shared.cost(
-            model: "gpt-4o",
-            providerName: "AppleAIPrivateCloudCompute",
-            inputTokens: 1_000,
-            outputTokens: 1_000
-        )
-
         let billedCost = await RTSCostCalculator.shared.cost(
             model: "gpt-4o",
             providerName: "OpenAI",
@@ -147,7 +135,6 @@ struct PrivateCloudComputeProviderTests {
         // check can make PCC's cost nil.
         #expect((billedCost?.totalCost ?? 0) > 0)
         #expect(cost == nil)
-        #expect(legacyCost == nil)
     }
 
     // MARK: - Events and concurrency
@@ -156,9 +143,6 @@ struct PrivateCloudComputeProviderTests {
     func wireValueIsApple() {
         #expect(RTSEventModelProvider.wireValue(for: RTSLLMProvider.privateCloudCompute().providerName)
             == "apple")
-        // Legacy: Private Cloud Compute's provider name in traces written before it reported
-        // "AppleAI".
-        #expect(RTSEventModelProvider.wireValue(for: "AppleAIPrivateCloudCompute") == "apple")
     }
 
     @Test("Evaluations cap it at four concurrent calls")

@@ -201,9 +201,6 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     static let appleOnDeviceModelID = "apple-on-device"
     /// ``modelID`` of Apple's Private Cloud Compute model.
     static let applePrivateCloudComputeModelID = "apple-private-cloud-compute"
-    /// The provider name Private Cloud Compute reported before it shared ``appleProviderName``.
-    /// Traces written before that change still carry it.
-    static let legacyPrivateCloudComputeProviderName = "AppleAIPrivateCloudCompute"
 
     public var description: String {
         switch self {
@@ -316,11 +313,6 @@ public enum RTSLLMProvider: CustomStringConvertible, CaseIterable, Sendable {
     /// A name no longer identifies one case: both Apple models report ``appleProviderName``, and
     /// either one answers for it, as both are unbilled.
     static func isBilled(providerName: String) -> Bool {
-        // Legacy: Private Cloud Compute's own name, in traces written before it reported
-        // `appleProviderName`. No case reports it now, so without this it would count as billed.
-        if providerName == legacyPrivateCloudComputeProviderName {
-            return false
-        }
         return allCases.first { $0.providerName == providerName }?.isBilled ?? true
     }
 
