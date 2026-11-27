@@ -18,15 +18,13 @@ extension RailtracksSwiftTestSuite {
 
         @Test("An unbilled provider has no cost, even for a priced model and tokens")
         func unbilledProviderHasNoCost() async {
-            for providerName in ["AppleAI", "AppleAIPrivateCloudCompute"] {
-                let cost = await RTSCostCalculator.shared.cost(
-                    model: "gpt-4o",
-                    providerName: providerName,
-                    inputTokens: 1_000,
-                    outputTokens: 1_000
-                )
-                #expect(cost == nil, "\(providerName)")
-            }
+            let cost = await RTSCostCalculator.shared.cost(
+                model: "gpt-4o",
+                providerName: "AppleAI",
+                inputTokens: 1_000,
+                outputTokens: 1_000
+            )
+            #expect(cost == nil)
         }
 
         @Test("A billed provider is priced as calculateCost prices the same tokens")

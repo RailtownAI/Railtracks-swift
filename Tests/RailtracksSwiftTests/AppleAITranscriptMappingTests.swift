@@ -280,7 +280,7 @@ struct FoundationModelProviderTests {
         let languageModel = RTSFoundationLanguageModel(
             SystemLanguageModel.default,
             kind: .appleAI,
-            modelID: "on-device"
+            modelID: "apple-on-device"
         )
 
         #expect(RTSLLMProvider.foundationModel(languageModel).isLocal)
@@ -304,7 +304,7 @@ struct FoundationModelProviderTests {
         let languageModel = RTSFoundationLanguageModel(
             SystemLanguageModel.default,
             kind: .appleAI,
-            modelID: "on-device"
+            modelID: "apple-on-device"
         )
         let agent = RTSAgent(
             llmProvider: .foundationModel(languageModel),
@@ -323,11 +323,11 @@ struct FoundationModelProviderTests {
         let finalMessage = try #require(assistantMessages.last)
         #expect((finalMessage.metadata?.inputTokenCount ?? 0) > 0)
         #expect((finalMessage.metadata?.tokenCount ?? 0) > 0)
-        #expect(finalMessage.metadata?.model == "on-device")
+        #expect(finalMessage.metadata?.model == "apple-on-device")
         #expect(finalMessage.metadata?.providerName == "AppleAI")
         print("ℹ️ live usage run produced \(assistantMessages.count) assistant message(s)")
         for earlier in assistantMessages.dropLast() {
-            #expect(earlier.metadata?.model == "on-device")
+            #expect(earlier.metadata?.model == "apple-on-device")
             #expect(earlier.metadata?.providerName == "AppleAI")
             #expect(earlier.metadata?.inputTokenCount == nil)
             #expect(earlier.metadata?.tokenCount == nil)
@@ -473,21 +473,21 @@ struct FoundationModelsMessageStampingTests {
             toolCallingTurn(),
             runID: runID,
             response: response,
-            model: "on-device",
+            model: "apple-on-device",
             providerName: "AppleAI"
         )
 
         #expect(stamped.allSatisfy { $0.runID == runID })
 
         let toolCallTurn = try #require(stamped[1].metadata)
-        #expect(toolCallTurn.model == "on-device")
+        #expect(toolCallTurn.model == "apple-on-device")
         #expect(toolCallTurn.providerName == "AppleAI")
         #expect(toolCallTurn.inputTokenCount == nil)
         #expect(toolCallTurn.tokenCount == nil)
         #expect(toolCallTurn.generationTime == nil)
 
         let finalTurn = try #require(stamped[3].metadata)
-        #expect(finalTurn.model == "on-device")
+        #expect(finalTurn.model == "apple-on-device")
         #expect(finalTurn.providerName == "AppleAI")
         #expect(finalTurn.inputTokenCount == 120)
         #expect(finalTurn.tokenCount == 7)
